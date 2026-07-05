@@ -8,3 +8,8 @@ Verification (The Counter Test): Δημιουργήθηκε επιτυχώς η 
 Σύνδεση με το Repository: Έγινε το git clone του κοινού αποθετηρίου τοπικά.
 
 Επόμενο Βήμα: Δημιουργία του feature branch και έναρξη της δόμησης του Flutter Skeleton (Φάκελοι & Αρχική Δομή).
+
+
+
+
+finished 2-5 days 
