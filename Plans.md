@@ -7,7 +7,7 @@
 * **Days 2 to 5 - Database & PostGIS Provisioning:** Initialize the Supabase project. Design and execute the normalized SQL schema for the `Users` and `Parties` tables. Enable the PostGIS extension and write the initial SQL queries to insert dummy party coordinates.
 * **Days 6 to 8 - Backend Authentication:** Configure Supabase Auth settings (like email/password providers) and set up Row Level Security (RLS) policies in PostgreSQL so users can only modify their own parties.
 * **Days 9 to 14 - API / RPC Setup:** Write the Supabase Remote Procedure Calls (RPCs) that the frontend will trigger to execute the complex spatial queries (e.g., fetching parties within a specific radius).
-
+no other 
 ---
 
 ## Developer B: Client & Integration
