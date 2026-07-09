@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'ui/screens/login_screen.dart';
+import 'ui/screens/auth_gate.dart';
 
-// Make sure main() is async because we have to wait for the environment 
-// variables and Supabase to initialize before running the app.
+
 Future<void> main() async {
   // Ensure Flutter binding is initialized
   WidgetsFlutterBinding.ensureInitialized();
@@ -14,7 +15,7 @@ Future<void> main() async {
   // Initialize Supabase using the loaded variables
   await Supabase.initialize(
     url: dotenv.env['SUPABASE_URL']!,
-    anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
+    publishableKey: dotenv.env['SUPABASE_ANON_KEY']!,
   );
 
   runApp(const MyPartyApp());
@@ -29,18 +30,10 @@ class MyPartyApp extends StatelessWidget {
       title: 'MyParty',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        // We will set up your dark glassmorphism theme here later
         scaffoldBackgroundColor: Colors.black, 
         primarySwatch: Colors.deepPurple,
       ),
-      home: const Scaffold(
-        body: Center(
-          child: Text(
-            'Supabase Initialized Successfully!',
-            style: TextStyle(color: Colors.white, fontSize: 20),
-          ),
-        ),
-      ),
+      home: const AuthGate(), // <-- Changed from LoginScreen to AuthGate
     );
   }
 }
