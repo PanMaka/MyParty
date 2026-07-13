@@ -27,7 +27,6 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<void> _initializeMap() async {
     await _getUserLocation();
-    await _fetchEventsInBounds();    
     if (mounted) {
       setState(() => _isLoading = false);
     }
@@ -106,53 +105,59 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator(color: Colors.deepPurple));
-    }
+    Widget build(BuildContext context) {
+      if (_isLoading) {
+        return const Center(child: CircularProgressIndicator(color: Colors.deepPurple));
+      }
 
-    // Αν δεν βρήκαμε τοποθεσία, βάζουμε μια προεπιλεγμένη (π.χ. κέντρο Αθήνας)
-    final startingPoint = _currentPosition ?? const LatLng(37.9838, 23.7275);
+      // Αν δεν βρήκαμε τοποθεσία, βάζουμε μια προεπιλεγμένη (π.χ. κέντρο Αθήνας)
+      final startingPoint = _currentPosition ?? const LatLng(37.9838, 23.7275);
 
-   return FlutterMap(
-      mapController: _mapController,
-      options: MapOptions(
-        initialCenter: startingPoint,
-        initialZoom: 13.0,
-        // Αυτό το κομμάτι "ακούει" την κίνηση του χάρτη!
-        onPositionChanged: (position, hasGesture) {
-          // Αν τρέχει ήδη χρονόμετρο, ακύρωσέ το (γιατί ο χρήστης συνεχίζει να κουνάει)
-          if (_debounce?.isActive ?? false) _debounce!.cancel();
+      return FlutterMap(
+        mapController: _mapController,
+        options: MapOptions(
+          initialCenter: startingPoint,
+          initialZoom: 13.0,
           
-          // Ξεκίνα ένα νέο χρονόμετρο 500 χιλιοστών του δευτερολέπτου
-          _debounce = Timer(const Duration(milliseconds: 500), () {
-            _fetchEventsInBounds(); // Όταν σταματήσει, καλεί τη βάση
-          });
-        },
-      ),
-      children: [
-        // Το υπόβαθρο του χάρτη (OpenStreetMap)
-        TileLayer(
-          // Pointing to CartoDB's Dark Matter servers
-          urlTemplate: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
-          subdomains: const ['a', 'b', 'c', 'd'],
-          userAgentPackageName: 'com.myparty.app',
+          // 1. ΠΡΟΣΘΗΚΗ: Μόλις ο χάρτης είναι έτοιμος, τραβάει τα parties
+          onMapReady: () {
+            _fetchEventsInBounds();
+          },
+
+          // Αυτό το κομμάτι "ακούει" την κίνηση του χάρτη!
+          onPositionChanged: (position, hasGesture) {
+            // Αν τρέχει ήδη χρονόμετρο, ακύρωσέ το (γιατί ο χρήστης συνεχίζει να κουνάει)
+            if (_debounce?.isActive ?? false) _debounce!.cancel();
+            
+            // Ξεκίνα ένα νέο χρονόμετρο 500 χιλιοστών του δευτερολέπτου
+            _debounce = Timer(const Duration(milliseconds: 500), () {
+              _fetchEventsInBounds(); // Όταν σταματήσει, καλεί τη βάση
+            });
+          },
         ),
-        // Το Layer με τις πινέζες των πάρτι
-        MarkerLayer(
-          markers: _eventMarkers,
-        ),
-        // Το Layer με την πινέζα του χρήστη (Μπλε κουκκίδα)
-        if (_currentPosition != null)
-          MarkerLayer(
-            markers: [
-              Marker(
-                point: _currentPosition!,
-                child: const Icon(Icons.my_location, color: Colors.blue, size: 30),
-              )
-            ],
+        children: [
+          // Το υπόβαθρο του χάρτη (OpenStreetMap)
+          TileLayer(
+            // Pointing to CartoDB's Dark Matter servers
+            urlTemplate: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+            subdomains: const ['a', 'b', 'c', 'd'],
+            userAgentPackageName: 'com.myparty.app',
           ),
-      ],
-    );
-  }
+          // Το Layer με τις πινέζες των πάρτι
+          MarkerLayer(
+            markers: _eventMarkers,
+          ),
+          // Το Layer με την πινέζα του χρήστη (Μπλε κουκκίδα)
+          if (_currentPosition != null)
+            MarkerLayer(
+              markers: [
+                Marker(
+                  point: _currentPosition!,
+                  child: const Icon(Icons.my_location, color: Colors.blue, size: 30),
+                )
+              ],
+            ),
+        ],
+      );
+    }
 }
