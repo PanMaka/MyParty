@@ -4,6 +4,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async'; 
+import 'package:latlong2/latlong.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -52,37 +53,39 @@ class _MapScreenState extends State<MapScreen> {
     _currentPosition = LatLng(position.latitude, position.longitude);
   }
 
-  // 2. Τραβάμε τα "dummy" πάρτι από τη βάση του Developer A
-  Future<void> _fetchEventsInBounds() async {
-    // 1. Παίρνουμε τα όρια της οθόνης από τον controller του χάρτη
+ Future<void> _fetchEventsInBounds() async {
+    final center = _mapController.camera.center;
     final bounds = _mapController.camera.visibleBounds;
+
+    final Distance distance = const Distance();
     
-    final minLat = bounds.southWest.latitude;
-    final maxLat = bounds.northEast.latitude;
-    final minLng = bounds.southWest.longitude;
-    final maxLng = bounds.northEast.longitude;
+    // Πολλαπλασιάζουμε επί 2.0 για να νικήσουμε την καμπυλότητα της Γης στο extreme zoom!
+    final double radiusInMeters = distance.as(
+      LengthUnit.Meter,
+      center,
+      bounds.northEast,
+    ) * 2.0;
 
     try {
-      // 2. Καλούμε το νέο RPC του Developer A (έστω ότι το ονόμασε get_parties_in_bounds)
+      // Καλούμε το ΠΡΑΓΜΑΤΙΚΟ όνομα της συνάρτησης του Developer A
       final response = await Supabase.instance.client.rpc(
-        'get_parties_in_bounds', // <-- Ζήτα από τον Dev A το ακριβές όνομα!
+        'get_parties_near_user', 
         params: {
-          'min_lat': minLat,
-          'max_lat': maxLat,
-          'min_lng': minLng,
-          'max_lng': maxLng,
+          // ΠΡΟΣΟΧΗ: Ο Dev A έβαλε πρώτα το LON στο SQL του!
+          'map_center_lon': center.longitude,
+          'map_center_lat': center.latitude,
+          'radius_meters': radiusInMeters,
         },
       );
       
-      // 3. Μετατρέπουμε τα αποτελέσματα σε πινέζες
       List<Marker> markers = [];
       for (var event in response) {
-        if (event['latitude'] != null && event['longitude'] != null) {
+        if (event['lat'] != null && event['lon'] != null) {
           markers.add(
             Marker(
-              point: LatLng(event['latitude'], event['longitude']),
-              width: 80,
-              height: 80,
+              point: LatLng(event['lat'], event['lon']),
+              width: 60,
+              height: 60,
               child: const Icon(
                 Icons.location_on,
                 color: Colors.deepPurple,
@@ -93,14 +96,13 @@ class _MapScreenState extends State<MapScreen> {
         }
       }
       
-      // 4. Ανανεώνουμε την οθόνη
       if (mounted) {
         setState(() {
           _eventMarkers = markers;
         });
       }
     } catch (e) {
-      debugPrint('Σφάλμα κατά τη φόρτωση των parties: $e');
+      debugPrint('Error loading parties: $e');
     }
   }
 
