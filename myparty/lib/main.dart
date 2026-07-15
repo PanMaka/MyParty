@@ -29,8 +29,24 @@ class MyPartyApp extends StatelessWidget {
       title: 'MyParty',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        scaffoldBackgroundColor: Colors.black, 
-        primarySwatch: Colors.deepPurple,
+        useMaterial3: true,
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: const Color(0xFF0D0D12),
+        primaryColor: Colors.purpleAccent,
+        colorScheme: ColorScheme.dark(
+          primary: Colors.purpleAccent,
+          secondary: Colors.purpleAccent,
+          surface: const Color(0xFF0D0D12),
+        ),
+        bottomNavigationBarTheme: BottomNavigationBarThemeData(
+          backgroundColor: const Color(0xFF1A1A24),
+          selectedItemColor: Colors.purpleAccent,
+          unselectedItemColor: Colors.grey[600],
+        ),
+        floatingActionButtonTheme: FloatingActionButtonThemeData(
+          backgroundColor: Colors.purpleAccent,
+          foregroundColor: Colors.black,
+        ),
       ),
       home: const AuthGate(), // <-- Changed from LoginScreen to AuthGate
     );

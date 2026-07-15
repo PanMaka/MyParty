@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../services/auth_service.dart';
-import 'map_screen.dart'; 
+import 'main_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -20,8 +20,8 @@ class HomeScreen extends StatelessWidget {
           )
         ],
       ),
-      // Βγάζουμε το Center με το Text και βάζουμε τον Χάρτη!
-      body: const MapScreen(), 
+      // Use the main tabbed experience instead of a single map screen.
+      body: const MainScreen(),
     );
   }
 }
