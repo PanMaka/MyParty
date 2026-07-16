@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'explore_screen.dart';
 import 'map_screen.dart';
+import 'profile_screen.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({Key? key}) : super(key: key);
@@ -11,25 +13,20 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
 
-  final List<String> _tabNames = [
-    'Explore',
-    'My Events',
-    'Map',
-    'Messages',
-    'Profile',
-  ];
-
   final List<Widget> _tabBodies = [
+    const ExploreScreen(),
     const Center(
-      child: Text(
-        'Explore',
-        style: TextStyle(color: Colors.purpleAccent, fontSize: 24),
-      ),
-    ),
-    const Center(
-      child: Text(
-        'My Events',
-        style: TextStyle(color: Colors.purpleAccent, fontSize: 24),
+      child: Padding(
+        padding: EdgeInsets.symmetric(horizontal: 24),
+        child: Text(
+          "You haven't RSVP'd to any events yet.",
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Colors.white70,
+            fontSize: 18,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
       ),
     ),
     const MapScreen(),
@@ -39,12 +36,7 @@ class _MainScreenState extends State<MainScreen> {
         style: TextStyle(color: Colors.purpleAccent, fontSize: 24),
       ),
     ),
-    const Center(
-      child: Text(
-        'Profile',
-        style: TextStyle(color: Colors.purpleAccent, fontSize: 24),
-      ),
-    ),
+    const ProfileScreen(),
   ];
 
   @override
