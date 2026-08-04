@@ -1,4 +1,6 @@
 import 'party_model.dart';
+import 'story_model.dart';
+import 'post_model.dart';
 
 const List<Party> dummyTrendingParties = [
   Party(
@@ -45,5 +47,59 @@ const List<Party> dummyTrendingParties = [
     category: 'Rave',
     attendeeCount: 320,
     imageUrl: 'https://images.unsplash.com/photo-1512453979798-5ea266f8880c?auto=format&fit=crop&w=1000&q=80',
+  ),
+];
+
+const List<Story> dummyStories = [
+  Story(
+    id: 'story_you',
+    label: 'Your Story',
+    imageUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=300&q=80',
+  ),
+  Story(
+    id: 'story_001',
+    label: 'Techno Noir',
+    imageUrl: 'https://images.unsplash.com/photo-1571266028243-d220c9c3b31c?auto=format&fit=crop&w=400&q=80',
+    isLive: true,
+    liveViewerCount: 623,
+  ),
+  Story(
+    id: 'story_002',
+    label: 'House 24',
+    imageUrl: 'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?auto=format&fit=crop&w=400&q=80',
+    startsInText: 'Starts in 2h',
+  ),
+  Story(
+    id: 'story_003',
+    label: 'Neon Rooftop',
+    imageUrl: 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?auto=format&fit=crop&w=400&q=80',
+    startsInText: 'Starts in 5h',
+  ),
+];
+
+const List<FeedPost> dummyFeedPosts = [
+  FeedPost(
+    id: 'post_001',
+    authorName: 'Techno Noir',
+    authorAvatarUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=200&q=80',
+    postedAgo: '2h ago',
+    locationName: 'Athens',
+    caption: 'Doors open. See you inside. 🖤',
+    imageUrl: 'https://images.unsplash.com/photo-1571266028243-d220c9c3b31c?auto=format&fit=crop&w=1000&q=80',
+    imageBadge: 'Techno Noir · Tonight',
+    likeCount: 532,
+    commentCount: 82,
+  ),
+  FeedPost(
+    id: 'post_002',
+    authorName: 'Sunset Rooftop',
+    authorAvatarUrl: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=200&q=80',
+    postedAgo: '4h ago',
+    locationName: 'Athens',
+    caption: 'The vibe tonight. 🌆',
+    imageUrl: 'https://images.unsplash.com/photo-1533174072545-7a4b6ad7a6c3?auto=format&fit=crop&w=1000&q=80',
+    imageBadge: 'Sunset Rooftop · Tonight',
+    likeCount: 318,
+    commentCount: 47,
   ),
 ];

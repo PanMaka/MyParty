@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'explore_screen.dart';
+import 'feed_screen.dart';
 import 'map_screen.dart';
 import 'profile_screen.dart';
 
@@ -14,7 +14,7 @@ class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
 
   final List<Widget> _tabBodies = [
-    const ExploreScreen(),
+    const FeedScreen(),
     const Center(
       child: Padding(
         padding: EdgeInsets.symmetric(horizontal: 24),
@@ -52,8 +52,8 @@ class _MainScreenState extends State<MainScreen> {
         },
         items: const [
           BottomNavigationBarItem(
-            icon: Icon(Icons.explore),
-            label: 'Explore',
+            icon: Icon(Icons.dynamic_feed),
+            label: 'Feed',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.event),
