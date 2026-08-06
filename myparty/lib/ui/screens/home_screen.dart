@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../services/auth_service.dart';
 import 'main_screen.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -7,21 +6,7 @@ class HomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('MyParty'),
-        backgroundColor: Colors.black,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout, color: Colors.white),
-            onPressed: () async {
-              await AuthService().signOut();
-            },
-          )
-        ],
-      ),
-      // Use the main tabbed experience instead of a single map screen.
-      body: const MainScreen(),
-    );
+    // MainScreen owns the full immersive shell (its own nav, no app bar).
+    return const MainScreen();
   }
 }

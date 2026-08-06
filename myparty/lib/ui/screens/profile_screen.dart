@@ -1,292 +1,491 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
-class ProfileScreen extends StatelessWidget {
-  const ProfileScreen({Key? key}) : super(key: key);
+import '../../models/mp_friend.dart';
+import '../../services/auth_service.dart';
+import '../../state/mp_store.dart';
+import '../theme/app_theme.dart';
+import '../widgets/diagonal_placeholder.dart';
+import '../widgets/party_detail_sheet.dart';
+
+class ProfileScreen extends StatefulWidget {
+  const ProfileScreen({super.key});
+
+  @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends State<ProfileScreen> {
+  bool _selfView = true;
+
+  void _comingSoon() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Έρχεται σύντομα'), behavior: SnackBarBehavior.floating),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
+    final store = context.watch<MpStore>();
+
     return Scaffold(
-      backgroundColor: const Color(0xFF0D0D12),
+      backgroundColor: AppColors.bg,
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+        bottom: false,
+        child: ListView(
+          padding: const EdgeInsets.only(bottom: 96),
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+              child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  _iconButton(Icons.share),
-                  _iconButton(Icons.settings),
+                  const Text('Προφίλ', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -0.5)),
+                  Container(
+                    padding: const EdgeInsets.all(3),
+                    decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(99)),
+                    child: Row(
+                      children: [
+                        _segment('ΕΓΩ', _selfView, () => setState(() => _selfView = true)),
+                        _segment('ΔΗΜΟΣΙΑ', !_selfView, () => setState(() => _selfView = false)),
+                      ],
+                    ),
+                  ),
                 ],
               ),
-              const SizedBox(height: 28),
-              Center(
-                child: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.purpleAccent, width: 2),
-                  ),
-                  child: const CircleAvatar(
-                    radius: 50,
-                    backgroundImage: NetworkImage(
-                      'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=500&q=80',
-                    ),
-                    backgroundColor: Colors.transparent,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              const Center(
-                child: Text(
-                  'Giorgos Zoumpoulakis',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 6),
-              const Center(
-                child: Text(
-                  '@gzoump',
-                  style: TextStyle(
-                    color: Colors.purpleAccent,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 24),
-              Container(
-                decoration: BoxDecoration(
-                  color: const Color(0x1AFFFFFF),
-                  borderRadius: BorderRadius.circular(22),
-                  border: Border.all(color: const Color(0x33FFFFFF)),
-                ),
-                padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    _buildStat('12', 'Attended'),
-                    _verticalDivider(),
-                    _buildStat('3', 'Hosted'),
-                    _verticalDivider(),
-                    _buildStat('4.9/5', 'Rating'),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
+              child: Row(
                 children: [
-                  ElevatedButton(
-                    onPressed: () {},
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.purpleAccent,
-                      foregroundColor: Colors.black,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                    ),
-                    child: const Text('Edit Profile'),
+                  Container(
+                    width: 74,
+                    height: 74,
+                    clipBehavior: Clip.antiAlias,
+                    decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: AppColors.purple.withValues(alpha: 0.5), width: 2)),
+                    child: const DiagonalStripePlaceholder(colors: [Color(0xFF241E3C), Color(0xFF1B1630)], label: 'avatar'),
                   ),
-                  const SizedBox(width: 12),
-                  OutlinedButton(
-                    onPressed: () {},
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: Colors.purpleAccent),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Κατερίνα Βλάχου', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+                        Text('@katerina · ΕΚΠΑ, Ψυχολογία', style: TextStyle(fontSize: 12.5, color: AppColors.textAlpha(0.5))),
+                        Padding(
+                          padding: const EdgeInsets.only(top: 9),
+                          child: Row(
+                            children: [
+                              _countPair('184', 'φίλοι'),
+                              const SizedBox(width: 16),
+                              _countPair('23', 'ακολουθεί'),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                    child: const Text('Add Friends'),
                   ),
                 ],
               ),
-              const SizedBox(height: 28),
-              const Text(
-                'Top Friends',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: Row(
+                children: [
+                  Expanded(child: _statTile('47', 'πάρτι φέτος')),
+                  const SizedBox(width: 8),
+                  Expanded(child: _statTile('5', 'διοργάνωσε', pink: true)),
+                  const SizedBox(width: 8),
+                  Expanded(child: _statTile('312', 'stories')),
+                ],
               ),
-              const SizedBox(height: 14),
-              SizedBox(
-                height: 90,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  children: [
-                    _friendAvatar('https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=200&q=80'),
-                    const SizedBox(width: 12),
-                    _friendAvatar('https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=200&q=80'),
-                    const SizedBox(width: 12),
-                    _friendAvatar('https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=200&q=80'),
-                    const SizedBox(width: 12),
-                    Container(
-                      width: 70,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF14141B),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      padding: const EdgeInsets.all(10),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: const [
-                          CircleAvatar(
-                            radius: 20,
-                            backgroundColor: Color(0xFF2F2F42),
-                            child: Icon(Icons.person, color: Colors.white70),
-                          ),
-                          SizedBox(height: 8),
-                          Text(
-                            'Emilios',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                          Text(
-                            '(Mavros)',
-                            style: TextStyle(
-                              color: Colors.grey,
-                              fontSize: 10,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+            ),
+            if (_selfView) ..._selfSections(context, store) else ..._publicSections(context, store),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _selfSections(BuildContext context, MpStore store) {
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('ΩΣ ΔΙΟΡΓΑΝΩΤΡΙΑ', style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.45))),
+            const SizedBox(height: 9),
+            GestureDetector(
+              onTap: () => showPartyDetailSheet(context, 'taratsa'),
+              child: Container(
+                padding: const EdgeInsets.all(13),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(15),
+                  border: Border.all(color: AppColors.pink.withValues(alpha: 0.28)),
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [AppColors.pink.withValues(alpha: 0.14), Colors.white.withValues(alpha: 0.03)],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 26),
-              DefaultTabController(
-                length: 2,
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF14141B),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: const TabBar(
-                        indicator: BoxDecoration(
-                          color: Colors.purpleAccent,
-                          borderRadius: BorderRadius.all(Radius.circular(20)),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Ταράτσα στο Κουκάκι', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700)),
+                            SizedBox(height: 2),
+                            Text('Απόψε · 18/24 δέχτηκαν', style: TextStyle(fontSize: 11.5, color: Color(0x8CF4F1F8))),
+                          ],
                         ),
-                        labelColor: Colors.black,
-                        unselectedLabelColor: Colors.white70,
-                        tabs: [
-                          Tab(text: 'Saved Events'),
-                          Tab(text: 'Past Memories'),
-                        ],
-                      ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                          decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.09), borderRadius: BorderRadius.circular(10)),
+                          child: const Text('Διαχείριση', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 18),
-                    GridView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      itemCount: 6,
-                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 2,
-                        crossAxisSpacing: 14,
-                        mainAxisSpacing: 14,
-                        childAspectRatio: 1,
+                    const SizedBox(height: 11),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(99),
+                      child: Container(
+                        height: 6,
+                        color: Colors.white.withValues(alpha: 0.08),
+                        child: FractionallySizedBox(
+                          alignment: Alignment.centerLeft,
+                          widthFactor: 0.75,
+                          child: Container(decoration: const BoxDecoration(gradient: LinearGradient(colors: [AppColors.purpleDeep, AppColors.pink]))),
+                        ),
                       ),
-                      itemBuilder: (context, index) {
-                        return Container(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(18),
-                            color: const Color(0xFF14141B),
-                          ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(18),
-                            child: Image.network(
-                              'https://images.unsplash.com/photo-1512453979798-5ea266f8880c?auto=format&fit=crop&w=400&q=80',
-                              fit: BoxFit.cover,
-                            ),
-                          ),
-                        );
-                      },
                     ),
                   ],
                 ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('ΤΟ ΙΣΤΟΡΙΚΟ ΜΟΥ', style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.45))),
+            const SizedBox(height: 9),
+            Row(
+              children: [
+                Expanded(child: _historyTile('Kápsimo', const [Color(0xFF1A1522), Color(0xFF141020)])),
+                const SizedBox(width: 5),
+                Expanded(child: _historyTile('Εξάρχεια', const [Color(0xFF1C1622), Color(0xFF151020)], ring: AppColors.pink)),
+                const SizedBox(width: 5),
+                Expanded(child: _historyTile('Anodos', const [Color(0xFF1D1730), Color(0xFF161126)])),
+              ],
+            ),
+          ],
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('ΙΔΙΩΤΙΚΟΤΗΤΑ', style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.45))),
+            const SizedBox(height: 9),
+            Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(15),
+                color: Colors.white.withValues(alpha: 0.035),
+                border: Border.all(color: AppColors.hairline),
+              ),
+              child: Column(
+                children: [
+                  _settingsRow('Ποιος βλέπει σε ποια πάρτι πάω', 'Μόνο οι φίλοι μου', chevron: true, onTap: _comingSoon),
+                  Container(height: 1, color: AppColors.hairline),
+                  _settingsRow(
+                    'Εμφάνιση στον χάρτη όταν είμαι σε πάρτι',
+                    'Οι φίλοι βλέπουν πού είσαι απόψε',
+                    trailing: _mapSwitch(store),
+                  ),
+                  Container(height: 1, color: AppColors.hairline),
+                  _settingsRow('Ποιος μπορεί να με καλέσει', 'Φίλοι και φίλοι φίλων', chevron: true, onTap: _comingSoon),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 9, 4, 0),
+              child: Text(
+                'Τα ιδιωτικά πάρτι στα οποία πας δεν φαίνονται ποτέ σε άτομα που δεν είναι καλεσμένα — ούτε στο προφίλ σου.',
+                style: TextStyle(fontSize: 11, height: 1.5, color: AppColors.textAlpha(0.38)),
+              ),
+            ),
+          ],
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+        child: GestureDetector(
+          onTap: () => AuthService().signOut(),
+          child: Container(
+            padding: const EdgeInsets.all(13),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(15),
+              color: Colors.white.withValues(alpha: 0.035),
+              border: Border.all(color: AppColors.hairline),
+            ),
+            child: Center(
+              child: Text('Αποσύνδεση', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textAlpha(0.6))),
+            ),
+          ),
+        ),
+      ),
+    ];
+  }
+
+  List<Widget> _publicSections(BuildContext context, MpStore store) {
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+        child: Row(
+          children: [
+            Expanded(
+              child: GestureDetector(
+                onTap: store.toggleFollow,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    gradient: store.following ? null : AppColors.purpleGradient,
+                    color: store.following ? Colors.white.withValues(alpha: 0.07) : null,
+                    border: store.following ? Border.all(color: AppColors.hairline) : null,
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: Text(store.following ? 'Ακολουθείς' : 'Ακολούθησε',
+                      style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: GestureDetector(
+                onTap: _comingSoon,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.07),
+                    border: Border.all(color: AppColors.hairline),
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: const Text('Μήνυμα', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('ΔΗΜΟΣΙΑ ΠΑΡΤΙ ΠΟΥ ΔΙΟΡΓΑΝΩΣΕ', style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.45))),
+            const SizedBox(height: 9),
+            Container(
+              padding: const EdgeInsets.all(13),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(15),
+                color: Colors.white.withValues(alpha: 0.035),
+                border: Border.all(color: AppColors.purple.withValues(alpha: 0.25)),
+              ),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Rooftop Σεπτεμβρίου', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700)),
+                  SizedBox(height: 2),
+                  Text('Πέρσι · 140 ήρθαν · Κουκάκι', style: TextStyle(fontSize: 11.5, color: Color(0x8CF4F1F8))),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(15),
+            color: Colors.white.withValues(alpha: 0.03),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.13)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.lock_outline, size: 16, color: AppColors.textAlpha(0.45)),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text('Τα ιδιωτικά πάρτι της Κατερίνας και τα stories τους δεν είναι ορατά σε σένα.',
+                    style: TextStyle(fontSize: 12, height: 1.45, color: AppColors.textAlpha(0.5))),
               ),
             ],
           ),
         ),
       ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('ΚΟΙΝΟΙ ΦΙΛΟΙ · ${mpFriends.length}', style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.45))),
+            const SizedBox(height: 9),
+            Row(
+              children: [
+                for (final f in mpFriends.take(3))
+                  Padding(
+                    padding: const EdgeInsets.only(right: 9),
+                    child: Column(
+                      children: [
+                        Container(
+                          width: 52,
+                          height: 52,
+                          clipBehavior: Clip.antiAlias,
+                          decoration: const BoxDecoration(shape: BoxShape.circle),
+                          child: DiagonalStripePlaceholder(colors: f.colors),
+                        ),
+                        const SizedBox(height: 5),
+                        Text(f.name.split(' ').first, style: TextStyle(fontSize: 10.5, color: AppColors.textAlpha(0.55))),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    ];
+  }
+
+  Widget _segment(String label, bool active, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
+        decoration: BoxDecoration(
+          color: active ? Colors.white.withValues(alpha: 0.12) : null,
+          borderRadius: BorderRadius.circular(99),
+        ),
+        child: Text(label, style: AppTextStyles.mono(size: 10.5, color: active ? AppColors.text : AppColors.textAlpha(0.45))),
+      ),
     );
   }
 
-  Widget _iconButton(IconData icon) {
+  Widget _countPair(String value, String label) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
+      children: [
+        Text(value, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800)),
+        const SizedBox(width: 4),
+        Text(label, style: TextStyle(fontSize: 11, color: AppColors.textAlpha(0.5))),
+      ],
+    );
+  }
+
+  Widget _statTile(String value, String label, {bool pink = false}) {
     return Container(
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF14141B),
-        shape: BoxShape.circle,
+        color: pink ? AppColors.pink.withValues(alpha: 0.1) : Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: pink ? AppColors.pink.withValues(alpha: 0.3) : AppColors.hairline),
       ),
-      child: IconButton(
-        onPressed: () {},
-        icon: Icon(icon, color: Colors.white70),
-      ),
-    );
-  }
-
-  Widget _buildStat(String value, String label) {
-    return Expanded(
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 12,
-            ),
-          ),
+          Text(value, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: -0.3, color: pink ? AppColors.pinkLight : AppColors.text)),
+          const SizedBox(height: 1),
+          Text(label, style: TextStyle(fontSize: 10.5, color: AppColors.textAlpha(0.5))),
         ],
       ),
     );
   }
 
-  Widget _verticalDivider() {
-    return Container(
-      height: 42,
-      width: 1,
-      color: Colors.white12,
-      margin: const EdgeInsets.symmetric(horizontal: 8),
+  Widget _historyTile(String label, List<Color> colors, {Color? ring}) {
+    return AspectRatio(
+      aspectRatio: 1,
+      child: Container(
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(11),
+          border: ring != null ? Border.all(color: ring.withValues(alpha: 0.5), width: 1.5) : null,
+        ),
+        child: Stack(
+          children: [
+            DiagonalStripePlaceholder(colors: colors),
+            Positioned(
+              bottom: 5,
+              left: 6,
+              child: Text(label, style: AppTextStyles.mono(size: 8, color: AppColors.textAlpha(0.4))),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
-  Widget _friendAvatar(String imageUrl) {
-    return Column(
-      children: [
-        CircleAvatar(
-          radius: 28,
-          backgroundImage: NetworkImage(imageUrl),
-          backgroundColor: const Color(0xFF1B1B28),
+  Widget _settingsRow(String title, String sub, {bool chevron = false, Widget? trailing, VoidCallback? onTap}) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.all(13),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 2),
+                  Text(sub, style: TextStyle(fontSize: 11, color: AppColors.textAlpha(0.45))),
+                ],
+              ),
+            ),
+            if (trailing != null) trailing,
+            if (chevron) Icon(Icons.chevron_right, size: 18, color: AppColors.textAlpha(0.35)),
+          ],
         ),
-      ],
+      ),
+    );
+  }
+
+  Widget _mapSwitch(MpStore store) {
+    return GestureDetector(
+      onTap: store.toggleMapVisible,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        width: 42,
+        height: 25,
+        padding: const EdgeInsets.all(2.5),
+        decoration: BoxDecoration(
+          gradient: store.mapVisible ? AppColors.purpleGradient : null,
+          color: store.mapVisible ? null : Colors.white.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(99),
+        ),
+        child: AnimatedAlign(
+          duration: const Duration(milliseconds: 180),
+          alignment: store.mapVisible ? Alignment.centerRight : Alignment.centerLeft,
+          child: Container(
+            width: 20,
+            height: 20,
+            decoration: BoxDecoration(color: store.mapVisible ? Colors.white : Colors.white.withValues(alpha: 0.6), shape: BoxShape.circle),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'state/mp_store.dart';
 import 'ui/screens/auth_gate.dart';
+import 'ui/theme/app_theme.dart';
 
 
 Future<void> main() async {
@@ -25,30 +28,17 @@ class MyPartyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'MyParty',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF0D0D12),
-        primaryColor: Colors.purpleAccent,
-        colorScheme: ColorScheme.dark(
-          primary: Colors.purpleAccent,
-          secondary: Colors.purpleAccent,
-          surface: const Color(0xFF0D0D12),
-        ),
-        bottomNavigationBarTheme: BottomNavigationBarThemeData(
-          backgroundColor: const Color(0xFF1A1A24),
-          selectedItemColor: Colors.purpleAccent,
-          unselectedItemColor: Colors.grey[600],
-        ),
-        floatingActionButtonTheme: FloatingActionButtonThemeData(
-          backgroundColor: Colors.purpleAccent,
-          foregroundColor: Colors.black,
-        ),
+    return ChangeNotifierProvider(
+      create: (_) => MpStore(),
+      // Above MaterialApp so every route on the Navigator (pushed screens,
+      // modal bottom sheets) can reach it — routes are siblings on the
+      // Navigator, not descendants of whichever screen pushed them.
+      child: MaterialApp(
+        title: 'MyParty',
+        debugShowCheckedModeBanner: false,
+        theme: buildAppTheme(),
+        home: const AuthGate(), // <-- Changed from LoginScreen to AuthGate
       ),
-      home: const AuthGate(), // <-- Changed from LoginScreen to AuthGate
     );
   }
 }
