@@ -6,14 +6,22 @@ import '../../state/mp_store.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
 import '../widgets/mp_bottom_nav.dart';
+import '../widgets/party_card.dart';
 import '../widgets/party_detail_sheet.dart';
 import '../widgets/privacy_badge.dart';
 import 'host_wizard_screen.dart';
 
-class EventsScreen extends StatelessWidget {
+class EventsScreen extends StatefulWidget {
   final ValueChanged<MpTab>? onNavigate;
 
   const EventsScreen({super.key, this.onNavigate});
+
+  @override
+  State<EventsScreen> createState() => _EventsScreenState();
+}
+
+class _EventsScreenState extends State<EventsScreen> {
+  bool _showAll = true;
 
   @override
   Widget build(BuildContext context) {
@@ -22,6 +30,8 @@ class EventsScreen extends StatelessWidget {
     final thisWeek = ['anodos'].where(store.interestedIn).toList();
     final later = ['nefeli'].where(store.interestedIn).toList();
     final empty = tonight.isEmpty && thisWeek.isEmpty && later.isEmpty;
+
+    final allParties = mpParties.values.toList()..sort((a, b) => a.sortKey.compareTo(b.sortKey));
 
     return Scaffold(
       backgroundColor: AppColors.bg,
@@ -35,6 +45,16 @@ class EventsScreen extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Text('Τα events μου', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -0.5)),
+                  Container(
+                    padding: const EdgeInsets.all(3),
+                    decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(99)),
+                    child: Row(
+                      children: [
+                        _segment('ΔΙΚΑ ΜΟΥ', !_showAll, () => setState(() => _showAll = false)),
+                        _segment('ΟΛΑ ΤΑ PARTY', _showAll, () => setState(() => _showAll = true)),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -75,24 +95,38 @@ class EventsScreen extends StatelessWidget {
               ),
             ),
             Expanded(
-              child: empty
-                  ? _emptyState(context)
-                  : ListView(
+              child: _showAll
+                  ? ListView(
                       padding: const EdgeInsets.fromLTRB(14, 16, 14, 96),
                       children: [
-                        if (tonight.isNotEmpty) _section(context, 'ΑΠΟΨΕ', tonight, live: true),
-                        if (thisWeek.isNotEmpty) ...[
-                          const SizedBox(height: 20),
-                          _section(context, 'ΑΥΤΗ ΤΗ ΒΔΟΜΑΔΑ', thisWeek),
+                        Padding(
+                          padding: const EdgeInsets.only(left: 2, bottom: 9),
+                          child: Text('ΟΛΑ ΤΑ PARTY', style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.6))),
+                        ),
+                        for (final party in allParties) ...[
+                          PartyCard(partyId: party.id),
+                          const SizedBox(height: 14),
                         ],
-                        if (later.isNotEmpty) ...[
-                          const SizedBox(height: 20),
-                          _section(context, 'ΑΡΓΟΤΕΡΑ', later),
-                        ],
-                        const SizedBox(height: 20),
-                        _pastSection(),
                       ],
-                    ),
+                    )
+                  : empty
+                      ? _emptyState(context)
+                      : ListView(
+                          padding: const EdgeInsets.fromLTRB(14, 16, 14, 96),
+                          children: [
+                            if (tonight.isNotEmpty) _section(context, 'ΑΠΟΨΕ', tonight, live: true),
+                            if (thisWeek.isNotEmpty) ...[
+                              const SizedBox(height: 20),
+                              _section(context, 'ΑΥΤΗ ΤΗ ΒΔΟΜΑΔΑ', thisWeek),
+                            ],
+                            if (later.isNotEmpty) ...[
+                              const SizedBox(height: 20),
+                              _section(context, 'ΑΡΓΟΤΕΡΑ', later),
+                            ],
+                            const SizedBox(height: 20),
+                            _pastSection(),
+                          ],
+                        ),
             ),
           ],
         ),
@@ -258,7 +292,7 @@ class EventsScreen extends StatelessWidget {
                 style: TextStyle(fontSize: 13, height: 1.5, color: AppColors.textAlpha(0.55))),
             const SizedBox(height: 18),
             GestureDetector(
-              onTap: () => onNavigate?.call(MpTab.map),
+              onTap: () => widget.onNavigate?.call(MpTab.map),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
                 decoration: BoxDecoration(gradient: AppColors.purpleGradient, borderRadius: BorderRadius.circular(13)),
@@ -267,6 +301,20 @@ class EventsScreen extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _segment(String label, bool active, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
+        decoration: BoxDecoration(
+          color: active ? Colors.white.withValues(alpha: 0.12) : null,
+          borderRadius: BorderRadius.circular(99),
+        ),
+        child: Text(label, style: AppTextStyles.mono(size: 10.5, color: active ? AppColors.text : AppColors.textAlpha(0.45))),
       ),
     );
   }
