@@ -17,7 +17,11 @@
       "Bash(git add *)",
       "Bash(git diff *)",
       "Bash(git status *)",
-      "Bash(powershell -Command \"Get-ChildItem -Recurse .claude | Select-Object FullName\")"
+      "Bash(powershell -Command \"Get-ChildItem -Recurse .claude | Select-Object FullName\")",
+      "Bash(git commit -m ' *)",
+      "Bash(git checkout *)",
+      "Bash(git pull *)",
+      "Bash(git commit *)"
     ]
   }
 }
