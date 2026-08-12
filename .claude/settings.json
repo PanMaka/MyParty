@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(nohup flutter run -d chrome --web-port=8765)",
+      "Bash(echo \"PID: $!\")",
+      "Bash(tail -n 20 /tmp/flutter_run.log)",
+      "Read(//tmp/**)",
+      "Bash(chromium-cli --help)",
+      "Bash(ps -W)",
+      "Bash(awk -F= '{v=$2; for\\(i=3;i<=NF;i++\\) v=v\"=\"$i; print $1\" -> length:\"length\\(v\\)\" prefix:\"substr\\(v,1,15\\)}' .env)",
+      "Bash(flutter analyze *)",
+      "Bash(tail -n 30 /tmp/flutter_run.log 2>/dev/null)",
+      "Bash(disown)",
+      "Bash(taskkill //F //IM flutter.bat)",
+      "Bash(taskkill //F //IM dart.exe)",
+      "Bash(powershell -c \"Get-ChildItem .claude\")",
+      "Bash(git add *)",
+      "Bash(git diff *)",
+      "Bash(git status *)",
+      "Bash(powershell -Command \"Get-ChildItem -Recurse .claude | Select-Object FullName\")"
+    ]
+  }
+}

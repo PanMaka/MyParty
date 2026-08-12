@@ -69,3 +69,18 @@ flutter run
 - Every new table ships with pgTAP tests in the same PR, including at
   least one negative assertion (who should NOT see/write this row).
 - `/clear` between phases; `/compact` if a single phase runs long.
+
+## Git workflow
+
+- Never commit directly to `main`.
+- At the START of every task, before writing any code, create and check out
+  a new branch: `git checkout main && git pull && git checkout -b phase/NN-short-name`
+  (e.g. `phase/02-party-lifecycle`, `phase/07a-proximity-schema`).
+- If the current branch is already a `phase/*` branch for THIS task, stay on it.
+- If the current branch is `main` or an unrelated branch, stop and create the
+  new one first.
+- Commit after every green test run, not once at the end.
+- Migrations are append-only once pushed to hosted: never edit an applied
+  migration file, always add a new one.
+- When the phase is done: push and open a PR with a summary of the migrations
+  added and what shrank in `mp_store.dart`.
