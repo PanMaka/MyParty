@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git checkout *)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git ls-tree *)",
+      "Bash(git rebase *)",
+      "Bash(git show *)",
+      "Read(//tmp/**)",
+      "Bash(rm -f .claude/settings.json /tmp/settings_feature.json)",
+      "WebFetch(domain:supabase.com)",
+      "Bash(git mv *)",
+      "PowerShell(docker --version 2>&1)",
+      "PowerShell(docker info 2>&1)",
+      "PowerShell(supabase --version 2>&1)",
+      "Bash(supabase start *)",
+      "Bash(supabase test *)",
+      "Bash(docker exec *)",
+      "Bash(supabase migration *)",
+      "Bash(supabase db *)",
+      "Bash(docker stats *)",
+      "Bash(supabase stop *)"
+    ]
+  }
+}
