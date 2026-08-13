@@ -42,7 +42,7 @@ insert into public.profiles (id, username, credibility_score) values
 -- invited, stranger is not) and PARTY_PUBLIC (a plain public party).
 -- ============================================================
 
-insert into public.parties (id, host_id, title, description, location, start_time, is_private, is_sponsored, party_tier) values
+insert into public.parties (id, host_id, title, description, location, starts_at, is_private, is_sponsored, party_tier) values
   -- Central Athens cluster (Syntagma), all within ~50m of each other
   ('aaaaaaaa-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111', 'Rooftop Pregame', 'Invite-only pregame before we head out.', st_point(23.7348, 37.9755)::geography, now() + interval '2 days', true, false, 'standard'),
   ('aaaaaaaa-0000-0000-0000-000000000002', '11111111-1111-1111-1111-111111111111', 'Syntagma Afterparty', 'Open afterparty, everyone welcome.', st_point(23.7351, 37.9758)::geography, now() + interval '2 days', false, false, 'standard'),
