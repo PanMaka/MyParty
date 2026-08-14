@@ -10,7 +10,7 @@
 -- invited), both in the Syntagma cluster.
 begin;
 set search_path to public, extensions;
-select plan(28);
+select plan(29);
 
 -- ============================================================
 -- follows: the graph itself
@@ -142,6 +142,16 @@ select throws_ok(
 select is_empty(
   $$ select 1 from public.profiles where id = '11111111-1111-1111-1111-111111111111' $$,
   'the blocked user cannot see the blocker''s profile (search, reverse direction)'
+);
+
+-- Cross-phase regression guard (20260814104618): hiding the profile row must
+-- NOT make the blocker's username look claimable. profiles_username_lower_idx
+-- is global, so a "yes" here would be a lie the user only discovers when the
+-- claim fails on a constraint violation.
+select is(
+  public.check_username_available('host'),
+  false,
+  'a taken username still reads as taken to someone blocked by its owner'
 );
 
 select tests.authenticate_as('11111111-1111-1111-1111-111111111111'); -- host

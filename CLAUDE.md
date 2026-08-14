@@ -9,9 +9,11 @@ Session-by-session task scripts: `docs/MyParty-ClaudeCode-Prompts.md`.
 **Real today:** `profiles`/`parties`/`invitations`/`rsvps`/`follows`/`blocks`
 tables with RLS; `get_parties_near_user` RPC (tier/zoom-filtered map query),
 called live from `MapScreen`; `create_party_with_invites`; the
-`can_access_party` and `is_blocked` visibility helpers; `AuthService` (email
-signup/signin/signout via `supabase_flutter`); `PartyRepository` and
-`SocialRepository` (all widget-level Supabase calls go through these).
+`can_access_party` and `is_blocked` visibility helpers; `handle_new_user`
+(every `auth.users` insert gets a `profiles` row) + `check_username_available`
+and the onboarding/consent columns; `AuthService` (email signup/signin/signout
+via `supabase_flutter`); `PartyRepository` and `SocialRepository` (all
+widget-level Supabase calls go through these).
 
 The social graph is **follows-only and asymmetric** — there is no
 `friendships` table and no `are_friends` helper, deliberately. See
@@ -23,9 +25,15 @@ visibility; that comes from `invitations` alone.
 `lib/state/mp_store.dart` (hype, interested, likes, invited, map-visibility)
 and the const lists in `lib/models/` (`mpParties`, `mpStory`,
 `mpSeedTaratsaChat`) — `ChatScreen`, `StoryViewerScreen` and `FeedScreen`'s
-`_KapsimoCard` still read from these instead of Supabase. Signup does **not**
-yet create a `profiles` row (Phase 1 was skipped and is still outstanding) —
-a fresh user can't host a party until it does.
+`_KapsimoCard` still read from these instead of Supabase.
+
+**Cross-phase gotcha worth remembering:** the `profiles` SELECT policy is no
+longer `using (true)` — it is block-filtered. Any function that reads
+`public.profiles` to answer a *global* question (uniqueness, counts, existence)
+must be `security definer`, or it will silently return the caller's filtered
+view as if it were the whole table. That is exactly how
+`check_username_available` started reporting taken usernames as free
+(`20260814104618`).
 
 ## Migration naming
 

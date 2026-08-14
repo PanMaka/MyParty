@@ -207,10 +207,11 @@ Deliverables:
    must finally pass real uuids to create_party_with_invites — it has been
    sending an empty array). Replace MpStore.toggleFollow.
 7. pgTAP with a blocked persona asserted against EVERY policy that exists at
-   this point, including the ones from Phases 0 and 2. Note that Phase 1
-   (identity) was never implemented — there is still no profiles INSERT
-   policy and no handle_new_user trigger, so there are no Phase 1 policies
-   to cover and a fresh signup still cannot create a profiles row.
+   this point, including the ones from Phases 0, 1 and 2. Phase 1 ships in
+   the same batch as this phase, so check its helpers too — anything that
+   reads public.profiles without security definer now runs under the
+   narrowed, block-filtered SELECT policy and may quietly return the wrong
+   answer.
 
 Start by listing every existing RLS policy in the repo and marking which
 ones need the block check. Show me that list before you edit anything.
