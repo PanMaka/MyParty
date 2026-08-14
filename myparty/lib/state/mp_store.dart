@@ -34,7 +34,6 @@ class MpStore extends ChangeNotifier {
     'zoi': false,
     'lefteris': false,
   };
-  bool _following = false;
   bool _mapVisible = true;
   bool _copied = false;
 
@@ -45,7 +44,6 @@ class MpStore extends ChangeNotifier {
   int hypeOf(String id) => _hype[id] ?? 0;
   bool interestedIn(String id) => _interested[id] ?? false;
   int likesOf(String id) => _likes[id] ?? 0;
-  bool get following => _following;
   bool get mapVisible => _mapVisible;
   bool get copied => _copied;
   bool invited(String friendId) => _invited[friendId] ?? false;
@@ -68,11 +66,6 @@ class MpStore extends ChangeNotifier {
     if (next && hypeBumpOnJoin > 0) {
       _hype[id] = math.min(100, (_hype[id] ?? 0) + hypeBumpOnJoin);
     }
-    notifyListeners();
-  }
-
-  void toggleFollow() {
-    _following = !_following;
     notifyListeners();
   }
 

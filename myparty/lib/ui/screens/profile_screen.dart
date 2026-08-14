@@ -1,22 +1,40 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../models/mp_friend.dart';
+import '../../data/social_repository.dart';
+import '../../models/profile.dart';
 import '../../services/auth_service.dart';
 import '../../state/mp_store.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
+import '../widgets/follow_button.dart';
 import '../widgets/party_detail_sheet.dart';
 
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({super.key});
+  const ProfileScreen({super.key, this.userId});
+
+  /// Whose profile this is. Null means "no real profile selected", which is
+  /// how `main_screen.dart` mounts it on the tab bar today — the public view
+  /// then keeps its design-prototype strings, because nothing in the app
+  /// navigates to another user yet (that arrives with search, Phase 8).
+  final String? userId;
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
+  final _social = SocialRepository();
+
   bool _selfView = true;
+  Future<List<Profile>>? _theirFollowing;
+
+  @override
+  void initState() {
+    super.initState();
+    final id = widget.userId;
+    if (id != null) _theirFollowing = _social.fetchFollowing(userId: id);
+  }
 
   void _comingSoon() {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -253,21 +271,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
         child: Row(
           children: [
             Expanded(
-              child: GestureDetector(
-                onTap: store.toggleFollow,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    gradient: store.following ? null : AppColors.purpleGradient,
-                    color: store.following ? Colors.white.withValues(alpha: 0.07) : null,
-                    border: store.following ? Border.all(color: AppColors.hairline) : null,
-                    borderRadius: BorderRadius.circular(13),
-                  ),
-                  child: Text(store.following ? 'Ακολουθείς' : 'Ακολούθησε',
-                      style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
-                ),
-              ),
+              child: widget.userId != null
+                  ? FollowButton(targetUserId: widget.userId!)
+                  : GestureDetector(
+                      onTap: _comingSoon,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          gradient: AppColors.purpleGradient,
+                          borderRadius: BorderRadius.circular(13),
+                        ),
+                        child: const Text('Ακολούθησε',
+                            style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
+                      ),
+                    ),
             ),
             const SizedBox(width: 8),
             Expanded(
@@ -336,37 +354,50 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ),
       ),
-      Padding(
-        padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('ΚΟΙΝΟΙ ΦΙΛΟΙ · ${mpFriends.length}', style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.45))),
-            const SizedBox(height: 9),
-            Row(
-              children: [
-                for (final f in mpFriends.take(3))
-                  Padding(
-                    padding: const EdgeInsets.only(right: 9),
-                    child: Column(
-                      children: [
-                        Container(
-                          width: 52,
-                          height: 52,
-                          clipBehavior: Clip.antiAlias,
-                          decoration: const BoxDecoration(shape: BoxShape.circle),
-                          child: DiagonalStripePlaceholder(colors: f.colors),
+      // Was "ΚΟΙΝΟΙ ΦΙΛΟΙ", rendered from the const mpFriends list. There is
+      // no friendship in the schema — only the asymmetric follow graph — so
+      // this is now who they follow, and it only renders for a real profile.
+      if (_theirFollowing != null)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+          child: FutureBuilder<List<Profile>>(
+            future: _theirFollowing,
+            builder: (context, snapshot) {
+              final people = snapshot.data ?? const <Profile>[];
+              if (people.isEmpty) return const SizedBox.shrink();
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('ΑΚΟΛΟΥΘΕΙ · ${people.length}',
+                      style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.45))),
+                  const SizedBox(height: 9),
+                  Row(
+                    children: [
+                      for (final f in people.take(3))
+                        Padding(
+                          padding: const EdgeInsets.only(right: 9),
+                          child: Column(
+                            children: [
+                              Container(
+                                width: 52,
+                                height: 52,
+                                clipBehavior: Clip.antiAlias,
+                                decoration: const BoxDecoration(shape: BoxShape.circle),
+                                child: DiagonalStripePlaceholder(colors: f.placeholderColors),
+                              ),
+                              const SizedBox(height: 5),
+                              Text(f.username,
+                                  style: TextStyle(fontSize: 10.5, color: AppColors.textAlpha(0.55))),
+                            ],
+                          ),
                         ),
-                        const SizedBox(height: 5),
-                        Text(f.name.split(' ').first, style: TextStyle(fontSize: 10.5, color: AppColors.textAlpha(0.55))),
-                      ],
-                    ),
+                    ],
                   ),
-              ],
-            ),
-          ],
+                ],
+              );
+            },
+          ),
         ),
-      ),
     ];
   }
 
