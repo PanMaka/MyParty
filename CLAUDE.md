@@ -6,18 +6,26 @@ Flutter client (`myparty/`) + Supabase (Postgres 17/PostGIS, Auth, Storage,
 Realtime, Edge Functions). Full design/rationale: `docs/backend-plan.md`.
 Session-by-session task scripts: `docs/MyParty-ClaudeCode-Prompts.md`.
 
-**Real today:** `profiles`/`parties`/`invitations` tables with RLS;
-`get_parties_near_user` RPC (tier/zoom-filtered map query), called live from
-`MapScreen`; `AuthService` (email signup/signin/signout via
-`supabase_flutter`).
+**Real today:** `profiles`/`parties`/`invitations`/`rsvps`/`follows`/`blocks`
+tables with RLS; `get_parties_near_user` RPC (tier/zoom-filtered map query),
+called live from `MapScreen`; `create_party_with_invites`; the
+`can_access_party` and `is_blocked` visibility helpers; `AuthService` (email
+signup/signin/signout via `supabase_flutter`); `PartyRepository` and
+`SocialRepository` (all widget-level Supabase calls go through these).
 
-**Mock today, ships real in later phases:** everything in
-`lib/state/mp_store.dart` (hype, interested/rsvp, likes, invited, follow,
-map-visibility) and the const lists in `lib/models/` (`mpParties`,
-`mpFriends`, `mpStory`, `mpSeedTaratsaChat`) — `HostWizardScreen`,
-`ChatScreen`, `StoryViewerScreen`, `ProfileScreen`, `EventsScreen` all read
-from these instead of Supabase. Signup does **not** yet create a `profiles`
-row (Phase 1 fixes this) — a fresh user can't host a party until it does.
+The social graph is **follows-only and asymmetric** — there is no
+`friendships` table and no `are_friends` helper, deliberately. See
+`docs/backend-plan.md` 3.1, which was reversed on purpose; don't reintroduce
+one without an explicit product decision. A follow grants **no** private-party
+visibility; that comes from `invitations` alone.
+
+**Mock today, ships real in later phases:** everything left in
+`lib/state/mp_store.dart` (hype, interested, likes, invited, map-visibility)
+and the const lists in `lib/models/` (`mpParties`, `mpStory`,
+`mpSeedTaratsaChat`) — `ChatScreen`, `StoryViewerScreen` and `FeedScreen`'s
+`_KapsimoCard` still read from these instead of Supabase. Signup does **not**
+yet create a `profiles` row (Phase 1 was skipped and is still outstanding) —
+a fresh user can't host a party until it does.
 
 ## Migration naming
 
@@ -32,7 +40,7 @@ hand-write one, ordering across branches depends on it.
 3. **`set search_path = ''`** on every `security definer` function, with
    fully schema-qualified refs (`public.profiles`) inside it.
 4. **No duplicated visibility logic** — one helper per rule
-   (`can_access_party`, `is_blocked`, `are_friends`, …), every policy/RPC
+   (`can_access_party`, `is_blocked`, …), every policy/RPC
    that needs it calls the helper, never reimplements it.
 5. **Keyset pagination, never offset** — `where (created_at, id) < (?, ?)`
    with a matching composite index, for any unbounded list.
