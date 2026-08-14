@@ -186,15 +186,24 @@ static friend picker with real queries; replace `MpStore.toggleFollow`.
 
 ## Phase 4 — Feed, reactions & reports
 
-Extract `can_access_party(p_party_id, p_user_id)` first and refactor the
-existing `parties` SELECT policy to use it before adding anything new — the
-feed must not reimplement party visibility, and Phases 5 and 6 reuse this
-same helper.
+`can_access_party(p_party_id)` already exists (`20260812121153`, with the
+block check added in Phase 3) — this phase does not create it, it **widens
+it to `can_access_party(p_party_id, p_user_id)`**, because a feed RPC
+evaluates visibility for a given user rather than always `auth.uid()`.
+
+Do this first, before adding anything new, and mind the trap: adding a
+second parameter creates an *overload*, it does not replace the existing
+function. The `parties` SELECT policy would keep calling the one-argument
+version, leaving the block logic living in two places — a violation of rule
+4, which is the very rule this phase invokes. The one-argument version must
+become a thin wrapper that delegates to the two-argument one, so there stays
+exactly one implementation. Phases 5 and 6 reuse the same helper.
 
 Deliverables: `party_posts`, `post_likes`, `post_comments` (denormalized
 `like_count`/`comment_count` via trigger, soft-delete columns on all
-three), a feed RPC (posts from parties the user follows/attended/was
-invited to, gated by `can_access_party`, keyset pagination on
+three), a feed RPC (posts from parties hosted by people the user follows,
+plus parties they attended or were invited to — you follow *users*, not
+parties — gated by `can_access_party`, keyset pagination on
 `(created_at, id)`), `reports` table (no admin UI needed yet — soft-delete
 via SQL is enough for v1). Flutter: replace the hardcoded `_KapsimoCard` and
 `MpStore._likes`; add a report action to every UGC surface.
