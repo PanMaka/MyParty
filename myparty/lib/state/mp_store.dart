@@ -51,15 +51,6 @@ class MpStore extends ChangeNotifier {
   bool invited(String friendId) => _invited[friendId] ?? false;
   int get invitedCount => _invited.values.where((v) => v).length;
 
-  int interestedCountFor(String id) {
-    // Design shows the base "vinyl" interested count bumping by one locally.
-    if (id == 'vinyl') return 312 + (interestedIn('vinyl') ? 1 : 0);
-    return mpParties[id]?.pop ?? 0;
-  }
-
-  List<MpParty> get interestedParties =>
-      mpParties.values.where((p) => interestedIn(p.id)).toList();
-
   void bump(String id, int amount) {
     _hype[id] = math.min(100, (_hype[id] ?? 0) + amount);
     notifyListeners();

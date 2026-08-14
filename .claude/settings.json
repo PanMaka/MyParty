@@ -21,7 +21,9 @@
       "Bash(supabase migration *)",
       "Bash(supabase db *)",
       "Bash(docker stats *)",
-      "Bash(supabase stop *)"
+      "Bash(supabase stop *)",
+      "Bash(supabase --version)",
+      "Bash(flutter analyze *)"
     ]
   }
 }

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
 
+import '../../data/party_repository.dart';
 import '../../models/mp_friend.dart';
+import '../../utils/greek_date.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
 import 'chat_screen.dart';
@@ -15,17 +18,30 @@ class HostWizardScreen extends StatefulWidget {
 }
 
 class _HostWizardScreenState extends State<HostWizardScreen> {
+  final _repository = PartyRepository();
+
   int _step = 1;
   bool _private = true;
   bool _copied = false;
+  bool _submitting = false;
+  String? _submitError;
   final Set<String> _invited = {'eleni', 'aris'};
 
   final _nameController = TextEditingController(text: 'Ταράτσα στου Θανάση');
   final _addressController = TextEditingController(text: 'Ζησιμοπούλου 8, Νέα Σμύρνη');
-  final _dayController = TextEditingController(text: 'Σάβ 8 Αυγ');
-  final _timeController = TextEditingController(text: '23:00');
   final _descController = TextEditingController(
       text: 'Φέρτε ό,τι πίνετε. Έχει ηχείο, μη φέρετε άλλο. Ταράτσα, βάλτε κάτι ζεστό για μετά τις 3.');
+
+  DateTime _selectedDate = DateTime.now();
+  TimeOfDay _selectedTime = const TimeOfDay(hour: 23, minute: 0);
+
+  DateTime get _startsAt => DateTime(
+        _selectedDate.year,
+        _selectedDate.month,
+        _selectedDate.day,
+        _selectedTime.hour,
+        _selectedTime.minute,
+      );
 
   static const _titles = ['Λεπτομέρειες', 'Ποιος το βλέπει;', 'Κάλεσε κόσμο', 'Έτοιμο;'];
 
@@ -57,15 +73,56 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
 
   Color get _accent => _private ? AppColors.pink : AppColors.purple;
 
-  void _next() {
-    if (_step >= 4) {
-      Navigator.of(context).push(MaterialPageRoute(builder: (_) => _HostDoneScreen(invitedCount: _invited.length)));
-    } else {
+  Future<void> _next() async {
+    if (_step < 4) {
       setState(() => _step += 1);
+      return;
+    }
+    if (_submitting) return;
+    setState(() {
+      _submitting = true;
+      _submitError = null;
+    });
+    try {
+      final position = await _resolveLocation();
+      // mpFriends is still mock data (no real profile ids yet), so invites
+      // stay empty until Phase where friends ship real.
+      await _repository.createPartyWithInvites(
+        party: {
+          'title': _nameController.text.trim(),
+          'description': '${_addressController.text.trim()}\n\n${_descController.text.trim()}',
+          'lat': position.latitude,
+          'lon': position.longitude,
+          'starts_at': _startsAt.toUtc().toIso8601String(),
+          'is_private': _private,
+        },
+      );
+      if (!mounted) return;
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => _HostDoneScreen(invitedCount: _invited.length)));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _submitError = 'Κάτι πήγε στραβά. Δοκίμασε ξανά.');
+    } finally {
+      if (mounted) setState(() => _submitting = false);
     }
   }
 
+  Future<Position> _resolveLocation() async {
+    if (!await Geolocator.isLocationServiceEnabled()) {
+      throw Exception('Location services disabled');
+    }
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+      throw Exception('Location permission denied');
+    }
+    return Geolocator.getCurrentPosition();
+  }
+
   void _back() {
+    if (_submitting) return;
     if (_step <= 1) {
       Navigator.of(context).pop();
     } else {
@@ -85,8 +142,6 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
   void dispose() {
     _nameController.dispose();
     _addressController.dispose();
-    _dayController.dispose();
-    _timeController.dispose();
     _descController.dispose();
     super.dispose();
   }
@@ -157,20 +212,34 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: GestureDetector(
-                      onTap: _next,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 15),
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          gradient: AppColors.brandGradient,
-                          borderRadius: BorderRadius.circular(14),
-                          boxShadow: [BoxShadow(color: AppColors.purpleDeep.withValues(alpha: 0.4), blurRadius: 26, offset: const Offset(0, 8))],
+                      onTap: _submitting ? null : _next,
+                      child: Opacity(
+                        opacity: _submitting ? 0.6 : 1,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 15),
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            gradient: AppColors.brandGradient,
+                            borderRadius: BorderRadius.circular(14),
+                            boxShadow: [BoxShadow(color: AppColors.purpleDeep.withValues(alpha: 0.4), blurRadius: 26, offset: const Offset(0, 8))],
+                          ),
+                          child: _submitting
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                )
+                              : Text(_ctaLabel, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
                         ),
-                        child: Text(_ctaLabel, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
                       ),
                     ),
                   ),
                   const SizedBox(height: 9),
+                  if (_submitError != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Text(_submitError!, style: const TextStyle(fontSize: 11.5, color: Color(0xFFFF6B6B))),
+                    ),
                   Text(_footLabel, style: TextStyle(fontSize: 10.5, color: AppColors.textAlpha(0.35))),
                 ],
               ),
@@ -207,6 +276,52 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
         ],
       ),
     );
+  }
+
+  Widget _pickerField(String label, String value, VoidCallback onTap) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 13),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: AppTextStyles.mono(size: 10, color: AppColors.textAlpha(0.45))),
+          const SizedBox(height: 6),
+          GestureDetector(
+            onTap: onTap,
+            child: Container(
+              padding: const EdgeInsets.all(13),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(13),
+                border: Border.all(color: AppColors.hairline),
+              ),
+              child: Text(value, style: AppTextStyles.mono(size: 14, weight: FontWeight.w600, color: AppColors.text)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _datePickerField() {
+    final label = '${_selectedDate.day}/${_selectedDate.month}/${_selectedDate.year}';
+    return _pickerField('ΜΕΡΑ', label, () async {
+      final picked = await showDatePicker(
+        context: context,
+        initialDate: _selectedDate,
+        firstDate: DateTime.now().subtract(const Duration(days: 1)),
+        lastDate: DateTime.now().add(const Duration(days: 365)),
+      );
+      if (picked != null) setState(() => _selectedDate = picked);
+    });
+  }
+
+  Widget _timePickerField() {
+    final label = _selectedTime.format(context);
+    return _pickerField('ΩΡΑ', label, () async {
+      final picked = await showTimePicker(context: context, initialTime: _selectedTime);
+      if (picked != null) setState(() => _selectedTime = picked);
+    });
   }
 
   Widget _step1() {
@@ -247,9 +362,9 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
         _field('ΔΙΕΥΘΥΝΣΗ Ή ΧΩΡΟΣ', _addressController),
         Row(
           children: [
-            Expanded(child: _field('ΜΕΡΑ', _dayController)),
+            Expanded(child: _datePickerField()),
             const SizedBox(width: 9),
-            Expanded(child: _field('ΩΡΑ', _timeController, mono: true)),
+            Expanded(child: _timePickerField()),
           ],
         ),
         _field('ΠΕΡΙΓΡΑΦΗ', _descController, maxLines: 4),
@@ -502,7 +617,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(_nameController.text, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
-                          Text('${_dayController.text}, ${_timeController.text} · ${_addressController.text}',
+                          Text('${formatPartyStart(_startsAt)} · ${_addressController.text}',
                               maxLines: 1, overflow: TextOverflow.ellipsis,
                               style: TextStyle(fontSize: 11.5, color: AppColors.textAlpha(0.65))),
                         ],

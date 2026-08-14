@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 
+import '../../data/party_repository.dart';
 import '../../models/mp_party.dart';
-import '../../state/mp_store.dart';
+import '../../models/rsvp_party.dart';
+import '../../utils/greek_date.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
 import '../widgets/mp_bottom_nav.dart';
 import '../widgets/party_card.dart';
-import '../widgets/party_detail_sheet.dart';
 import '../widgets/privacy_badge.dart';
 import 'host_wizard_screen.dart';
 
@@ -21,16 +21,22 @@ class EventsScreen extends StatefulWidget {
 }
 
 class _EventsScreenState extends State<EventsScreen> {
+  final _repository = PartyRepository();
   bool _showAll = true;
+  late Future<List<RsvpParty>> _rsvpsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _rsvpsFuture = _repository.fetchMyRsvps();
+  }
+
+  void _reloadRsvps() {
+    setState(() => _rsvpsFuture = _repository.fetchMyRsvps());
+  }
 
   @override
   Widget build(BuildContext context) {
-    final store = context.watch<MpStore>();
-    final tonight = ['taratsa', 'vinyl', 'maria'].where(store.interestedIn).toList();
-    final thisWeek = ['anodos'].where(store.interestedIn).toList();
-    final later = ['nefeli'].where(store.interestedIn).toList();
-    final empty = tonight.isEmpty && thisWeek.isEmpty && later.isEmpty;
-
     final allParties = mpParties.values.toList()..sort((a, b) => a.sortKey.compareTo(b.sortKey));
 
     return Scaffold(
@@ -109,24 +115,53 @@ class _EventsScreenState extends State<EventsScreen> {
                         ],
                       ],
                     )
-                  : empty
-                      ? _emptyState(context)
-                      : ListView(
+                  : FutureBuilder<List<RsvpParty>>(
+                      future: _rsvpsFuture,
+                      builder: (context, snapshot) {
+                        if (snapshot.connectionState != ConnectionState.done) {
+                          return const Center(child: CircularProgressIndicator(color: AppColors.purple));
+                        }
+                        if (snapshot.hasError) {
+                          return _errorState();
+                        }
+
+                        final now = DateTime.now();
+                        final todayEnd = DateTime(now.year, now.month, now.day + 1);
+                        final weekEnd = now.add(const Duration(days: 7));
+                        final upcoming = snapshot.data!.where((r) => r.startsAt.isAfter(now)).toList()
+                          ..sort((a, b) => a.startsAt.compareTo(b.startsAt));
+
+                        final tonight = <RsvpParty>[];
+                        final thisWeek = <RsvpParty>[];
+                        final later = <RsvpParty>[];
+                        for (final rsvp in upcoming) {
+                          if (rsvp.startsAt.isBefore(todayEnd)) {
+                            tonight.add(rsvp);
+                          } else if (rsvp.startsAt.isBefore(weekEnd)) {
+                            thisWeek.add(rsvp);
+                          } else {
+                            later.add(rsvp);
+                          }
+                        }
+
+                        if (upcoming.isEmpty) return _emptyState(context);
+
+                        return ListView(
                           padding: const EdgeInsets.fromLTRB(14, 16, 14, 96),
                           children: [
-                            if (tonight.isNotEmpty) _section(context, 'ΑΠΟΨΕ', tonight, live: true),
+                            if (tonight.isNotEmpty) _rsvpSection(context, 'ΑΠΟΨΕ', tonight, live: true),
                             if (thisWeek.isNotEmpty) ...[
                               const SizedBox(height: 20),
-                              _section(context, 'ΑΥΤΗ ΤΗ ΒΔΟΜΑΔΑ', thisWeek),
+                              _rsvpSection(context, 'ΑΥΤΗ ΤΗ ΒΔΟΜΑΔΑ', thisWeek),
                             ],
                             if (later.isNotEmpty) ...[
                               const SizedBox(height: 20),
-                              _section(context, 'ΑΡΓΟΤΕΡΑ', later),
+                              _rsvpSection(context, 'ΑΡΓΟΤΕΡΑ', later),
                             ],
-                            const SizedBox(height: 20),
-                            _pastSection(),
                           ],
-                        ),
+                        );
+                      },
+                    ),
             ),
           ],
         ),
@@ -134,7 +169,7 @@ class _EventsScreenState extends State<EventsScreen> {
     );
   }
 
-  Widget _section(BuildContext context, String title, List<String> ids, {bool live = false}) {
+  Widget _rsvpSection(BuildContext context, String title, List<RsvpParty> rsvps, {bool live = false}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -151,28 +186,31 @@ class _EventsScreenState extends State<EventsScreen> {
           ),
         ),
         Column(
-          children: [for (final id in ids) _row(context, id)],
+          children: [for (final rsvp in rsvps) _rsvpRow(context, rsvp)],
         ),
       ],
     );
   }
 
-  Widget _row(BuildContext context, String id) {
-    final party = mpParties[id]!;
+  Widget _rsvpRow(BuildContext context, RsvpParty rsvp) {
+    final accent = rsvp.isPrivate ? AppColors.pink : AppColors.purple;
+    final crowd = rsvp.goingCount > 0 ? '${rsvp.goingCount} πάνε' : '${rsvp.interestedCount} ενδιαφέρονται';
     return Padding(
       padding: const EdgeInsets.only(bottom: 9),
       child: GestureDetector(
-        onTap: () => showPartyDetailSheet(context, id),
+        onTap: () => ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Έρχεται σύντομα'), behavior: SnackBarBehavior.floating),
+        ),
         child: Container(
           padding: const EdgeInsets.all(11),
           decoration: BoxDecoration(
             color: Colors.white.withValues(alpha: 0.035),
             borderRadius: BorderRadius.circular(15),
             border: Border(
-              top: BorderSide(color: (party.isPrivate ? AppColors.pink : AppColors.purple).withValues(alpha: 0.3)),
-              bottom: BorderSide(color: (party.isPrivate ? AppColors.pink : AppColors.purple).withValues(alpha: 0.3)),
-              right: BorderSide(color: (party.isPrivate ? AppColors.pink : AppColors.purple).withValues(alpha: 0.3)),
-              left: BorderSide(color: party.isPrivate ? AppColors.pink : AppColors.purple, width: 3),
+              top: BorderSide(color: accent.withValues(alpha: 0.3)),
+              bottom: BorderSide(color: accent.withValues(alpha: 0.3)),
+              right: BorderSide(color: accent.withValues(alpha: 0.3)),
+              left: BorderSide(color: accent, width: 3),
             ),
           ),
           child: Row(
@@ -183,7 +221,7 @@ class _EventsScreenState extends State<EventsScreen> {
                 clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(borderRadius: BorderRadius.circular(11)),
                 child: DiagonalStripePlaceholder(
-                  colors: party.isPrivate ? const [Color(0xFF1C1622), Color(0xFF151020)] : const [Color(0xFF1D1730), Color(0xFF161126)],
+                  colors: rsvp.isPrivate ? const [Color(0xFF1C1622), Color(0xFF151020)] : const [Color(0xFF1D1730), Color(0xFF161126)],
                   label: 'cover',
                 ),
               ),
@@ -194,23 +232,23 @@ class _EventsScreenState extends State<EventsScreen> {
                   children: [
                     Row(
                       children: [
-                        PrivacyBadge(type: party.type),
+                        PrivacyBadge(type: rsvp.isPrivate ? MpPartyType.private : MpPartyType.public),
                         const SizedBox(width: 5),
-                        Text(party.isPrivate ? 'ΚΑΛΕΣΜΕΝΟΣ' : 'ΕΝΔΙΑΦΕΡΟΜΑΙ',
+                        Text(rsvp.rsvpStatus == 'going' ? 'ΠΑΩ' : 'ΜΕ ΕΝΔΙΑΦΕΡΕΙ',
                             style: AppTextStyles.mono(size: 9, color: AppColors.textAlpha(0.45))),
                       ],
                     ),
                     const SizedBox(height: 3),
-                    Text(party.name, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: -0.2)),
+                    Text(rsvp.title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: -0.2)),
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
-                      child: Text('${party.time} · ${party.host}',
+                      child: Text(formatPartyStart(rsvp.startsAt),
                           maxLines: 1, overflow: TextOverflow.ellipsis,
                           style: TextStyle(fontSize: 11.5, color: AppColors.textAlpha(0.55))),
                     ),
                     Padding(
                       padding: const EdgeInsets.only(top: 7),
-                      child: Text(party.crowd, style: TextStyle(fontSize: 10.5, color: AppColors.textAlpha(0.5))),
+                      child: Text(crowd, style: TextStyle(fontSize: 10.5, color: AppColors.textAlpha(0.5))),
                     ),
                   ],
                 ),
@@ -222,49 +260,27 @@ class _EventsScreenState extends State<EventsScreen> {
     );
   }
 
-  Widget _pastSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 2, bottom: 9),
-          child: Text('ΠΕΡΑΣΜΕΝΑ', style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.35))),
-        ),
-        Opacity(
-          opacity: 0.6,
-          child: Container(
-            padding: const EdgeInsets.all(11),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.02),
-              borderRadius: BorderRadius.circular(15),
-              border: Border.all(color: AppColors.hairline),
+  Widget _errorState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 30),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Δεν μπορέσαμε να φορτώσουμε τα events σου.',
+                textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: AppColors.textAlpha(0.6))),
+            const SizedBox(height: 12),
+            GestureDetector(
+              onTap: _reloadRsvps,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 11),
+                decoration: BoxDecoration(gradient: AppColors.purpleGradient, borderRadius: BorderRadius.circular(12)),
+                child: const Text('Δοκίμασε ξανά', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+              ),
             ),
-            child: Row(
-              children: [
-                Container(
-                  width: 52,
-                  height: 52,
-                  clipBehavior: Clip.antiAlias,
-                  decoration: BoxDecoration(borderRadius: BorderRadius.circular(11)),
-                  child: const DiagonalStripePlaceholder(colors: [Color(0xFF191521), Color(0xFF141020)]),
-                ),
-                const SizedBox(width: 11),
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Kápsimo x Λευτέρης', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
-                      SizedBox(height: 2),
-                      Text('Χθες · Γκάζι · 4 φωτό σου στο story',
-                          style: TextStyle(fontSize: 11.5, color: Color(0x73F4F1F8))),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
+          ],
         ),
-      ],
+      ),
     );
   }
 
