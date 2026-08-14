@@ -12,14 +12,14 @@ Edge Functions). Local dev via Supabase CLI (`supabase/config.toml`).
 
 Product shape: a map-first party app. Public parties are discoverable near a
 user; private parties are invite-only and invisible to everyone else,
-including on the map. Hosts create parties, invite friends, run a group chat
-and a story per party. Social graph (friends/follows/blocks) gates
+including on the map. Hosts create parties, invite the people they follow,
+run a group chat and a story per party. Social graph (follows/blocks) gates
 visibility everywhere.
 
 State today: `profiles`, `parties`, `invitations` exist with RLS and a single
 RPC, `get_parties_near_user`, that the map screen calls live. Everything else
-in the Flutter app — rsvps/interest, likes, chat, stories, the friend list,
-follow state, map-visibility toggle — is in-memory mock state in
+in the Flutter app — rsvps/interest, likes, chat, stories, the follow list
+and follow state, map-visibility toggle — is in-memory mock state in
 `lib/state/mp_store.dart` or hardcoded const lists in `lib/models/`. Each
 phase below replaces one slice of that mock state with a real table + RLS
 policy + RPC and deletes the corresponding mock code.
@@ -57,7 +57,7 @@ structurally impossible, not just unlikely.
    inside it. Unqualified search_path on a definer function is a privilege-
    escalation vector.
 4. **No duplicated visibility logic.** One helper per visibility rule
-   (`can_access_party`, `is_blocked`, `are_friends`, …), every policy and RPC
+   (`can_access_party`, `is_blocked`, …), every policy and RPC
    that needs that rule calls the helper. Phase 4 formalizes
    `can_access_party`; Phase 3's block check retrofits into every policy
    that existed before it, not just new ones.
@@ -143,22 +143,43 @@ calling Supabase from widgets directly.
 
 ## Phase 3 — Social graph & blocks
 
-### 3.1 Follows vs friendships
+### 3.1 Follows only — why there is no `friendships` table
 
-Not interchangeable. `follows` is one-directional and asymmetric (following
-a venue/host account, no reciprocity required). `friendships` is symmetric
-and mutual (both sides see each other's private parties per the invite
-flow, per Phase 8's `invite_policy`). A follow does not grant any private-
-party visibility; a friendship does not imply a follow. Both tables are
-needed; neither substitutes for the other.
+**This section was reversed during the Phase 3 session and the schema
+follows the decision below, not the original argument. Do not "restore" a
+`friendships` table in a later phase without an explicit decision to change
+product direction.**
 
-Deliverables: `follows`, `friendships`, `are_friends(a, b)` (checks both
-directions), `blocks` + `is_blocked(a, b)`. The critical part: retrofit
-`is_blocked` into every existing policy on `parties`, `invitations`, and
-`profiles` — not just new tables — so a block means the blocked party's
-parties disappear from the blocker's map, they can't be invited, and
-neither shows up in the other's search. List every existing policy and mark
-which ones change before editing any of them.
+The original plan called for `follows` *and* `friendships` as
+non-interchangeable tables: asymmetric following for venue/host accounts,
+plus a symmetric mutual friendship that granted private-party visibility.
+That was rejected in favour of an **Instagram-shaped graph**: `follows` is
+one-directional, asymmetric, needs no reciprocity, and is the entire social
+graph. There is no `friendships` table, no request/accept flow, and no
+`are_friends()` helper.
+
+What this buys: one table instead of two, no accept-state machine, no
+ambiguity about whether a mutual follow "is" a friendship. What it costs:
+there is no mutual-only visibility tier, so any feature that wants one has
+to define it in follow terms and say so explicitly.
+
+The load-bearing consequence: **a follow grants no private-party visibility
+whatsoever.** Private-party access comes from `invitations` and nothing
+else. Following someone means you see their public activity and they appear
+in your invite picker when *you* host — it never means you can see their
+private parties. This is stricter than the original friendship rule and is
+what keeps the privacy model unchanged from Phase 0.
+
+Deliverables: `follows`, `blocks` + `is_blocked(a, b)` (symmetric — one call
+answers both directions). Denormalized `follower_count`/`following_count` on
+`profiles` via trigger. Blocking deletes the follow edges both ways and the
+`follows` INSERT policy prevents re-following until the block is lifted.
+
+The critical part: retrofit `is_blocked` into every existing policy on
+`parties`, `invitations`, and `profiles` — not just new tables — so a block
+means the blocked party's parties disappear from the blocker's map, they
+can't be invited, and neither shows up in the other's search. List every
+existing policy and mark which ones change before editing any of them.
 
 Flutter half: replace the const `mpFriends` list and the host wizard's
 static friend picker with real queries; replace `MpStore.toggleFollow`.
@@ -260,6 +281,12 @@ produces a notification in under 60s, no duplicates, quiet hours respected.
 policies — `invite_policy` inside the `invitations` insert policy,
 `map_visibility` inside `get_parties_near_user` — never only checked
 client-side, a UI toggle with no server enforcement is privacy theatre.
+
+Both tiers must be expressed in follow terms, since 3.1 removed the
+friendship concept: `map_visibility` as public / followers / private, and
+`invite_policy` as anyone / only people I follow. The exact tier names are
+a decision for this phase — Phase 3 only removed the dead `friends`
+vocabulary, it did not settle what replaces it.
 Wire the "ΙΔΙΩΤΙΚΟΤΗΤΑ" toggles to these columns, replacing
 `MpStore.mapVisible`. Stats tiles become an aggregate RPC over
 `rsvps`/`parties`/`stories` — measure it against seeded data; if slow,

@@ -187,20 +187,31 @@ Show me a diff summary of what shrank in mp_store.dart.
 Task: Phase 3 (Social graph & blocks) from docs/backend-plan.md.
 
 Deliverables:
-1. follows and friendships tables per the plan. Both are needed and they
-   are not interchangeable — read 3.1 for why.
-2. are_friends(a, b) helper covering both directions.
-3. blocks table + is_blocked(a, b) helper.
+1. follows table only — asymmetric, Instagram-style, no reciprocity. There
+   is deliberately NO friendships table and no are_friends helper; read 3.1
+   for why, including the note that 3.1 was reversed on purpose.
+2. Denormalized follower_count / following_count on profiles via trigger.
+3. blocks table + is_blocked(a, b) helper, symmetric in both directions.
+   Blocking must delete the follow edges both ways and prevent re-following
+   until the block is lifted.
 4. THE CRITICAL PART: retrofit is_blocked into the EXISTING policies on
    parties, invitations and profiles — not just the new tables. A block must
    mean: I don't see their parties on the map, they can't invite me, we
    don't appear in each other's search. Go through every existing policy one
    by one and tell me which ones you changed and why.
-5. RLS: friends visible to each other, follow counts public.
+5. RLS: follow edges and follow counts public, with blocked pairs filtered
+   out of both. Blocks readable only by the blocker — the blocked user must
+   never be able to enumerate who blocked them.
 6. Flutter: replace the const mpFriends list and the host wizard's static
-   friend picker with real queries. Replace MpStore.toggleFollow.
+   friend picker with real queries (the picker lists who you follow, and
+   must finally pass real uuids to create_party_with_invites — it has been
+   sending an empty array). Replace MpStore.toggleFollow.
 7. pgTAP with a blocked persona asserted against EVERY policy that exists at
-   this point, including the ones from Phases 1 and 2.
+   this point, including the ones from Phases 0, 1 and 2. Phase 1 ships in
+   the same batch as this phase, so check its helpers too — anything that
+   reads public.profiles without security definer now runs under the
+   narrowed, block-filtered SELECT policy and may quietly return the wrong
+   answer.
 
 Start by listing every existing RLS policy in the repo and marking which
 ones need the block check. Show me that list before you edit anything.
@@ -379,8 +390,8 @@ Task: Phase 8 (Profile screen backing) from docs/backend-plan.md.
    list the options with their tradeoffs and tell me what a v1 could look
    like. I'll decide.
 
-pgTAP: a user with map_visibility = 'friends' does not appear in the map RPC
-for a stranger.
+pgTAP: a user with map_visibility = 'followers' does not appear in the map
+RPC for a stranger who does not follow them.
 ```
 
 ---

@@ -3,7 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../../data/party_repository.dart';
-import '../../models/mp_friend.dart';
+import '../../data/social_repository.dart';
+import '../../models/profile.dart';
 import '../../utils/greek_date.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
@@ -19,13 +20,19 @@ class HostWizardScreen extends StatefulWidget {
 
 class _HostWizardScreenState extends State<HostWizardScreen> {
   final _repository = PartyRepository();
+  final _social = SocialRepository();
 
   int _step = 1;
   bool _private = true;
   bool _copied = false;
   bool _submitting = false;
   String? _submitError;
-  final Set<String> _invited = {'eleni', 'aris'};
+
+  /// Real `profiles.id` uuids now, not mock slugs — these go straight into
+  /// `create_party_with_invites`.
+  final Set<String> _invited = {};
+
+  late Future<List<Profile>> _following;
 
   final _nameController = TextEditingController(text: 'Ταράτσα στου Θανάση');
   final _addressController = TextEditingController(text: 'Ζησιμοπούλου 8, Νέα Σμύρνη');
@@ -44,6 +51,15 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
       );
 
   static const _titles = ['Λεπτομέρειες', 'Ποιος το βλέπει;', 'Κάλεσε κόσμο', 'Έτοιμο;'];
+
+  @override
+  void initState() {
+    super.initState();
+    // Kicked off once here rather than in build(): a FutureBuilder fed
+    // straight from a method call re-queries on every rebuild, and this
+    // screen rebuilds on each keystroke and step change.
+    _following = _social.fetchFollowing();
+  }
 
   String get _ctaLabel {
     switch (_step) {
@@ -85,8 +101,6 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
     });
     try {
       final position = await _resolveLocation();
-      // mpFriends is still mock data (no real profile ids yet), so invites
-      // stay empty until Phase where friends ship real.
       await _repository.createPartyWithInvites(
         party: {
           'title': _nameController.text.trim(),
@@ -96,6 +110,10 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
           'starts_at': _startsAt.toUtc().toIso8601String(),
           'is_private': _private,
         },
+        // Anyone here that the host has a block with is dropped server-side
+        // by create_party_with_invites, so the count on the done screen can
+        // legitimately be higher than the invitations actually written.
+        inviteeIds: _invited.toList(),
       );
       if (!mounted) return;
       Navigator.of(context).push(MaterialPageRoute(builder: (_) => _HostDoneScreen(invitedCount: _invited.length)));
@@ -520,18 +538,51 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('ΦΙΛΟΙ', style: AppTextStyles.mono(size: 10, color: AppColors.textAlpha(0.45))),
+              Text('ΑΚΟΛΟΥΘΕΙΣ', style: AppTextStyles.mono(size: 10, color: AppColors.textAlpha(0.45))),
               Text('${_invited.length} επιλεγμένοι', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.purpleLight)),
             ],
           ),
         ),
         const SizedBox(height: 9),
-        for (final f in mpFriends) _friendRow(f),
+        FutureBuilder<List<Profile>>(
+          future: _following,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Padding(
+                padding: EdgeInsets.symmetric(vertical: 22),
+                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+              );
+            }
+            if (snapshot.hasError) {
+              return _pickerNotice('Δεν φόρτωσε η λίστα. Δοκίμασε ξανά.');
+            }
+            final people = snapshot.data ?? const <Profile>[];
+            if (people.isEmpty) {
+              return _pickerNotice(
+                'Δεν ακολουθείς κανέναν ακόμα. Το πάρτι μπορεί να δημιουργηθεί και να μοιραστεί με το λινκ.',
+              );
+            }
+            return Column(children: [for (final p in people) _personRow(p)]);
+          },
+        ),
       ],
     );
   }
 
-  Widget _friendRow(MpFriend f) {
+  Widget _pickerNotice(String message) {
+    return Container(
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.035),
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(color: AppColors.hairline),
+      ),
+      child: Text(message,
+          style: TextStyle(fontSize: 12, height: 1.45, color: AppColors.textAlpha(0.5))),
+    );
+  }
+
+  Widget _personRow(Profile f) {
     final selected = _invited.contains(f.id);
     return Padding(
       padding: const EdgeInsets.only(bottom: 7),
@@ -547,15 +598,16 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
                 height: 38,
                 clipBehavior: Clip.antiAlias,
                 decoration: const BoxDecoration(shape: BoxShape.circle),
-                child: DiagonalStripePlaceholder(colors: f.colors),
+                child: DiagonalStripePlaceholder(colors: f.placeholderColors),
               ),
               const SizedBox(width: 11),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(f.name, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
-                    Text(f.sub, style: TextStyle(fontSize: 10.5, color: AppColors.textAlpha(0.42))),
+                    Text(f.username, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+                    Text('${f.followerCount} ακόλουθοι',
+                        style: TextStyle(fontSize: 10.5, color: AppColors.textAlpha(0.42))),
                   ],
                 ),
               ),

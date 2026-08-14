@@ -247,8 +247,20 @@ class FeedScreen extends StatelessWidget {
   }
 }
 
-class _KapsimoCard extends StatelessWidget {
+class _KapsimoCard extends StatefulWidget {
   const _KapsimoCard();
+
+  @override
+  State<_KapsimoCard> createState() => _KapsimoCardState();
+}
+
+class _KapsimoCardState extends State<_KapsimoCard> {
+  /// Local, not wired to `follows`. This whole card is a hardcoded design
+  /// mock — "Kápsimo" has no `profiles` row, so there is no id to follow.
+  /// Phase 4 replaces the card with real `party_posts` rows, and the button
+  /// becomes a [FollowButton] on the real author then. Keeping it fake and
+  /// obviously local beats inventing a placeholder uuid that would 42501.
+  bool _following = false;
 
   @override
   Widget build(BuildContext context) {
@@ -290,15 +302,15 @@ class _KapsimoCard extends StatelessWidget {
                   ),
                 ),
                 OutlinedButton(
-                  onPressed: store.toggleFollow,
+                  onPressed: () => setState(() => _following = !_following),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
-                    backgroundColor: store.following ? Colors.white.withValues(alpha: 0.08) : null,
-                    side: store.following ? BorderSide.none : const BorderSide(color: AppColors.purple),
+                    backgroundColor: _following ? Colors.white.withValues(alpha: 0.08) : null,
+                    side: _following ? BorderSide.none : const BorderSide(color: AppColors.purple),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(99)),
-                    foregroundColor: store.following ? AppColors.textAlpha(0.6) : AppColors.purpleLight,
+                    foregroundColor: _following ? AppColors.textAlpha(0.6) : AppColors.purpleLight,
                   ),
-                  child: Text(store.following ? 'Ακολουθείς' : 'Ακολούθησε',
+                  child: Text(_following ? 'Ακολουθείς' : 'Ακολούθησε',
                       style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
                 ),
               ],
