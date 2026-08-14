@@ -67,7 +67,16 @@ insert into public.parties (id, host_id, title, description, location, starts_at
   -- Megara (~33km from Athens center)
   (gen_random_uuid(), '66666666-6666-6666-6666-666666666666', 'Megara Town Square Fiesta', 'Local festival in the square.', st_point(23.3419, 37.9985)::geography, now() + interval '9 days', false, false, 'standard'),
   ('aaaaaaaa-0000-0000-0000-000000000019', '11111111-1111-1111-1111-111111111111', 'Megara Port Bonfire', 'Small invite-only bonfire by the port.', st_point(23.3378, 37.9928)::geography, now() + interval '10 days', true, false, 'standard'),
-  (gen_random_uuid(), '11111111-1111-1111-1111-111111111111', 'Megara Hilltop Mega Rave', 'Sponsored mega rave on the hilltop.', st_point(23.3465, 38.0050)::geography, now() + interval '11 days', false, true, 'mega');
+  (gen_random_uuid(), '11111111-1111-1111-1111-111111111111', 'Megara Hilltop Mega Rave', 'Sponsored mega rave on the hilltop.', st_point(23.3465, 38.0050)::geography, now() + interval '11 days', false, true, 'mega'),
+
+  -- blocked_user's two parties, both in the Syntagma cluster so the Phase 3
+  -- block tests can assert against get_parties_near_user's proximity filter
+  -- as well as the plain SELECT policy. One public, one private, so a block
+  -- is provably stronger than the privacy flag on its own: the public one
+  -- must disappear for a blocked viewer even though `not is_private` would
+  -- otherwise let anyone see it.
+  ('aaaaaaaa-0000-0000-0000-000000000021', '55555555-5555-5555-5555-555555555555', 'Blocked User Open Night', 'Public party hosted by blocked_user.', st_point(23.7350, 37.9756)::geography, now() + interval '2 days', false, false, 'standard'),
+  ('aaaaaaaa-0000-0000-0000-000000000022', '55555555-5555-5555-5555-555555555555', 'Blocked User Private Loft', 'Private party hosted by blocked_user, host is invited.', st_point(23.7352, 37.9757)::geography, now() + interval '3 days', true, false, 'standard');
 
 -- ============================================================
 -- Invitations
@@ -81,7 +90,13 @@ insert into public.invitations (party_id, guest_id) values
   ('aaaaaaaa-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222'), -- invitee -> Rooftop Pregame (PARTY_PRIVATE)
   ('aaaaaaaa-0000-0000-0000-000000000001', '66666666-6666-6666-6666-666666666666'), -- second_host -> Rooftop Pregame (PARTY_PRIVATE)
   ('aaaaaaaa-0000-0000-0000-000000000013', '11111111-1111-1111-1111-111111111111'), -- host -> Ambelokipi Loft
-  ('aaaaaaaa-0000-0000-0000-000000000019', '66666666-6666-6666-6666-666666666666'); -- second_host -> Megara Port Bonfire
+  ('aaaaaaaa-0000-0000-0000-000000000019', '66666666-6666-6666-6666-666666666666'), -- second_host -> Megara Port Bonfire
+  ('aaaaaaaa-0000-0000-0000-000000000022', '11111111-1111-1111-1111-111111111111'); -- host -> Blocked User Private Loft
+
+-- Note: no rows are seeded into public.follows or public.blocks. Both are
+-- created inside the Phase 3 test transaction instead, so the counter and
+-- purge triggers are exercised for real and the earlier suites keep seeing
+-- exactly the graph they were written against.
 
 -- ============================================================
 -- Test harness helpers
