@@ -17,13 +17,22 @@ insert into auth.users (
   ('00000000-0000-0000-0000-000000000000', '55555555-5555-5555-5555-555555555555', 'authenticated', 'authenticated', 'blocked_user@myparty.local', crypt('password123', gen_salt('bf')), current_timestamp, '{"provider":"email","providers":["email"]}', '{}', current_timestamp, current_timestamp),
   ('00000000-0000-0000-0000-000000000000', '66666666-6666-6666-6666-666666666666', 'authenticated', 'authenticated', 'second_host@myparty.local', crypt('password123', gen_salt('bf')), current_timestamp, '{"provider":"email","providers":["email"]}', '{}', current_timestamp, current_timestamp);
 
-insert into public.profiles (id, username, credibility_score) values
-  ('11111111-1111-1111-1111-111111111111', 'host', 8),
-  ('22222222-2222-2222-2222-222222222222', 'invitee', 5),
-  ('33333333-3333-3333-3333-333333333333', 'friend_not_invited', 5),
-  ('44444444-4444-4444-4444-444444444444', 'stranger', 3),
-  ('55555555-5555-5555-5555-555555555555', 'blocked_user', 1),
-  ('66666666-6666-6666-6666-666666666666', 'second_host', 7);
+-- The auth.users insert above already fired handle_new_user() (Phase 1,
+-- 20260813084353_profile_on_signup.sql) and created a placeholder profile
+-- row for each persona. Upsert over those rows with the real seeded
+-- identity instead of a plain insert, and mark onboarding complete since
+-- these personas have real chosen usernames, not placeholders.
+insert into public.profiles (id, username, credibility_score, onboarding_completed_at) values
+  ('11111111-1111-1111-1111-111111111111', 'host', 8, now()),
+  ('22222222-2222-2222-2222-222222222222', 'invitee', 5, now()),
+  ('33333333-3333-3333-3333-333333333333', 'friend_not_invited', 5, now()),
+  ('44444444-4444-4444-4444-444444444444', 'stranger', 3, now()),
+  ('55555555-5555-5555-5555-555555555555', 'blocked_user', 1, now()),
+  ('66666666-6666-6666-6666-666666666666', 'second_host', 7, now())
+on conflict (id) do update set
+  username = excluded.username,
+  credibility_score = excluded.credibility_score,
+  onboarding_completed_at = excluded.onboarding_completed_at;
 
 -- ============================================================
 -- Parties
