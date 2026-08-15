@@ -119,22 +119,17 @@ class PartyCard extends StatelessWidget {
                     _hypeBumpButton(accent: accent, onTap: () => store.bump(partyId, 5)),
                   ],
                 ),
+                // The like pill that used to sit here is gone. Likes are a
+                // property of a post (`post_likes`), not of a party — there
+                // is no parties.like_count in the schema and no phase that
+                // adds one, so it was a counter that could only ever stay
+                // mock. `MpStore._likes`, which backed it, went with it.
                 Padding(
                   padding: const EdgeInsets.only(top: 12),
-                  child: Row(
-                    children: [
-                      _reactionPill(
-                        onTap: () => store.like(partyId, hypeBump: 3),
-                        gradientDot: true,
-                        label: '${store.likesOf(partyId)}',
-                      ),
-                      const SizedBox(width: 8),
-                      _reactionPill(
-                        onTap: () => showPartyDetailSheet(context, partyId),
-                        icon: Icons.chat_bubble_outline,
-                        label: '${party.commentCount}',
-                      ),
-                    ],
+                  child: _reactionPill(
+                    onTap: () => showPartyDetailSheet(context, partyId),
+                    icon: Icons.chat_bubble_outline,
+                    label: '${party.commentCount}',
                   ),
                 ),
                 Padding(
@@ -179,7 +174,7 @@ Widget _hypeBumpButton({required Color accent, required VoidCallback onTap}) {
   );
 }
 
-Widget _reactionPill({VoidCallback? onTap, IconData? icon, bool gradientDot = false, required String label}) {
+Widget _reactionPill({VoidCallback? onTap, required IconData icon, required String label}) {
   return GestureDetector(
     onTap: onTap,
     child: Container(
@@ -192,10 +187,7 @@ Widget _reactionPill({VoidCallback? onTap, IconData? icon, bool gradientDot = fa
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (gradientDot)
-            Container(width: 13, height: 13, decoration: const BoxDecoration(gradient: AppColors.likeGradient, shape: BoxShape.circle))
-          else if (icon != null)
-            Icon(icon, size: 15, color: AppColors.textAlpha(0.7)),
+          Icon(icon, size: 15, color: AppColors.textAlpha(0.7)),
           const SizedBox(width: 6),
           Text(label, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
         ],

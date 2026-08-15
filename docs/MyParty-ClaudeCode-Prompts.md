@@ -219,7 +219,17 @@ ones need the block check. Show me that list before you edit anything.
 
 ---
 
-## Phase 4 — Feed, reactions & reports
+## Phase 4 — Feed, reactions & reports — DONE
+
+Step 1 below turned out to be a no-op: `can_access_party` had already been
+extracted in `20260812121153` and the `parties` policy already read
+`using (can_access_party(id))`. The signature stayed one-arg — see rule 4 in
+`docs/backend-plan.md` §3.
+
+Shipped as `20260814112530` (tables + counters + `hide_post`/`hide_comment`),
+`20260814112531` (`get_feed`), `20260814112532` (`reports`),
+`20260814114721` (`get_post_comments`), and 33 pgTAP assertions in
+`05_feed_posts_and_reports.test.sql`.
 
 ```
 Task: Phase 4 (Feed, reactions & reports) from docs/backend-plan.md.
@@ -245,6 +255,17 @@ Deliverables:
    the join goes through follows.followee_id = parties.host_id. Gated by
    can_access_party. KEYSET pagination on (created_at, id) with the matching
    composite index. Do not use offset.
+1. First, extract can_access_party(p_party_id) as a helper and REFACTOR the
+   existing parties RLS policy to use it. Do this before adding anything new
+   — the feed must not reimplement the visibility rule, and Phases 5 and 6
+   will reuse the same helper. One implementation, one place to change.
+2. party_posts, post_likes, post_comments. Denormalized like_count and
+   comment_count via trigger. Soft-delete columns (hidden_at, hidden_by,
+   hidden_reason) on all three — and hiding a row must take it out of the
+   counter too, not just out of the SELECT policy.
+3. Feed RPC: posts from parties the user follows, attended, or was invited
+   to — gated by can_access_party. KEYSET pagination on (created_at, id)
+   with the matching composite index. Do not use offset.
 4. reports table: reporter_id, target_type, target_id, reason, status,
    created_at. No admin UI needed — the table plus the ability to soft-delete
    via SQL is enough for now.
@@ -252,6 +273,9 @@ Deliverables:
    report action to every UGC surface.
 6. pgTAP: a post on a private party is invisible to a non-invitee; a blocked
    user's posts never appear in the feed.
+
+Note: can_access_party only checks the party's HOST. Every UGC table needs
+its own is_blocked check on the AUTHOR as well.
 
 Do step 1 first and show me the refactor before continuing.
 ```
@@ -266,8 +290,10 @@ Do step 1 first and show me the refactor before continuing.
 Task: Phase 6 (Group chat) from docs/backend-plan.md.
 
 Deliverables:
-1. messages table per the plan, RLS gated on can_access_party (the helper
-   from Phase 4 — do not reimplement the logic).
+1. messages table per the plan, RLS gated on can_access_party (the existing
+   helper — do not reimplement the logic). It checks only the party's HOST,
+   so messages also needs its own is_blocked term on the message author, the
+   way party_posts does.
 2. Realtime via BROADCAST FROM DATABASE, not postgres_changes. Read the
    Phase 6 section for why: postgres_changes evaluates RLS per subscriber
    per event, which is the wrong scaling shape for group chat. Implement a
@@ -292,12 +318,16 @@ Task: Phase 5 (Stories) from docs/backend-plan.md.
 
 Deliverables:
 1. stories (party_id, author_id, media_path, expires_at) + story_views.
-   Visibility via can_access_party.
+   Visibility via can_access_party, plus its own is_blocked check on
+   author_id — the helper only covers the party's host.
 2. Signed-URL upload flow into the story-media bucket created in Phase 0.
    The client must never write to the bucket directly.
 3. pg_cron cleanup that BOTH hides expired rows AND deletes the underlying
    storage objects. The second half is routinely forgotten and then you pay
-   storage forever — I want to see the object deletion explicitly.
+   storage forever — I want to see the object deletion explicitly. The hide
+   half is a security definer RPC, not an UPDATE policy — see the
+   soft-delete rule in backend-plan.md §3 for why a client-side one cannot
+   work.
 4. Rate limit: N stories per user per hour, enforced server-side.
 5. Flutter: replace the const mpStory list and StoryViewerScreen's static
    frames.

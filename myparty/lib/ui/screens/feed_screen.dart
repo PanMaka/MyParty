@@ -1,17 +1,149 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 
+import '../../data/feed_repository.dart';
+import '../../models/feed_post.dart';
 import '../../models/mp_party.dart';
-import '../../state/mp_store.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
-import '../widgets/party_detail_sheet.dart';
-import '../widgets/privacy_badge.dart';
+import '../widgets/feed_post_card.dart';
 import '../widgets/story_picker_sheet.dart';
 import 'story_viewer_screen.dart';
 
-class FeedScreen extends StatelessWidget {
-  const FeedScreen({super.key});
+/// The feed. The story row above it is still the const `mpStory` mock — that
+/// ships real in Phase 5 — but everything below the divider is now
+/// `public.get_feed`, keyset-paginated.
+class FeedScreen extends StatefulWidget {
+  const FeedScreen({super.key, this.repository});
+
+  /// Injectable so widget tests can drive the list without a live Supabase
+  /// client, the same way [FollowButton] and the profile screen take one.
+  final FeedRepository? repository;
+
+  @override
+  State<FeedScreen> createState() => _FeedScreenState();
+}
+
+class _FeedScreenState extends State<FeedScreen> {
+  late final FeedRepository _repo = widget.repository ?? FeedRepository();
+  final _scroll = ScrollController();
+
+  final List<FeedPost> _posts = [];
+  bool _loading = true;
+  bool _loadingMore = false;
+  bool _hasMore = true;
+  bool _failed = false;
+
+  static const _pageSize = 20;
+
+  @override
+  void initState() {
+    super.initState();
+    _scroll.addListener(_onScroll);
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (!_scroll.hasClients || _loadingMore || !_hasMore || _loading) return;
+    if (_scroll.position.pixels > _scroll.position.maxScrollExtent - 400) {
+      _loadMore();
+    }
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _failed = false;
+    });
+
+    try {
+      final page = await _repo.fetchFeed(limit: _pageSize);
+      if (!mounted) return;
+      setState(() {
+        _posts
+          ..clear()
+          ..addAll(page);
+        // A short page means the end. Asking for one more row to be sure
+        // would cost a round trip on every refresh to learn something the
+        // next scroll finds out for free.
+        _hasMore = page.length >= _pageSize;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _failed = true;
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _loadMore() async {
+    if (_posts.isEmpty) return;
+    setState(() => _loadingMore = true);
+
+    try {
+      // The cursor is the last row we hold, not a page number: rows inserted
+      // above it while the user reads cannot shift this page's boundary the
+      // way an offset would.
+      final page = await _repo.fetchFeed(after: _posts.last, limit: _pageSize);
+      if (!mounted) return;
+      setState(() {
+        _posts.addAll(page);
+        _hasMore = page.length >= _pageSize;
+        _loadingMore = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _hasMore = false;
+        _loadingMore = false;
+      });
+    }
+  }
+
+  /// Optimistic, then reconciled: the pill moves on tap, and rolls back if
+  /// the insert is refused (the post's party can stop being accessible
+  /// between the fetch and the tap — a block, or a party going private).
+  Future<void> _toggleLike(int index) async {
+    final before = _posts[index];
+    final liked = !before.likedByMe;
+    setState(() => _posts[index] = before.withLike(liked));
+
+    try {
+      if (liked) {
+        await _repo.like(before.postId);
+      } else {
+        await _repo.unlike(before.postId);
+      }
+    } catch (_) {
+      if (!mounted) return;
+      final at = _posts.indexWhere((p) => p.postId == before.postId);
+      if (at != -1) setState(() => _posts[at] = before);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Δεν έγινε. Δοκίμασε ξανά.'), behavior: SnackBarBehavior.floating),
+      );
+    }
+  }
+
+  void _bumpCommentCount(String postId, int delta) {
+    final at = _posts.indexWhere((p) => p.postId == postId);
+    if (at == -1) return;
+    setState(() {
+      _posts[at] = _posts[at].copyWith(
+        commentCount: (_posts[at].commentCount + delta).clamp(0, 1 << 30),
+      );
+    });
+  }
+
+  void _removePost(String postId) {
+    setState(() => _posts.removeWhere((p) => p.postId == postId));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -19,24 +151,95 @@ class FeedScreen extends StatelessWidget {
       backgroundColor: AppColors.bg,
       body: SafeArea(
         bottom: false,
-        child: ListView(
-          padding: const EdgeInsets.only(bottom: 96),
-          children: [
-            _header(context),
-            const SizedBox(height: 2),
-            _storyRow(context),
-            const SizedBox(height: 16),
-            Container(height: 1, color: Colors.white.withValues(alpha: 0.07), margin: const EdgeInsets.only(bottom: 16)),
+        child: RefreshIndicator(
+          onRefresh: _load,
+          child: ListView(
+            key: const ValueKey('feed-list'),
+            controller: _scroll,
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.only(bottom: 96),
+            children: [
+              _header(context),
+              const SizedBox(height: 2),
+              _storyRow(context),
+              const SizedBox(height: 16),
+              Container(height: 1, color: Colors.white.withValues(alpha: 0.07), margin: const EdgeInsets.only(bottom: 16)),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                child: Column(children: _feedBody()),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _feedBody() {
+    if (_loading) {
+      return const [
+        Padding(
+          padding: EdgeInsets.symmetric(vertical: 48),
+          child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+        ),
+      ];
+    }
+
+    if (_failed) {
+      return [_notice('Δεν φόρτωσε το feed.', action: ('Δοκίμασε ξανά', _load))];
+    }
+
+    if (_posts.isEmpty) {
+      return [
+        _notice(
+          'Ήσυχα εδώ.\nΑκολούθησε κόσμο ή δήλωσε συμμετοχή σε πάρτι\nκαι θα γεμίσει.',
+        ),
+      ];
+    }
+
+    return [
+      for (var i = 0; i < _posts.length; i++)
+        FeedPostCard(
+          key: ValueKey(_posts[i].postId),
+          post: _posts[i],
+          repository: _repo,
+          currentUserId: _repo.currentUserId,
+          onToggleLike: () => _toggleLike(i),
+          onCommentCountChanged: (delta) => _bumpCommentCount(_posts[i].postId, delta),
+          onHidden: () => _removePost(_posts[i].postId),
+        ),
+      if (_loadingMore)
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 18),
+          child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+        ),
+    ];
+  }
+
+  Widget _notice(String message, {(String, VoidCallback)? action}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 48),
+      child: Column(
+        children: [
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 13, height: 1.5, color: AppColors.textAlpha(0.55)),
+          ),
+          if (action != null)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              child: Column(
-                children: [
-                  _KapsimoCard(),
-                ],
+              padding: const EdgeInsets.only(top: 14),
+              child: OutlinedButton(
+                onPressed: action.$2,
+                style: OutlinedButton.styleFrom(
+                  side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(99)),
+                  foregroundColor: AppColors.text,
+                ),
+                child: Text(action.$1, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
               ),
             ),
-          ],
-        ),
+        ],
       ),
     );
   }
@@ -245,148 +448,4 @@ class FeedScreen extends StatelessWidget {
       ),
     );
   }
-}
-
-class _KapsimoCard extends StatefulWidget {
-  const _KapsimoCard();
-
-  @override
-  State<_KapsimoCard> createState() => _KapsimoCardState();
-}
-
-class _KapsimoCardState extends State<_KapsimoCard> {
-  /// Local, not wired to `follows`. This whole card is a hardcoded design
-  /// mock — "Kápsimo" has no `profiles` row, so there is no id to follow.
-  /// Phase 4 replaces the card with real `party_posts` rows, and the button
-  /// becomes a [FollowButton] on the real author then. Keeping it fake and
-  /// obviously local beats inventing a placeholder uuid that would 42501.
-  bool _following = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final store = context.watch<MpStore>();
-
-    return Container(
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.hairline),
-        color: Colors.white.withValues(alpha: 0.03),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(13),
-            child: Row(
-              children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  clipBehavior: Clip.antiAlias,
-                  decoration: BoxDecoration(borderRadius: BorderRadius.circular(11)),
-                  child: const DiagonalStripePlaceholder(colors: [Color(0xFF241E3C), Color(0xFF1B1630)], label: 'LOGO'),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(children: const [
-                        Text('Kápsimo', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
-                        SizedBox(width: 6),
-                        PrivacyBadge(type: MpPartyType.public),
-                      ]),
-                      Text('Χθες το βράδυ · Γκάζι', style: TextStyle(fontSize: 11.5, color: AppColors.textAlpha(0.5))),
-                    ],
-                  ),
-                ),
-                OutlinedButton(
-                  onPressed: () => setState(() => _following = !_following),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
-                    backgroundColor: _following ? Colors.white.withValues(alpha: 0.08) : null,
-                    side: _following ? BorderSide.none : const BorderSide(color: AppColors.purple),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(99)),
-                    foregroundColor: _following ? AppColors.textAlpha(0.6) : AppColors.purpleLight,
-                  ),
-                  child: Text(_following ? 'Ακολουθείς' : 'Ακολούθησε',
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
-                ),
-              ],
-            ),
-          ),
-          GestureDetector(
-            onTap: () => showPartyDetailSheet(context, 'kapsimo'),
-            child: SizedBox(
-              height: 190,
-              child: Row(
-                children: [
-                  Expanded(
-                    flex: 2,
-                    child: DiagonalStripePlaceholder(colors: const [Color(0xFF1A1522), Color(0xFF141020)], label: 'φωτό πίστας'),
-                  ),
-                  const SizedBox(width: 3),
-                  Expanded(
-                    child: Column(
-                      children: [
-                        Expanded(child: DiagonalStripePlaceholder(colors: const [Color(0xFF1A1522), Color(0xFF141020)], label: 'clip')),
-                        const SizedBox(height: 3),
-                        Expanded(child: DiagonalStripePlaceholder(colors: const [Color(0xFF1A1522), Color(0xFF141020)], label: '+14')),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(13, 12, 13, 14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Γέμισε μέχρι τις 04:00. Ευχαριστούμε όσους ήρθαν — την Παρασκευή ξανά με τον Λευτέρη στα decks.',
-                    style: TextStyle(fontSize: 13, height: 1.45, color: AppColors.textAlpha(0.85))),
-                Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: Row(
-                    children: [
-                      _reactionPill(onTap: () => store.like('kapsimo'), gradientDot: true, label: '${store.likesOf('kapsimo')}'),
-                      const SizedBox(width: 8),
-                      _reactionPill(onTap: null, icon: Icons.chat_bubble_outline, label: '27'),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-Widget _reactionPill({VoidCallback? onTap, IconData? icon, bool gradientDot = false, required String label}) {
-  return GestureDetector(
-    onTap: onTap,
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.hairline),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (gradientDot)
-            Container(width: 13, height: 13, decoration: const BoxDecoration(gradient: AppColors.likeGradient, shape: BoxShape.circle))
-          else if (icon != null)
-            Icon(icon, size: 15, color: AppColors.textAlpha(0.7)),
-          const SizedBox(width: 6),
-          Text(label, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
-        ],
-      ),
-    ),
-  );
 }

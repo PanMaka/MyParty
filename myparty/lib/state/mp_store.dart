@@ -27,7 +27,6 @@ class MpStore extends ChangeNotifier {
     'kapsimo': false,
     'nefeli': true,
   };
-  final Map<String, int> _likes = {'vinyl': 128, 'taratsa': 57, 'kapsimo': 214};
   final Map<String, bool> _invited = {
     'eleni': true,
     'aris': true,
@@ -43,7 +42,6 @@ class MpStore extends ChangeNotifier {
 
   int hypeOf(String id) => _hype[id] ?? 0;
   bool interestedIn(String id) => _interested[id] ?? false;
-  int likesOf(String id) => _likes[id] ?? 0;
   bool get mapVisible => _mapVisible;
   bool get copied => _copied;
   bool invited(String friendId) => _invited[friendId] ?? false;
@@ -51,12 +49,6 @@ class MpStore extends ChangeNotifier {
 
   void bump(String id, int amount) {
     _hype[id] = math.min(100, (_hype[id] ?? 0) + amount);
-    notifyListeners();
-  }
-
-  void like(String id, {int hypeBump = 0}) {
-    _likes[id] = (_likes[id] ?? 0) + 1;
-    if (hypeBump > 0) _hype[id] = math.min(100, (_hype[id] ?? 0) + hypeBump);
     notifyListeners();
   }
 
