@@ -1,23 +1,29 @@
 import 'package:flutter/material.dart';
 
 import '../../data/feed_repository.dart';
+import '../../data/story_repository.dart';
 import '../../models/feed_post.dart';
-import '../../models/mp_party.dart';
+import '../../models/story.dart';
+import '../../utils/greek_date.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
 import '../widgets/feed_post_card.dart';
 import '../widgets/story_picker_sheet.dart';
 import 'story_viewer_screen.dart';
 
-/// The feed. The story row above it is still the const `mpStory` mock — that
-/// ships real in Phase 5 — but everything below the divider is now
-/// `public.get_feed`, keyset-paginated.
+/// The feed: `public.get_feed` below the divider, `public.get_story_rails`
+/// above it. Both keyset/bounded, neither one a mock any more.
 class FeedScreen extends StatefulWidget {
-  const FeedScreen({super.key, this.repository});
+  const FeedScreen({super.key, this.repository, this.storyRepository});
 
   /// Injectable so widget tests can drive the list without a live Supabase
   /// client, the same way [FollowButton] and the profile screen take one.
   final FeedRepository? repository;
+
+  /// Separate from [repository] because the story row is a separate query with
+  /// a separate failure mode: an empty or broken rail must not take the feed
+  /// below it down with it.
+  final StoryRepository? storyRepository;
 
   @override
   State<FeedScreen> createState() => _FeedScreenState();
@@ -25,6 +31,7 @@ class FeedScreen extends StatefulWidget {
 
 class _FeedScreenState extends State<FeedScreen> {
   late final FeedRepository _repo = widget.repository ?? FeedRepository();
+  late final StoryRepository _stories = widget.storyRepository ?? StoryRepository();
   final _scroll = ScrollController();
 
   final List<FeedPost> _posts = [];
@@ -33,6 +40,12 @@ class _FeedScreenState extends State<FeedScreen> {
   bool _hasMore = true;
   bool _failed = false;
 
+  final List<StoryRail> _rails = [];
+
+  /// Cover URLs by story id. Signed, and only good for 60 seconds — they are
+  /// re-fetched whenever the rail is, never persisted.
+  Map<String, String> _railCovers = {};
+
   static const _pageSize = 20;
 
   @override
@@ -40,6 +53,32 @@ class _FeedScreenState extends State<FeedScreen> {
     super.initState();
     _scroll.addListener(_onScroll);
     _load();
+    _loadRails();
+  }
+
+  /// Deliberately not part of [_load]: the story row and the feed fail
+  /// independently, and a rail that cannot load should leave the feed alone
+  /// (and vice versa). It is also the reason nothing here touches `_failed`.
+  Future<void> _loadRails() async {
+    try {
+      final rails = await _stories.fetchRails();
+      final covers = await _stories.signedViewUrls(
+        rails.map((r) => r.coverStoryId).toList(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _rails
+          ..clear()
+          ..addAll(rails);
+        _railCovers = covers;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _rails.clear();
+        _railCovers = {};
+      });
+    }
   }
 
   @override
@@ -152,7 +191,7 @@ class _FeedScreenState extends State<FeedScreen> {
       body: SafeArea(
         bottom: false,
         child: RefreshIndicator(
-          onRefresh: _load,
+          onRefresh: () => Future.wait([_load(), _loadRails()]),
           child: ListView(
             key: const ValueKey('feed-list'),
             controller: _scroll,
@@ -254,7 +293,7 @@ class _FeedScreenState extends State<FeedScreen> {
           Row(
             children: [
               OutlinedButton(
-                onPressed: () => showStoryPickerSheet(context),
+                onPressed: _startStory,
                 style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                   side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
@@ -286,6 +325,14 @@ class _FeedScreenState extends State<FeedScreen> {
     );
   }
 
+  /// Opens the picker, and re-reads the rail if something was actually
+  /// uploaded — the new story is the party's newest frame, so the tile's cover
+  /// changes and a rail may appear that was not there before.
+  Future<void> _startStory() async {
+    final uploaded = await showStoryPickerSheet(context, repository: _stories);
+    if (uploaded == true && mounted) _loadRails();
+  }
+
   Widget _storyRow(BuildContext context) {
     return SizedBox(
       height: 146,
@@ -294,7 +341,7 @@ class _FeedScreenState extends State<FeedScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 16),
         children: [
           GestureDetector(
-            onTap: () => showStoryPickerSheet(context),
+            onTap: _startStory,
             child: Container(
               width: 104,
               margin: const EdgeInsets.only(right: 10),
@@ -319,33 +366,63 @@ class _FeedScreenState extends State<FeedScreen> {
               ),
             ),
           ),
-          _storyTile(context, 'taratsa', 'Ταράτσα στο Κουκάκι', 'Κουκάκι · 24 μέσα'),
-          _storyTile(context, 'vinyl', 'Techno Δευτέρα', 'Vinyl Room · 180 μέσα', venue: true),
-          _storyTile(context, 'maria', 'Γενέθλια Μαρίας', 'Εξάρχεια · 31 μέσα'),
-          _kapsimoStoryTile(context),
+          for (final rail in _rails) _storyTile(context, rail),
         ],
       ),
     );
   }
 
-  Widget _storyTile(BuildContext context, String id, String title, String sub, {bool venue = false}) {
-    final party = mpParties[id]!;
+  /// One party's tile: its newest frame as the cover, a bright ring while there
+  /// is something in it this user has not watched.
+  ///
+  /// The cover image is a 60-second signed URL like every other story frame —
+  /// there are no durable URLs into the `story-media` bucket — so a rail that
+  /// sits on screen long enough will fall back to the striped placeholder
+  /// rather than showing a broken image. Refreshing the feed re-signs it.
+  Widget _storyTile(BuildContext context, StoryRail rail) {
+    final accent = rail.isPrivate ? AppColors.pink : AppColors.purple;
+    final coverUrl = _railCovers[rail.coverStoryId];
+
     return GestureDetector(
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => StoryViewerScreen(partyId: id)),
-      ),
+      onTap: () async {
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => StoryViewerScreen(
+              partyId: rail.partyId,
+              partyTitle: rail.partyTitle,
+              isPrivate: rail.isPrivate,
+            ),
+          ),
+        );
+        // Watching the reel is what clears the ring, and it also may have
+        // emptied the rail (the author took their own frames down), so the row
+        // is re-read rather than patched locally.
+        if (mounted) _loadRails();
+      },
       child: Container(
         width: 104,
         margin: const EdgeInsets.only(right: 10),
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: party.isPrivate ? AppColors.pink : AppColors.purple, width: 2),
+          border: Border.all(
+            color: rail.hasUnseen ? accent : Colors.white.withValues(alpha: 0.16),
+            width: rail.hasUnseen ? 2 : 1,
+          ),
         ),
         child: Stack(
           fit: StackFit.expand,
           children: [
-            DiagonalStripePlaceholder(colors: party.isPrivate ? const [Color(0xFF1C1622), Color(0xFF151020)] : const [Color(0xFF191428), Color(0xFF130F20)]),
+            if (coverUrl != null)
+              Image.network(
+                coverUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => _coverPlaceholder(rail),
+                loadingBuilder: (_, child, progress) =>
+                    progress == null ? child : _coverPlaceholder(rail),
+              )
+            else
+              _coverPlaceholder(rail),
             DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
@@ -361,26 +438,27 @@ class _FeedScreenState extends State<FeedScreen> {
               left: 7,
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.7), borderRadius: BorderRadius.circular(99)),
-                child: Text('ΤΩΡΑ', style: AppTextStyles.mono(size: 8.5)),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.7),
+                  borderRadius: BorderRadius.circular(99),
+                ),
+                child: Text(formatPostAge(rail.latestAt.toUtc()), style: AppTextStyles.mono(size: 8.5)),
               ),
             ),
-            Positioned(
-              top: 7,
-              right: 7,
-              child: venue
-                  ? Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                      decoration: BoxDecoration(color: AppColors.purple.withValues(alpha: 0.92), borderRadius: BorderRadius.circular(5)),
-                      child: Text('VENUE', style: AppTextStyles.mono(size: 7.5)),
-                    )
-                  : Container(
-                      width: 16,
-                      height: 16,
-                      decoration: BoxDecoration(color: AppColors.pink.withValues(alpha: 0.9), borderRadius: BorderRadius.circular(5)),
-                      child: const Icon(Icons.lock, size: 9, color: Colors.white),
-                    ),
-            ),
+            if (rail.isPrivate)
+              Positioned(
+                top: 7,
+                right: 7,
+                child: Container(
+                  width: 16,
+                  height: 16,
+                  decoration: BoxDecoration(
+                    color: AppColors.pink.withValues(alpha: 0.9),
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: const Icon(Icons.lock, size: 9, color: Colors.white),
+                ),
+              ),
             Positioned(
               left: 8,
               right: 8,
@@ -388,8 +466,12 @@ class _FeedScreenState extends State<FeedScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, height: 1.2)),
-                  Text(sub, style: TextStyle(fontSize: 9.5, color: AppColors.textAlpha(0.6))),
+                  Text(rail.partyTitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, height: 1.2)),
+                  Text('${rail.storyCount} stories',
+                      style: TextStyle(fontSize: 9.5, color: AppColors.textAlpha(0.6))),
                 ],
               ),
             ),
@@ -399,53 +481,13 @@ class _FeedScreenState extends State<FeedScreen> {
     );
   }
 
-  Widget _kapsimoStoryTile(BuildContext context) {
-    return GestureDetector(
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const StoryViewerScreen(partyId: 'kapsimo')),
-      ),
-      child: Container(
-        width: 104,
-        clipBehavior: Clip.antiAlias,
-        decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.hairline)),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            const DiagonalStripePlaceholder(colors: [Color(0xFF191428), Color(0xFF130F20)], label: 'poster\nKápsimo'),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.bottomCenter,
-                  end: Alignment.topCenter,
-                  colors: [AppColors.bg.withValues(alpha: 0.9), Colors.transparent],
-                  stops: const [0.42, 1],
-                ),
-              ),
-            ),
-            Positioned(
-              top: 7,
-              right: 7,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                decoration: BoxDecoration(color: AppColors.purple.withValues(alpha: 0.92), borderRadius: BorderRadius.circular(5)),
-                child: Text('VENUE', style: AppTextStyles.mono(size: 7.5)),
-              ),
-            ),
-            const Positioned(
-              left: 8,
-              right: 8,
-              bottom: 8,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Kápsimo', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
-                  Text('Γκάζι · από 00:00', style: TextStyle(fontSize: 9.5, color: Color(0x99F4F1F8))),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  Widget _coverPlaceholder(StoryRail rail) => DiagonalStripePlaceholder(
+        colors: rail.isPrivate
+            ? const [Color(0xFF1C1622), Color(0xFF151020)]
+            : const [Color(0xFF191428), Color(0xFF130F20)],
+      );
 }
+
+// The const `mpStory` frames and the four hardcoded tiles that used to live
+// here (taratsa / vinyl / maria / kapsimo) are gone: the row above is
+// public.get_story_rails, and the viewer behind it is public.get_party_stories.

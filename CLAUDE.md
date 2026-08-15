@@ -7,22 +7,34 @@ Realtime, Edge Functions). Full design/rationale: `docs/backend-plan.md`.
 Session-by-session task scripts: `docs/MyParty-ClaudeCode-Prompts.md`.
 
 **Real today:** `profiles`/`parties`/`invitations`/`rsvps`/`follows`/`blocks`/
-`party_posts`/`post_likes`/`post_comments`/`reports`/`messages`/`party_reads`
-tables with RLS; `get_parties_near_user` RPC (tier/zoom-filtered map query),
-called live from `MapScreen`; `create_party_with_invites`; `get_feed`,
-`get_post_comments`, `get_messages` and `get_party_chats` (all
-keyset-paginated, all invoker-rights so RLS does the filtering);
-`hide_post`/`hide_comment`/`hide_message`; the `can_access_party`,
-`can_chat_in_party`, `is_blocked`, `can_moderate_post`,
-`can_moderate_comment` and `can_moderate_message` helpers; realtime group
-chat over **broadcast from database** (trigger on `messages` → topic
-`party:{uuid}`, authorized by RLS on `realtime.messages`); `handle_new_user`
-(every `auth.users` insert gets a `profiles` row) + `check_username_available`
-and the onboarding/consent columns; `AuthService` (email signup/signin/signout
-via `supabase_flutter`); `PartyRepository`, `SocialRepository`,
-`FeedRepository` and `ChatRepository` (all widget-level Supabase calls go
-through these — a widget reaching for `Supabase.instance` directly is a bug,
-and also unbuildable under `flutter test`).
+`party_posts`/`post_likes`/`post_comments`/`reports`/`messages`/`party_reads`/
+`stories`/`story_views` tables with RLS; `get_parties_near_user` RPC
+(tier/zoom-filtered map query), called live from `MapScreen`;
+`create_party_with_invites`; `get_feed`, `get_post_comments`, `get_messages`,
+`get_party_chats` and `get_party_stories`/`get_story_rails` (all
+keyset-paginated or time-bounded, all invoker-rights so RLS does the
+filtering); `hide_post`/`hide_comment`/`hide_message`/`hide_story`; the
+`can_access_party`, `can_chat_in_party`, `is_blocked`, `can_moderate_post`,
+`can_moderate_comment`, `can_moderate_message` and `can_moderate_story`
+helpers; realtime group chat over **broadcast from database** (trigger on
+`messages` → topic `party:{uuid}`, authorized by RLS on `realtime.messages`);
+the story upload handshake (`story_upload_target` → `story-media` edge
+function → signed PUT → `confirm_story_upload`) and the `pg_cron`
+`story-cleanup` job that hides expired stories **and** deletes their objects
+over pg_net; `handle_new_user` (every `auth.users` insert gets a `profiles`
+row) + `check_username_available` and the onboarding/consent columns;
+`AuthService` (email signup/signin/signout via `supabase_flutter`);
+`PartyRepository`, `SocialRepository`, `FeedRepository`, `ChatRepository` and
+`StoryRepository` (all widget-level Supabase calls go through these — a widget
+reaching for `Supabase.instance` directly is a bug, and also unbuildable under
+`flutter test`).
+
+Story visibility uses the **wide** `can_access_party`, not
+`can_chat_in_party` — deliberately the opposite call from chat. A story is
+read-only content attached to a party, so anyone who may look at the party may
+watch its reel; chat is writable, which is why it narrows to participants.
+Posting a story is gated by the same wide helper plus a 10/hour per-user rate
+limit.
 
 `can_chat_in_party` is **narrower than** `can_access_party` and composes it.
 `can_access_party` is true for any signed-in user on a public party; chat
@@ -38,15 +50,17 @@ visibility; that comes from `invitations` alone.
 
 **Mock today, ships real in later phases:** everything left in
 `lib/state/mp_store.dart` (hype, interested, invited, map-visibility) and the
-const lists in `lib/models/` (`mpParties`, `mpStory`) — `StoryViewerScreen`,
-`PartyCard` and `PartyDetailSheet` still read from these instead of Supabase.
-Note `mpParties` keys are strings like `'taratsa'`, not uuids, which is why
-the report action is wired into `MapPinSheet` (a real `parties` row) and not
-`PartyDetailSheet`, and why `PartyDetailSheet`'s "Group chat" button is still
-a placeholder while `ChatScreen` itself is real — it has no uuid to hand it.
-Real chat entry points are `MessagesScreen`, `EventsScreen`'s RSVP rows and
-the host wizard's done screen; `MapPinSheet` deliberately has none, since a
-map-pin viewer is exactly the passer-by `can_chat_in_party` excludes.
+const `mpParties` list in `lib/models/` — `PartyCard` and `PartyDetailSheet`
+still read from it instead of Supabase. Note `mpParties` keys are strings like
+`'taratsa'`, not uuids, which is why the report action is wired into
+`MapPinSheet` (a real `parties` row) and not `PartyDetailSheet`, and why
+*both* of `PartyDetailSheet`'s "Group chat" button and its story tiles are
+placeholders while `ChatScreen` and `StoryViewerScreen` are real — it has no
+uuid to hand either of them. Real chat entry points are `MessagesScreen`,
+`EventsScreen`'s RSVP rows and the host wizard's done screen; `MapPinSheet`
+deliberately has none, since a map-pin viewer is exactly the passer-by
+`can_chat_in_party` excludes. Real story entry points are the feed's story
+rail and its "+ Story" picker.
 
 **Cross-phase gotchas worth remembering:**
 
@@ -58,22 +72,23 @@ map-pin viewer is exactly the passer-by `can_chat_in_party` excludes.
    `check_username_available` started reporting taken usernames as free
    (`20260814104618`).
 2. `can_access_party` answers about the party's **host** only. Any table
-   holding authored content (`party_posts`, `post_comments`, `messages`, and
-   the coming `stories`) needs its own `is_blocked` term on the **author** —
-   a blocked user can have posted on a public party hosted by someone else.
+   holding authored content (`party_posts`, `post_comments`, `messages`,
+   `stories`) needs its own `is_blocked` term on the **author** — a blocked
+   user can have posted on a public party hosted by someone else.
 3. **A soft-delete cannot be a client UPDATE.** On UPDATE, Postgres applies
    the SELECT policy to the *new* row whenever the statement needs read
    access, so setting `hidden_at` on a table whose SELECT policy says
    `hidden_at is null` always fails with "new row violates row-level
    security policy". Use a `security definer` RPC (`hide_post`,
-   `hide_comment`, `hide_message`) and leave the table with no UPDATE grant
-   at all. A table with *no* `hidden_at` in its SELECT policy — like
-   `party_reads` — is unaffected and can take a plain client upsert.
+   `hide_comment`, `hide_message`, `hide_story`) and leave the table with no
+   UPDATE grant at all. A table with *no* `hidden_at` in its SELECT policy —
+   like `party_reads` — is unaffected and can take a plain client upsert.
 4. Table privileges are checked whether or not a `where` clause could ever
    be true. An RPC that merely *mentions* a table the caller lacks SELECT on
    errors out instead of returning zero rows — which is why `get_feed`,
-   `get_messages` and `get_party_chats` all have `execute` revoked from
-   `anon` rather than relying on their `auth.uid() is not null` guard.
+   `get_messages`, `get_party_chats`, `get_party_stories` and
+   `get_story_rails` all have `execute` revoked from `anon` rather than
+   relying on their `auth.uid() is not null` guard.
 5. **Realtime authorization is a separate policy on a separate table.** Chat
    delivery is broadcast-from-database, so who may *read a message row*
    (policy on `public.messages`) and who may *join the topic it is broadcast
@@ -83,6 +98,22 @@ map-pin viewer is exactly the passer-by `can_chat_in_party` excludes.
    the second. `realtime.messages` ships an INSERT grant to `authenticated`,
    so the *absence* of an INSERT policy on it is what stops clients forging
    broadcasts; don't add one.
+6. **`insert … returning` is a READ.** RETURNING goes through the table's
+   SELECT policy, so on a table whose policy hides the row you just wrote —
+   `stories` hides anything with `media_uploaded_at is null` — the insert
+   appears to fail. That is why creating a story is a bare insert and the
+   media path comes back from the `story_upload_target` definer RPC, and why
+   `StoryRepository.createStory` does not call `.select()`.
+7. **`delete from storage.objects` does not delete the object.** That table
+   is Storage's *metadata*; the bytes live in S3 (or the storage container's
+   disk locally) and only the Storage API removes both. Deleting the row
+   orphans the file — unreferenced, uncleanable, and now invisible to the one
+   table you would have enumerated to find it. `purge_story_media` therefore
+   sends a real `DELETE /storage/v1/object/story-media` over pg_net and only
+   marks `media_deleted_at` once `reconcile_story_media_purges` has read the
+   response back. `scripts/verify_story_lifecycle.sh` asserts the file is gone
+   from disk, not just the row — pgTAP structurally cannot, because pg_net
+   only dispatches after COMMIT and every test file rolls back.
 
 ## Migration naming
 
@@ -116,6 +147,11 @@ supabase start              # local stack (Postgres :54322, Studio :54323)
 supabase db reset            # drop + reapply all migrations + seed.sql
 supabase migration new NAME  # new timestamped migration file
 supabase test db             # run pgTAP suite (supabase/tests/)
+supabase functions serve     # edge functions (story-media); no name argument
+
+# End-to-end story lifecycle, incl. proof the storage object is really gone.
+# Needs the stack up and `supabase functions serve` running in another shell.
+bash scripts/verify_story_lifecycle.sh
 
 cd myparty
 flutter pub get

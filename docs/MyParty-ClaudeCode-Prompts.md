@@ -348,6 +348,23 @@ Verification: upload, view, wait for expiry (or fake the clock), and prove
 the storage object is actually gone — not just the row.
 ```
 
+**Shipped.** N = 10 stories/user/hour, 24h TTL. Deliverable 1 landed on the
+*wide* `can_access_party` on purpose — the opposite call from Phase 6's, and
+the reason is in `docs/backend-plan.md` §5: a story is read-only content, so
+the passer-by who may see the party may watch its reel, while a writable chat
+could not be handed out that broadly.
+
+Verification is `scripts/verify_story_lifecycle.sh`: it signs a persona in
+through GoTrue, is refused a direct write to the bucket, uploads through the
+signed URL, views the frame back, fakes the clock to 25 hours old, runs the
+cron function, and then asserts **both** that the `storage.objects` row is
+gone and that the file is gone from the storage container's disk. That second
+assertion is the point — `delete from storage.objects` alone would pass the
+first one while leaving the bytes on disk forever. pgTAP
+(`07_stories.test.sql`, 52 assertions) covers everything else, but
+structurally cannot cover this: pg_net only dispatches after COMMIT and every
+test file rolls back.
+
 ---
 
 ## Phase 7 — Proximity & push

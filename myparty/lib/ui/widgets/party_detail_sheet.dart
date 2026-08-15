@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 
 import '../../models/mp_party.dart';
 import '../../state/mp_store.dart';
-import '../screens/story_viewer_screen.dart';
 import '../theme/app_theme.dart';
 import 'diagonal_placeholder.dart';
 import 'privacy_badge.dart';
@@ -82,9 +81,15 @@ class PartyDetailSheet extends StatelessWidget {
                     ),
                     const SizedBox(height: 9),
                     GestureDetector(
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => StoryViewerScreen(partyId: partyId)),
-                      ),
+                      // Same reason the "Group chat" button below is a
+                      // placeholder: this sheet is still driven by the const
+                      // `mpParties` map, whose keys are strings like 'taratsa'
+                      // rather than uuids. StoryViewerScreen now queries
+                      // public.get_party_stories with whatever it is handed, so
+                      // passing a mock key would fetch nothing and blame the
+                      // network for it. Real entry points into the reel are the
+                      // feed's story rail and the picker sheet.
+                      onTap: () => _comingSoon(context),
                       child: Row(
                         children: [
                           for (final t in const ['23:41', '00:12'])

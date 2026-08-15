@@ -66,5 +66,11 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<!-- Phase 5: image_picker. Without these two strings iOS terminates the
+	     app the moment the story picker opens, rather than refusing politely. -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Για να ανεβάσεις φωτογραφία στο story του πάρτι.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Για να τραβήξεις φωτογραφία για το story του πάρτι.</string>
 </dict>
 </plist>
