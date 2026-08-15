@@ -183,9 +183,9 @@ void main() {
 
     expect(find.text('πρώτο'), findsOneWidget);
     expect(find.text('δεύτερο'), findsOneWidget);
-    // The hardcoded card's copy is gone for good. ("Kápsimo" itself is not a
-    // useful probe — it survives in the story row, which is still the const
-    // mpStory mock until Phase 5.)
+    // The hardcoded card's copy is gone for good. ("Kápsimo" is gone from the
+    // story row too as of Phase 5 — see story_test.dart, which asserts that
+    // separately against real rails.)
     expect(find.textContaining('Γέμισε μέχρι τις 04:00'), findsNothing);
   });
 

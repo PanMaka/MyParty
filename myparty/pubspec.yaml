@@ -49,6 +49,11 @@ dependencies:
   # supabase_flutter; declared here because we import it directly.
   uuid: ^4.5.1
 
+  # Phase 5. Picks the photo a story is made of, and hands it over as bytes —
+  # which is what StoryRepository.createStory wants, since the upload is a PUT
+  # to a server-issued signed URL rather than a file the storage SDK opens.
+  image_picker: ^1.2.3
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
