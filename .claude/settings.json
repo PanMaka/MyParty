@@ -23,7 +23,9 @@
       "Bash(docker stats *)",
       "Bash(supabase stop *)",
       "Bash(supabase --version)",
-      "Bash(flutter analyze *)"
+      "Bash(flutter analyze *)",
+      "Bash(sed -i 's/borderSide: const BorderSide\\(color: AppColors.hairline\\),/borderSide: BorderSide\\(color: AppColors.hairline\\),/g' myparty/lib/ui/widgets/post_comments_sheet.dart)",
+      "Bash(git pull *)"
     ]
   }
 }

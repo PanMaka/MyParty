@@ -41,6 +41,13 @@ dependencies:
   geolocator: ^14.0.3
   google_fonts: ^6.2.1
   provider: ^6.1.2
+  # Client-generated message ids are what make the optimistic send in
+  # ChatScreen idempotent: the bubble renders under the id the row will be
+  # stored with, so the broadcast echo of our own message is recognisable and
+  # replaces the pending bubble instead of duplicating it. `messages` grants
+  # INSERT on `id` for exactly this reason. Already present transitively via
+  # supabase_flutter; declared here because we import it directly.
+  uuid: ^4.5.1
 
 dev_dependencies:
   flutter_test:

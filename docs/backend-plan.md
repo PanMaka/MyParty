@@ -286,19 +286,52 @@ limit: N stories/user/hour. Flutter: replace the const `mpStory` list and
 
 ## Phase 6 — Group chat
 
-Built before Phase 5 (cheaper, no Storage dependency). `messages` table,
-RLS gated on the existing `can_access_party` helper — do not reimplement the
-visibility check, and remember it says nothing about the message author, so
-`messages` needs its own `is_blocked` term the way `party_posts` does. Realtime via **broadcast from database**, not
-`postgres_changes`: `postgres_changes` re-evaluates RLS per subscriber per
-event, which is the wrong scaling shape for a group chat channel — a
-trigger on `messages` broadcasts to topic `party:{party_id}`, with RLS on
-`realtime.messages` authorizing the topic instead. `last_read_at` per
-`(user, party)` for unread counts. Keyset pagination on message history.
-Flutter: replace `ChatScreen`'s local `_messages` list with the live
-subscription, with reconnect + optimistic send. Verification bar: a
-non-invitee must receive nothing — not the message, not even the broadcast
-event.
+Built before Phase 5 (cheaper, no Storage dependency). **Shipped.**
+
+`messages` table, gated on a new `can_chat_in_party` helper that **composes**
+`can_access_party` rather than reimplementing it — and deliberately narrows
+it. This is a correction to what this section originally said ("RLS gated on
+the existing `can_access_party` helper"), made during implementation:
+`can_access_party` is true for *any* signed-in user on a public party,
+because reading is a fine thing to hand out that broadly. A writable group
+chat is not. Applied as-is it would have made every public party's chat a
+room the entire user base can post in, with no moderation story behind it.
+So chat additionally requires participation — host, invited, or RSVP'd
+(either status; an `interested` RSVP counts, the same call `get_feed` makes).
+The composition means privacy, the invitation check and both directions of
+the host block all still live in `can_access_party` alone; the extra `and`
+can only ever remove people.
+
+`can_access_party` still says nothing about the message *author*, so
+`messages` carries its own `is_blocked` term on `author_id` the way
+`party_posts` does.
+
+Realtime via **broadcast from database**, not `postgres_changes`:
+`postgres_changes` re-evaluates RLS per subscriber per event, which is the
+wrong scaling shape for a group chat channel — a trigger on `messages`
+broadcasts to topic `party:{party_id}`, with RLS on `realtime.messages`
+authorizing the topic instead, once at subscribe time. That policy calls the
+same `can_chat_in_party`, so "who may join the channel" and "who may read the
+history" cannot drift apart. `realtime.messages` gets **no INSERT policy**,
+deliberately: the trigger is the only writer, so a participant cannot forge a
+broadcast that skips the rate limit and leaves nothing for `hide_message` to
+take down. A second trigger broadcasts `message_hidden` on soft-delete, or a
+moderated line keeps rendering on every phone already in the chat.
+
+`party_reads.last_read_at` per `(user, party)` for unread counts, clamped by
+trigger to be monotonic and never future-dated. Unread is the one read-time
+count in the schema — it cannot be denormalized because it is per-viewer — so
+it is bounded instead, counted over a `limit 100` subquery and rendered
+`99+`. Keyset pagination on message history.
+
+Flutter: `ChatScreen`'s local `_messages` list replaced by the live
+subscription, with reconnect gap-fill (broadcast has no replay, so
+reconnecting means refetching what was missed, not resuming) and optimistic
+send under a client-generated uuid. `MessagesScreen` became the real chat
+list. Verification bar, asserted in `06_group_chat.test.sql` at both layers:
+a non-invitee must receive nothing — not the message row, and not the
+broadcast event, because the topic join itself is refused. Two-device
+delivery plan in `docs/phase-06-manual-test.md`.
 
 ## Phase 7 — Proximity & push
 

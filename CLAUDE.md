@@ -7,18 +7,28 @@ Realtime, Edge Functions). Full design/rationale: `docs/backend-plan.md`.
 Session-by-session task scripts: `docs/MyParty-ClaudeCode-Prompts.md`.
 
 **Real today:** `profiles`/`parties`/`invitations`/`rsvps`/`follows`/`blocks`/
-`party_posts`/`post_likes`/`post_comments`/`reports` tables with RLS;
-`get_parties_near_user` RPC (tier/zoom-filtered map query), called live from
-`MapScreen`; `create_party_with_invites`; `get_feed` and `get_post_comments`
-(both keyset-paginated, both invoker-rights so RLS does the filtering);
-`hide_post`/`hide_comment`; the `can_access_party`, `is_blocked`,
-`can_moderate_post` and `can_moderate_comment` helpers; `handle_new_user`
+`party_posts`/`post_likes`/`post_comments`/`reports`/`messages`/`party_reads`
+tables with RLS; `get_parties_near_user` RPC (tier/zoom-filtered map query),
+called live from `MapScreen`; `create_party_with_invites`; `get_feed`,
+`get_post_comments`, `get_messages` and `get_party_chats` (all
+keyset-paginated, all invoker-rights so RLS does the filtering);
+`hide_post`/`hide_comment`/`hide_message`; the `can_access_party`,
+`can_chat_in_party`, `is_blocked`, `can_moderate_post`,
+`can_moderate_comment` and `can_moderate_message` helpers; realtime group
+chat over **broadcast from database** (trigger on `messages` → topic
+`party:{uuid}`, authorized by RLS on `realtime.messages`); `handle_new_user`
 (every `auth.users` insert gets a `profiles` row) + `check_username_available`
 and the onboarding/consent columns; `AuthService` (email signup/signin/signout
-via `supabase_flutter`); `PartyRepository`, `SocialRepository` and
-`FeedRepository` (all widget-level Supabase calls go through these — a widget
-reaching for `Supabase.instance` directly is a bug, and also unbuildable
-under `flutter test`).
+via `supabase_flutter`); `PartyRepository`, `SocialRepository`,
+`FeedRepository` and `ChatRepository` (all widget-level Supabase calls go
+through these — a widget reaching for `Supabase.instance` directly is a bug,
+and also unbuildable under `flutter test`).
+
+`can_chat_in_party` is **narrower than** `can_access_party` and composes it.
+`can_access_party` is true for any signed-in user on a public party; chat
+additionally requires participation (host, invited, or RSVP'd), or every
+public party's chat would be writable by the whole user base. Don't
+"simplify" chat back onto `can_access_party` — see `docs/backend-plan.md` §6.
 
 The social graph is **follows-only and asymmetric** — there is no
 `friendships` table and no `are_friends` helper, deliberately. See
@@ -28,11 +38,15 @@ visibility; that comes from `invitations` alone.
 
 **Mock today, ships real in later phases:** everything left in
 `lib/state/mp_store.dart` (hype, interested, invited, map-visibility) and the
-const lists in `lib/models/` (`mpParties`, `mpStory`, `mpSeedTaratsaChat`) —
-`ChatScreen`, `StoryViewerScreen`, `PartyCard` and `PartyDetailSheet` still
-read from these instead of Supabase. Note `mpParties` keys are strings like
-`'taratsa'`, not uuids, which is why the report action is wired into
-`MapPinSheet` (a real `parties` row) and not `PartyDetailSheet`.
+const lists in `lib/models/` (`mpParties`, `mpStory`) — `StoryViewerScreen`,
+`PartyCard` and `PartyDetailSheet` still read from these instead of Supabase.
+Note `mpParties` keys are strings like `'taratsa'`, not uuids, which is why
+the report action is wired into `MapPinSheet` (a real `parties` row) and not
+`PartyDetailSheet`, and why `PartyDetailSheet`'s "Group chat" button is still
+a placeholder while `ChatScreen` itself is real — it has no uuid to hand it.
+Real chat entry points are `MessagesScreen`, `EventsScreen`'s RSVP rows and
+the host wizard's done screen; `MapPinSheet` deliberately has none, since a
+map-pin viewer is exactly the passer-by `can_chat_in_party` excludes.
 
 **Cross-phase gotchas worth remembering:**
 
@@ -44,20 +58,31 @@ read from these instead of Supabase. Note `mpParties` keys are strings like
    `check_username_available` started reporting taken usernames as free
    (`20260814104618`).
 2. `can_access_party` answers about the party's **host** only. Any table
-   holding authored content (`party_posts`, `post_comments`, and the coming
-   `stories`/`messages`) needs its own `is_blocked` term on the **author** —
+   holding authored content (`party_posts`, `post_comments`, `messages`, and
+   the coming `stories`) needs its own `is_blocked` term on the **author** —
    a blocked user can have posted on a public party hosted by someone else.
 3. **A soft-delete cannot be a client UPDATE.** On UPDATE, Postgres applies
    the SELECT policy to the *new* row whenever the statement needs read
    access, so setting `hidden_at` on a table whose SELECT policy says
    `hidden_at is null` always fails with "new row violates row-level
    security policy". Use a `security definer` RPC (`hide_post`,
-   `hide_comment`) and leave the table with no UPDATE grant at all.
+   `hide_comment`, `hide_message`) and leave the table with no UPDATE grant
+   at all. A table with *no* `hidden_at` in its SELECT policy — like
+   `party_reads` — is unaffected and can take a plain client upsert.
 4. Table privileges are checked whether or not a `where` clause could ever
    be true. An RPC that merely *mentions* a table the caller lacks SELECT on
-   errors out instead of returning zero rows — which is why `get_feed` has
-   `execute` revoked from `anon` rather than relying on its
-   `auth.uid() is not null` guard.
+   errors out instead of returning zero rows — which is why `get_feed`,
+   `get_messages` and `get_party_chats` all have `execute` revoked from
+   `anon` rather than relying on their `auth.uid() is not null` guard.
+5. **Realtime authorization is a separate policy on a separate table.** Chat
+   delivery is broadcast-from-database, so who may *read a message row*
+   (policy on `public.messages`) and who may *join the topic it is broadcast
+   to* (policy on `realtime.messages`) are enforced independently. Both call
+   `can_chat_in_party` so they cannot drift, and both are asserted separately
+   in `06_group_chat.test.sql` — the first passing tells you nothing about
+   the second. `realtime.messages` ships an INSERT grant to `authenticated`,
+   so the *absence* of an INSERT policy on it is what stops clients forging
+   broadcasts; don't add one.
 
 ## Migration naming
 

@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 
 import '../../models/mp_party.dart';
 import '../../state/mp_store.dart';
-import '../screens/chat_screen.dart';
 import '../screens/story_viewer_screen.dart';
 import '../theme/app_theme.dart';
 import 'diagonal_placeholder.dart';
@@ -197,8 +196,18 @@ class PartyDetailSheet extends StatelessWidget {
                       children: [
                         Expanded(
                           child: OutlinedButton(
-                            onPressed: () => Navigator.of(context).push(
-                              MaterialPageRoute(builder: (_) => ChatScreen(partyId: partyId)),
+                            // This sheet is still driven by the const
+                            // `mpParties` map, whose keys are strings like
+                            // 'taratsa' rather than uuids — the same reason
+                            // Phase 4 wired the report action into MapPinSheet
+                            // and not here. ChatScreen now needs a real
+                            // parties.id, so this button stays a placeholder
+                            // until PartyDetailSheet itself ships real.
+                            onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Έρχεται σύντομα'),
+                                behavior: SnackBarBehavior.floating,
+                              ),
                             ),
                             style: OutlinedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 12),

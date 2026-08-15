@@ -9,6 +9,7 @@ import '../widgets/diagonal_placeholder.dart';
 import '../widgets/mp_bottom_nav.dart';
 import '../widgets/party_card.dart';
 import '../widgets/privacy_badge.dart';
+import 'chat_screen.dart';
 import 'host_wizard_screen.dart';
 
 class EventsScreen extends StatefulWidget {
@@ -198,9 +199,18 @@ class _EventsScreenState extends State<EventsScreen> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 9),
       child: GestureDetector(
-        onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Έρχεται σύντομα'), behavior: SnackBarBehavior.floating),
-        ),
+        // An RsvpParty is a real `parties` row, and an rsvp is exactly what
+        // can_chat_in_party counts as participation — so this row can open
+        // the real group chat rather than the "coming soon" placeholder it
+        // used to show.
+        onTap: () => Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => ChatScreen(
+            partyId: rsvp.partyId,
+            partyTitle: rsvp.title,
+            isPrivate: rsvp.isPrivate,
+            memberCount: rsvp.goingCount,
+          ),
+        )),
         child: Container(
           padding: const EdgeInsets.all(11),
           decoration: BoxDecoration(
