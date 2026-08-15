@@ -183,3 +183,38 @@ begin
   perform set_config('role', 'anon', true);
 end;
 $$;
+
+
+-- ============================================================
+-- Story cleanup credentials (Phase 5, 20260815133041)
+--
+-- public.purge_story_media() calls the Storage API to delete the objects
+-- behind expired stories, and it needs a service_role key plus the API's base
+-- URL to do it. Those live in Vault, and this seeds the LOCAL values so
+-- `supabase db reset` produces a stack where the whole expiry path -- hide,
+-- delete, confirm -- actually runs end to end, which is what
+-- scripts/verify_story_lifecycle.sh exercises.
+--
+-- Safe to commit: both values below are the fixed demo credentials every
+-- local Supabase stack ships with, and seed.sql only ever runs against
+-- local/CI databases via `supabase db reset`, never a hosted project. A
+-- hosted project gets its own secrets inserted once by hand -- see the header
+-- of the cleanup migration.
+--
+-- `kong:8000` rather than 127.0.0.1:54321: this request is made by pg_net
+-- from inside the database container, where the API gateway answers on its
+-- docker network alias.
+-- ============================================================
+delete from vault.secrets where name in ('storage_api_url', 'story_cleanup_service_key');
+
+select vault.create_secret(
+  'http://kong:8000/storage/v1',
+  'storage_api_url',
+  'Base URL of the Storage API, used by public.purge_story_media()'
+);
+
+select vault.create_secret(
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU',
+  'story_cleanup_service_key',
+  'Local demo service_role key, used by public.purge_story_media()'
+);
