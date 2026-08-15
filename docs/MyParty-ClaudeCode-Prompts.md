@@ -235,6 +235,26 @@ Shipped as `20260814112530` (tables + counters + `hide_post`/`hide_comment`),
 Task: Phase 4 (Feed, reactions & reports) from docs/backend-plan.md.
 
 Deliverables:
+1. First, WIDEN the existing can_access_party. It already exists as
+   can_access_party(p_party_id) from 20260812121153 and already carries the
+   Phase 3 block check — do NOT write it from scratch. It needs a second
+   parameter, can_access_party(p_party_id, p_user_id), because the feed RPC
+   evaluates visibility for a given user rather than always auth.uid().
+
+   The trap: a second parameter creates an OVERLOAD, it does not replace the
+   old function. The parties SELECT policy will keep calling the 1-arg
+   version and you end up with the block logic in two places — exactly the
+   rule 4 violation this step exists to prevent. Make the 1-arg version a
+   thin wrapper delegating to the 2-arg one. One implementation, one place
+   to change. Phases 5 and 6 reuse the same helper.
+2. party_posts, post_likes, post_comments. Denormalized like_count and
+   comment_count via trigger. Soft-delete columns (hidden_at, hidden_by,
+   hidden_reason) on all three.
+3. Feed RPC: posts from parties hosted by people the user FOLLOWS, plus
+   parties they attended or were invited to. You follow users, not parties —
+   the join goes through follows.followee_id = parties.host_id. Gated by
+   can_access_party. KEYSET pagination on (created_at, id) with the matching
+   composite index. Do not use offset.
 1. First, extract can_access_party(p_party_id) as a helper and REFACTOR the
    existing parties RLS policy to use it. Do this before adding anything new
    — the feed must not reimplement the visibility rule, and Phases 5 and 6
