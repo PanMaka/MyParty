@@ -157,6 +157,24 @@ void main() {
     expect(find.textContaining('Ο κώδικας της πόρτας είναι 4471'), findsNothing);
   });
 
+  testWidgets('own messages from history render as ours, not as someone else\'s', (tester) async {
+    // The bubble picks its side from authorId == currentUserId, so a message
+    // we sent on another device has to come back from history as ours —
+    // with no author label above it, which is what proves it took the `mine`
+    // branch rather than just happening to render the same text.
+    final repo = _FakeChatRepository(uid: 'zoi-id', history: [
+      _msg(id: 'm1', body: 'δικό μου', authorId: 'zoi-id', authorUsername: 'zoi', minute: 1),
+      _msg(id: 'm2', body: 'δικό τους', authorId: 'other-id', authorUsername: 'stefanos', minute: 2),
+    ]);
+
+    await tester.pumpWidget(_chat(repo));
+    await tester.pumpAndSettle();
+
+    expect(find.text('δικό μου'), findsOneWidget);
+    expect(find.text('zoi'), findsNothing, reason: 'our own bubble carries no author label');
+    expect(find.text('stefanos'), findsOneWidget);
+  });
+
   testWidgets('an empty chat explains itself instead of rendering nothing', (tester) async {
     final repo = _FakeChatRepository();
 

@@ -309,6 +309,18 @@ Verification: a non-invitee must receive NOTHING — not the message, not even
 the broadcast event. Show me how you verified that.
 ```
 
+**Shipped. One deliberate departure from the prompt above:** deliverable 1
+said to gate `messages` on `can_access_party`. It is gated on a new
+`can_chat_in_party` that *composes* that helper and narrows it, because
+`can_access_party` is true for every signed-in user on a public party — which
+would have made each public party's chat writable by the whole user base.
+Chat also requires host / invited / RSVP'd. See `docs/backend-plan.md` §6.
+
+Verification landed as two layers in `supabase/tests/database/06_group_chat.test.sql`
+(the message row, and the broadcast topic join, enforced by different
+policies on different tables) plus the two-device delivery pass in
+`docs/phase-06-manual-test.md`.
+
 ---
 
 ## Phase 5 — Stories
