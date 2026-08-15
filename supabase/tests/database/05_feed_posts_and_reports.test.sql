@@ -19,7 +19,7 @@
 -- seeing exactly the fixture they were written against.
 begin;
 set search_path to public, extensions;
-select plan(31);
+select plan(33);
 
 -- ============================================================
 -- Posting, and party visibility inherited from can_access_party
@@ -113,7 +113,7 @@ select throws_ok(
      where id = 'bbbbbbbb-0000-0000-0000-000000000001' $$,
   '42501',
   null,
-  'a user cannot write like_count directly (column-level update grant)'
+  'a user cannot write like_count directly -- there is no update grant at all'
 );
 
 delete from public.post_likes
@@ -301,6 +301,32 @@ select isnt_empty(
   $$ select 1 from public.get_feed()
      where post_id = 'bbbbbbbb-0000-0000-0000-000000000006' $$,
   'a third party with no block still sees that post (the block does not over-reach)'
+);
+
+-- ============================================================
+-- get_post_comments inherits the same chain: post_comments -> party_posts
+-- -> can_access_party. Asserted on a live (not hidden) comment, so an empty
+-- result can only mean the visibility chain held.
+-- ============================================================
+select tests.authenticate_as('22222222-2222-2222-2222-222222222222'); -- invitee
+
+insert into public.post_comments (id, post_id, author_id, body) values
+  ('cccccccc-0000-0000-0000-000000000002',
+   'bbbbbbbb-0000-0000-0000-000000000001',
+   '22222222-2222-2222-2222-222222222222',
+   'still visible');
+
+select isnt_empty(
+  $$ select 1 from public.get_post_comments('bbbbbbbb-0000-0000-0000-000000000001')
+     where id = 'cccccccc-0000-0000-0000-000000000002' $$,
+  'the comment RPC returns comments on a post the caller can see'
+);
+
+select tests.authenticate_as('44444444-4444-4444-4444-444444444444'); -- stranger
+
+select is_empty(
+  $$ select 1 from public.get_post_comments('bbbbbbbb-0000-0000-0000-000000000001') $$,
+  'the comment RPC returns nothing on a private party post the caller was not invited to'
 );
 
 -- ============================================================

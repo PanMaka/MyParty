@@ -16,13 +16,16 @@ including on the map. Hosts create parties, invite the people they follow,
 run a group chat and a story per party. Social graph (follows/blocks) gates
 visibility everywhere.
 
-State today: `profiles`, `parties`, `invitations` exist with RLS and a single
-RPC, `get_parties_near_user`, that the map screen calls live. Everything else
-in the Flutter app — rsvps/interest, likes, chat, stories, the follow list
-and follow state, map-visibility toggle — is in-memory mock state in
-`lib/state/mp_store.dart` or hardcoded const lists in `lib/models/`. Each
-phase below replaces one slice of that mock state with a real table + RLS
-policy + RPC and deletes the corresponding mock code.
+State today: `profiles`, `parties`, `invitations`, `rsvps`, `follows`,
+`blocks`, `party_posts`, `post_likes`, `post_comments` and `reports` exist
+with RLS, alongside `get_parties_near_user`, `create_party_with_invites`,
+`get_feed` and `get_post_comments`. What is still mock in the Flutter app —
+hype, interest, invited, map-visibility in `lib/state/mp_store.dart`, and
+the const `mpParties`/`mpStory`/`mpSeedTaratsaChat` lists in `lib/models/` —
+feeds `ChatScreen`, `StoryViewerScreen`, `PartyCard` and
+`PartyDetailSheet`. Each phase below replaces one slice of that mock state
+with a real table + RLS policy + RPC and deletes the corresponding mock
+code.
 
 ## 2. Ταυτότητα & Environment (Identity)
 
@@ -58,9 +61,19 @@ structurally impossible, not just unlikely.
    escalation vector.
 4. **No duplicated visibility logic.** One helper per visibility rule
    (`can_access_party`, `is_blocked`, …), every policy and RPC
-   that needs that rule calls the helper. Phase 4 formalizes
-   `can_access_party`; Phase 3's block check retrofits into every policy
-   that existed before it, not just new ones.
+   that needs that rule calls the helper. `can_access_party` was extracted
+   ahead of schedule in `20260812121153` (RLS recursion forced it) and made
+   block-aware in `20260814094945`; Phase 3's block check retrofits into
+   every policy that existed before it, not just new ones.
+
+   Its signature is `can_access_party(p_party_id)` — caller-implicit, not
+   the `(p_party_id, p_user_id)` this document originally specified. Nothing
+   in Phases 4–6 asks about a user other than the caller, and a public
+   two-arg `security definer` form would let anyone probe a private party's
+   guest list. If Phase 7's background enqueue needs to ask on behalf of
+   another user, it adds the two-arg form with the one-arg redefined as a
+   thin wrapper (still one implementation) and `execute` revoked from
+   `authenticated`.
 5. **Keyset pagination, never offset** — `where (created_at, id) < (?, ?)
    order by created_at desc, id desc limit N`, with a matching composite
    index. Applies to feed, chat history, any list that grows unbounded.
@@ -78,7 +91,17 @@ get re-litigated per phase:
   visibility-gated (`party-covers`, `post-media`, `story-media`) — signed
   URLs only, so bucket access follows the same rule as the row it belongs to.
 - **Soft-delete for UGC** (`hidden_at`/`hidden_by`/`hidden_reason`), hard
-  delete only for account/GDPR erasure (Phase 9).
+  delete only for account/GDPR erasure (Phase 9). **The write is a
+  `security definer` RPC, never an UPDATE policy** — Phase 4 found out why
+  and Phases 5/6 will hit the same wall: on UPDATE, Postgres applies the
+  SELECT policy to the *new* row whenever the statement needs read access,
+  so with `hidden_at is null` in that policy a client-side soft-delete
+  always produces a row the client may no longer read and is rejected with
+  "new row violates row-level security policy". No WITH CHECK expression
+  fixes that. Doing the write in a definer function (`hide_post`,
+  `hide_comment`) keeps "hidden means hidden, to every client role" as a
+  flat invariant instead of a predicate with a moderator-shaped hole in it,
+  and leaves the UGC tables with **no UPDATE grant on any column at all**.
 - **Rate limits are enforced server-side**, never trusted from the client.
 
 ## 4. Migration naming convention
@@ -186,23 +209,53 @@ static friend picker with real queries; replace `MpStore.toggleFollow`.
 
 ## Phase 4 — Feed, reactions & reports
 
-Extract `can_access_party(p_party_id, p_user_id)` first and refactor the
-existing `parties` SELECT policy to use it before adding anything new — the
-feed must not reimplement party visibility, and Phases 5 and 6 reuse this
-same helper.
+**Done.** Step one of this phase — extract `can_access_party` and refactor
+the `parties` SELECT policy onto it — turned out to be already done:
+`20260812121153` extracted it (RLS recursion between the `parties` and
+`invitations` policies forced the issue in Phase 2) and `20260814094945`
+folded the block check into it. The policy has read `using
+(can_access_party(id))` ever since, so there was nothing to refactor. See
+rule 4 in §3 for why the signature stayed one-arg.
 
-Deliverables: `party_posts`, `post_likes`, `post_comments` (denormalized
-`like_count`/`comment_count` via trigger, soft-delete columns on all
-three), a feed RPC (posts from parties the user follows/attended/was
-invited to, gated by `can_access_party`, keyset pagination on
-`(created_at, id)`), `reports` table (no admin UI needed yet — soft-delete
-via SQL is enough for v1). Flutter: replace the hardcoded `_KapsimoCard` and
-`MpStore._likes`; add a report action to every UGC surface.
+Shipped: `party_posts`, `post_likes`, `post_comments` (denormalized
+`like_count`/`comment_count` via trigger, soft-delete columns on all three,
+and hidden rows leave the counters as well as the SELECT policies —
+`20260814112530`); `get_feed`, keyset on `(created_at, id)` against a
+matching partial index (`20260814112531`); `reports` with a
+one-report-per-target unique index doing the rate limiting
+(`20260814112532`); `get_post_comments`, keyset for the same reason the feed
+is (`20260814114721`). Flutter: `FeedRepository`, `FeedScreen` now paging
+`get_feed`, `FeedPostCard` replacing `_KapsimoCard`, a comments sheet, and a
+shared `showReportSheet` wired into posts, comments, map-pin parties and
+real profiles.
+
+Three things worth carrying forward:
+
+- **`get_feed` is invoker-rights, deliberately.** That is what makes "gated
+  by `can_access_party`" true rather than restated — the `party_posts`
+  SELECT policy does the filtering. Its WHERE clause only *narrows* (which
+  of the parties I can already see do I care about) and can never widen.
+- **`can_access_party` only knows the party's HOST.** Every UGC table needs
+  its own `is_blocked` check on the AUTHOR too: a blocked user can have
+  posted on a public party hosted by a third party. Phases 5 and 6 must
+  repeat this, not assume the helper covers it.
+- **`execute` is revoked from `anon` on `get_feed`.** Table privileges are
+  checked whether or not a WHERE clause could be true, so an anonymous
+  caller otherwise gets "permission denied for table rsvps" — a confusing
+  error that also advertises the query's internals.
+
+One product note: the party card's like pill was removed rather than
+re-pointed. Likes belong to a post (`post_likes`); there is no
+`parties.like_count` in the schema and no phase that adds one, so it was a
+counter that could only ever stay mock.
 
 ## Phase 5 — Stories
 
 `stories` (`party_id`, `author_id`, `media_path`, `expires_at`) +
-`story_views`, visibility via `can_access_party`. Signed-URL upload into the
+`story_views`, visibility via `can_access_party` — plus its own `is_blocked`
+check on `author_id`, which the helper does not cover (see Phase 4). The
+`pg_cron` cleanup below hides rows, so it needs the definer-RPC soft-delete
+shape from Phase 4, not an UPDATE policy. Signed-URL upload into the
 `story-media` bucket from Phase 0 — client never writes to the bucket
 directly. `pg_cron` cleanup that both hides expired rows and deletes the
 underlying storage objects (the object deletion is the part that gets
@@ -213,8 +266,9 @@ limit: N stories/user/hour. Flutter: replace the const `mpStory` list and
 ## Phase 6 — Group chat
 
 Built before Phase 5 (cheaper, no Storage dependency). `messages` table,
-RLS gated on `can_access_party` from Phase 4 — do not reimplement the
-visibility check. Realtime via **broadcast from database**, not
+RLS gated on the existing `can_access_party` helper — do not reimplement the
+visibility check, and remember it says nothing about the message author, so
+`messages` needs its own `is_blocked` term the way `party_posts` does. Realtime via **broadcast from database**, not
 `postgres_changes`: `postgres_changes` re-evaluates RLS per subscriber per
 event, which is the wrong scaling shape for a group chat channel — a
 trigger on `messages` broadcasts to topic `party:{party_id}`, with RLS on

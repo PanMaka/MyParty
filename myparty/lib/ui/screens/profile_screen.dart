@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/social_repository.dart';
+import '../../models/feed_post.dart';
 import '../../models/profile.dart';
 import '../../services/auth_service.dart';
 import '../../state/mp_store.dart';
@@ -9,6 +10,7 @@ import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
 import '../widgets/follow_button.dart';
 import '../widgets/party_detail_sheet.dart';
+import '../widgets/report_sheet.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key, this.userId});
@@ -303,6 +305,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
             ),
+            // Report is offered only when there is a real profile behind the
+            // view. Mounted on the tab bar, ProfileScreen still renders the
+            // design prototype's strings with userId == null — there would be
+            // nothing to put in reports.target_id.
+            if (widget.userId != null)
+              PopupMenuButton<String>(
+                icon: Icon(Icons.more_horiz, size: 20, color: AppColors.textAlpha(0.5)),
+                color: AppColors.sheet,
+                onSelected: (_) => showReportSheet(
+                  context,
+                  target: ReportTarget.profile,
+                  targetId: widget.userId!,
+                ),
+                itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'report', child: Text('Αναφορά', style: TextStyle(fontSize: 13))),
+                ],
+              ),
           ],
         ),
       ),
