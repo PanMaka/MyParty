@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
+import '../../models/feed_post.dart';
 import '../../models/map_party_pin.dart';
 import '../../models/mp_party.dart';
 import '../theme/app_theme.dart';
 import 'diagonal_placeholder.dart';
 import 'privacy_badge.dart';
+import 'report_sheet.dart';
 
 /// Lightweight detail sheet for a real Supabase-backed map pin. Only shows
 /// what the RPC actually returns — no fabricated host/description/story data.
@@ -50,7 +52,10 @@ class MapPinSheet extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(pin.title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+                      Text(pin.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
                       const SizedBox(height: 4),
                       Row(
                         children: [
@@ -63,6 +68,18 @@ class MapPinSheet extends StatelessWidget {
                       ),
                     ],
                   ),
+                ),
+                // A party is UGC too, and this sheet — unlike the mock
+                // PartyDetailSheet — is backed by a real `parties` row, so
+                // pin.id is the uuid `reports.target_id` needs.
+                IconButton(
+                  onPressed: () => showReportSheet(
+                    context,
+                    target: ReportTarget.party,
+                    targetId: pin.id,
+                  ),
+                  icon: Icon(Icons.more_horiz, size: 20, color: AppColors.textAlpha(0.5)),
+                  tooltip: 'Αναφορά',
                 ),
               ],
             ),
