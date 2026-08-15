@@ -272,6 +272,8 @@ counter that could only ever stay mock.
 
 ## Phase 5 — Stories
 
+Built after Phase 6. **Shipped.**
+
 `stories` (`party_id`, `author_id`, `media_path`, `expires_at`) +
 `story_views`, visibility via `can_access_party` — plus its own `is_blocked`
 check on `author_id`, which the helper does not cover (see Phase 4). The
@@ -281,8 +283,52 @@ shape from Phase 4, not an UPDATE policy. Signed-URL upload into the
 directly. `pg_cron` cleanup that both hides expired rows and deletes the
 underlying storage objects (the object deletion is the part that gets
 forgotten and then storage cost never stops growing). Server-side rate
-limit: N stories/user/hour. Flutter: replace the const `mpStory` list and
-`StoryViewerScreen`'s static frames.
+limit: N stories/user/hour, shipped as **10**, with a **24h** TTL. Flutter:
+replace the const `mpStory` list and `StoryViewerScreen`'s static frames.
+
+Six decisions made during implementation that this section did not anticipate:
+
+1. **Stories use the WIDE `can_access_party`, not `can_chat_in_party`.** This
+   is the mirror image of the §6 correction and it is worth stating so the two
+   do not get "harmonised" later. Chat narrowed to participants because a
+   writable room open to the whole user base is a spam surface. A story is
+   read-only content attached to a party, so the passer-by who may look at the
+   party may watch its reel. Posting is gated by the same wide helper — you
+   must at least be able to *see* the party — plus the rate limit.
+
+2. **Expiry is enforced by the SELECT policy (`expires_at > now()`), not by
+   the cron job.** The job's only responsibility is collecting storage. A
+   pg_cron outage must cost bucket bytes, never a story that outstays its 24
+   hours, and a design where the sweep is what makes a story disappear gets
+   that backwards.
+
+3. **The row exists before the object does, and every object has a row.** The
+   upload is a four-step handshake — insert (RLS + rate limit + trigger-derived
+   `media_path`), `story_upload_target` → signed URL, PUT, then
+   `confirm_story_upload`, which checks `storage.objects` before making the row
+   visible. That ordering is what makes the purge complete by construction: an
+   object with no row would be invisible to the cleanup and paid for forever.
+   A crash mid-handshake leaves a row that never became visible, which the
+   same job collects as `abandoned` after an hour.
+
+4. **`insert … returning` cannot work here** — RETURNING is a read and goes
+   through the SELECT policy, which hides unconfirmed rows. Hence the definer
+   `story_upload_target` rather than returning `media_path` from the insert.
+   Recorded as gotcha #6 in CLAUDE.md.
+
+5. **`delete from storage.objects` does not delete the object** — it is the
+   metadata table, and deleting the row orphans the file where nothing can
+   ever enumerate it again. The purge sends a real
+   `DELETE /storage/v1/object/story-media` over pg_net with a service key from
+   Vault, records the request in `story_media_purges`, and sets
+   `media_deleted_at` only after reading the HTTP response back. Gotcha #7.
+
+6. **The proof is a script, not pgTAP.** pg_net dispatches only after COMMIT
+   and every pgTAP file ends in a rollback, so the suite can prove the DELETE
+   was queued and no more. `scripts/verify_story_lifecycle.sh` runs the real
+   path end to end and asserts both the `storage.objects` row and the file on
+   the storage container's disk are gone — the second assertion being the one
+   that distinguishes a working purge from a convincing-looking one.
 
 ## Phase 6 — Group chat
 
