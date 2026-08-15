@@ -17,6 +17,31 @@ insert into auth.users (
   ('00000000-0000-0000-0000-000000000000', '55555555-5555-5555-5555-555555555555', 'authenticated', 'authenticated', 'blocked_user@myparty.local', crypt('password123', gen_salt('bf')), current_timestamp, '{"provider":"email","providers":["email"]}', '{}', current_timestamp, current_timestamp),
   ('00000000-0000-0000-0000-000000000000', '66666666-6666-6666-6666-666666666666', 'authenticated', 'authenticated', 'second_host@myparty.local', crypt('password123', gen_salt('bf')), current_timestamp, '{"provider":"email","providers":["email"]}', '{}', current_timestamp, current_timestamp);
 
+-- Without this, NONE of the personas above can actually sign in.
+--
+-- GoTrue scans these four columns into Go strings, which cannot hold NULL:
+-- a password grant fails with
+--   Scan error on column index 3, name "confirmation_token":
+--   converting NULL to string is unsupported
+-- surfacing to the client as a generic 500 "Database error querying schema"
+-- that says nothing about the real cause. The other token columns on
+-- auth.users default to '' already; these four have no default, so inserting
+-- without naming them leaves NULL behind.
+--
+-- It never showed up before because every earlier phase was verified through
+-- pgTAP, which impersonates users with tests.authenticate_as() and never
+-- goes near GoTrue. The moment you sign in from the app -- which Phase 6's
+-- two-device chat test is the first thing to require -- it blocks everything.
+update auth.users set
+  confirmation_token = '',
+  recovery_token = '',
+  email_change_token_new = '',
+  email_change = ''
+where confirmation_token is null
+   or recovery_token is null
+   or email_change_token_new is null
+   or email_change is null;
+
 -- The auth.users insert above already fired handle_new_user() (Phase 1,
 -- 20260813084353_profile_on_signup.sql) and created a placeholder profile
 -- row for each persona. Upsert over those rows with the real seeded
