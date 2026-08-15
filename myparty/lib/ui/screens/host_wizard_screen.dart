@@ -101,7 +101,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
     });
     try {
       final position = await _resolveLocation();
-      await _repository.createPartyWithInvites(
+      final partyId = await _repository.createPartyWithInvites(
         party: {
           'title': _nameController.text.trim(),
           'description': '${_addressController.text.trim()}\n\n${_descController.text.trim()}',
@@ -116,7 +116,19 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
         inviteeIds: _invited.toList(),
       );
       if (!mounted) return;
-      Navigator.of(context).push(MaterialPageRoute(builder: (_) => _HostDoneScreen(invitedCount: _invited.length)));
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => _HostDoneScreen(
+          invitedCount: _invited.length,
+          // The real uuid create_party_with_invites just returned. The done
+          // screen's "open the chat" button used to push a hardcoded mock
+          // key; the host is the party's host, so can_chat_in_party is
+          // already true for them and the chat opens empty rather than
+          // erroring.
+          partyId: partyId,
+          partyTitle: _nameController.text.trim(),
+          isPrivate: _private,
+        ),
+      ));
     } catch (e) {
       if (!mounted) return;
       setState(() => _submitError = 'Κάτι πήγε στραβά. Δοκίμασε ξανά.');
@@ -747,8 +759,16 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
 
 class _HostDoneScreen extends StatelessWidget {
   final int invitedCount;
+  final String partyId;
+  final String partyTitle;
+  final bool isPrivate;
 
-  const _HostDoneScreen({required this.invitedCount});
+  const _HostDoneScreen({
+    required this.invitedCount,
+    required this.partyId,
+    required this.partyTitle,
+    required this.isPrivate,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -794,7 +814,13 @@ class _HostDoneScreen extends StatelessWidget {
                   child: GestureDetector(
                     onTap: () {
                       Navigator.of(context).popUntil((route) => route.isFirst);
-                      Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ChatScreen(partyId: 'taratsa')));
+                      Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => ChatScreen(
+                          partyId: partyId,
+                          partyTitle: partyTitle,
+                          isPrivate: isPrivate,
+                        ),
+                      ));
                     },
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 13),
