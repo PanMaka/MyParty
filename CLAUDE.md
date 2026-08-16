@@ -8,21 +8,25 @@ Session-by-session task scripts: `docs/MyParty-ClaudeCode-Prompts.md`.
 
 **Real today:** `profiles`/`parties`/`invitations`/`rsvps`/`follows`/`blocks`/
 `party_posts`/`post_likes`/`post_comments`/`reports`/`messages`/`party_reads`/
-`stories`/`story_views` tables with RLS; `get_parties_near_user` RPC
+`stories`/`story_views`/`user_devices`/`sent_notifications` tables with RLS;
+`get_parties_near_user` RPC
 (tier/zoom-filtered map query), called live from `MapScreen`;
 `create_party_with_invites`; `get_feed`, `get_post_comments`, `get_messages`,
 `get_party_chats` and `get_party_stories`/`get_story_rails` (all
 keyset-paginated or time-bounded, all invoker-rights so RLS does the
 filtering); `hide_post`/`hide_comment`/`hide_message`/`hide_story`; the
 `can_access_party`, `can_chat_in_party`, `is_blocked`, `can_moderate_post`,
-`can_moderate_comment`, `can_moderate_message` and `can_moderate_story`
-helpers; realtime group chat over **broadcast from database** (trigger on
+`can_moderate_comment`, `can_moderate_message`, `can_moderate_story` and
+`has_location_consent` helpers; realtime group chat over **broadcast from
+database** (trigger on
 `messages` → topic `party:{uuid}`, authorized by RLS on `realtime.messages`);
 the story upload handshake (`story_upload_target` → `story-media` edge
 function → signed PUT → `confirm_story_upload`) and the `pg_cron`
 `story-cleanup` job that hides expired stories **and** deletes their objects
-over pg_net; `handle_new_user` (every `auth.users` insert gets a `profiles`
-row) + `check_username_available` and the onboarding/consent columns;
+over pg_net; the `pg_cron` `location-retention` job (`purge_stale_locations`
++ `purge_old_sent_notifications`); `handle_new_user` (every `auth.users`
+insert gets a `profiles` row) + `check_username_available` and the
+onboarding/consent columns;
 `AuthService` (email signup/signin/signout via `supabase_flutter`);
 `PartyRepository`, `SocialRepository`, `FeedRepository`, `ChatRepository` and
 `StoryRepository` (all widget-level Supabase calls go through these — a widget
@@ -35,6 +39,28 @@ read-only content attached to a party, so anyone who may look at the party may
 watch its reel; chat is writable, which is why it narrows to participants.
 Posting a story is gated by the same wide helper plus a 10/hour per-user rate
 limit.
+
+`user_devices.last_location` is the one column in the schema with a
+**retention clock**, and three separate mechanisms keep it honest — none of
+them optional, all asserted in `08_proximity_and_retention.test.sql`:
+
+- The RLS `with check` refuses a location unless `has_location_consent`, on
+  **INSERT and UPDATE both**. The gate is on the location, not the row: a
+  device may register a push token with no consent and no location, since
+  `push_consent` is a separate act.
+- `round_location` (~100m, 3dp) runs in a **`before insert or update`
+  trigger**, not only in whatever RPC the client calls. The precise fix
+  never reaches the heap, the WAL, or a backup.
+- `purge_stale_locations` nulls it past 24h on a `*/10` cron, and a trigger
+  on `profiles.location_consent` going true→false clears it immediately.
+  Both null the column and keep the row — retention is not unsubscribing
+  someone from push.
+
+There is deliberately **no location history table**, and the test asserts
+over `pg_attribute` that `parties.location` and `user_devices.last_location`
+are the only two geography columns in `public`, so adding one fails CI.
+`sent_notifications` is engine-internal: RLS on, zero policies, zero client
+grants, dedupe by the `(user_id, party_id, kind)` unique constraint.
 
 `can_chat_in_party` is **narrower than** `can_access_party` and composes it.
 `can_access_party` is true for any signed-in user on a public party; chat
@@ -61,6 +87,11 @@ uuid to hand either of them. Real chat entry points are `MessagesScreen`,
 deliberately has none, since a map-pin viewer is exactly the passer-by
 `can_chat_in_party` excludes. Real story entry points are the feed's story
 rail and its "+ Story" picker.
+
+Phase 7a is **schema only** — nothing in Flutter touches `user_devices` yet
+and there is no `DeviceRepository`. Token capture, the location-permission
+pre-prompt and the upsert are 7c; the notification triggers and the
+proximity queries are 7b. `mp_store.dart` is unchanged by this phase.
 
 **Cross-phase gotchas worth remembering:**
 
@@ -114,6 +145,22 @@ rail and its "+ Story" picker.
    response back. `scripts/verify_story_lifecycle.sh` asserts the file is gone
    from disk, not just the row — pgTAP structurally cannot, because pg_net
    only dispatches after COMMIT and every test file rolls back.
+8. **RLS filters rows; it cannot protect a column.** Keeping a column
+   *derived* — `user_devices.last_location_at`, the clock the 24h retention
+   sweep reads — takes a column-scoped grant, `grant update (push_token,
+   platform, last_location)`, so the privilege to write it simply is not
+   held. A row policy cannot express "not this column", and if the client
+   could restamp `last_location_at` it could opt itself out of retention
+   entirely. Same reasoning as `stories.media_path`.
+9. **Every table in `public` is created holding privileges nobody granted.**
+   Supabase's default ACL hands `anon` and `authenticated` TRUNCATE,
+   REFERENCES, TRIGGER and MAINTAIN on each new table. None is a data
+   privilege, so RLS is not bypassed — but **RLS does not mediate
+   TRUNCATE**, so an RLS-perfect table is still one `anon` could empty if
+   anything ever routed to it. `revoke all on <table> from anon,
+   authenticated;` *before* the intended grants (`20260816083807`). Only
+   `user_devices` and `sent_notifications` have it today; the project-wide
+   sweep is a Phase 10 item.
 
 ## Migration naming
 
