@@ -408,6 +408,35 @@ functions, not just documented:
 - Retention elsewhere: `sent_notifications` 90 days, ended parties kept
   indefinitely (documented fully in Phase 9).
 
+Four refinements settled while building 7a, all shipped in
+`20260816083807` / `20260816083809`:
+
+- **The consent gate is on the location, not on the row.** A device may
+  register a push token with `location_consent = false` and no
+  `last_location` — push consent (`profiles.push_consent`) is a separate
+  act, and conflating them would make "notify me when someone invites me"
+  unavailable to anyone who declines background location. The policy reads
+  `last_location is null or has_location_consent(...)`, and it is repeated
+  in the UPDATE `with check` as well as the INSERT one: a row inserted
+  location-free while consent is false and then updated with a location is
+  the same violation through a door nobody checked.
+- **Rounding is a `before insert or update` trigger, not just the RPC.**
+  An RPC is the path the client takes; a trigger is the path every writer
+  takes, including later migrations and psql. "Raw coordinates never touch
+  disk" is only true if it is impossible.
+- **Withdrawing consent clears what consent bought.** A trigger on
+  `profiles.location_consent` true→false nulls every stored location for
+  that user immediately (GDPR Art. 7(3)); waiting for the 24h sweep would
+  leave an off toggle next to a live coordinate that 7b's proximity queries
+  can still match. The device row and its push token survive — withdrawing
+  location consent is not unsubscribing from push.
+- **The sweep runs `*/10`, not hourly.** Worst-case retention is 24h + the
+  sweep interval, so an hourly job makes a documented 24-hour retention
+  period measurably 25 hours. This is the one cron in the schema with no
+  independent enforcement behind it: Phase 5's expiry is backstopped by the
+  `stories` SELECT policy, but no policy can make bytes stop existing, so
+  the retention promise is exactly as good as this job's uptime.
+
 Deliverables split across three sessions:
 
 **7a Schema & retention** — `user_devices`, `sent_notifications`, GiST
@@ -471,7 +500,19 @@ default. Retention to document: locations 24h (from 7.2), sent_notifications
 Run `get_advisors` (Supabase MCP) for security/performance lint and fix
 everything actionable, listing anything deliberately left with why. Index
 audit: every FK used in a join, every policy with a subquery, needs a
-matching index. Re-verify the parties↔invitations cross-table RLS under
+matching index.
+
+**Revoke the default ACL project-wide.** Supabase ships
+`alter default privileges in schema public` granting `anon`,
+`authenticated` and `service_role` TRUNCATE, REFERENCES, TRIGGER and
+MAINTAIN on every table created in `public`. None of those is a data
+privilege, so nothing is readable and no RLS policy is bypassed — but RLS
+does not mediate TRUNCATE, so on paper `anon` can empty any table in the
+schema. PostgREST exposes no route to it, which is why this is hardening
+and not an incident. 7a revoked it on `user_devices` and
+`sent_notifications` (`20260816083807`); every table created before that
+still carries it, and the fix is one migration plus an
+`alter default privileges ... revoke` so new tables stop inheriting it. Re-verify the parties↔invitations cross-table RLS under
 pgTAP rather than manual reading. Rate limiting on all write paths (posts,
 stories, messages, invites). Load test `get_parties_near_user` at 10k
 parties / 50k rsvps (not the ~20 seeded), report p50/p95, identify what
