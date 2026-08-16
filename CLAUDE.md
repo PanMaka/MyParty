@@ -8,7 +8,8 @@ Session-by-session task scripts: `docs/MyParty-ClaudeCode-Prompts.md`.
 
 **Real today:** `profiles`/`parties`/`invitations`/`rsvps`/`follows`/`blocks`/
 `party_posts`/`post_likes`/`post_comments`/`reports`/`messages`/`party_reads`/
-`stories`/`story_views` tables with RLS; `get_parties_near_user` RPC
+`stories`/`story_views`/`user_devices`/`sent_notifications` tables with RLS;
+`get_parties_near_user` RPC
 (tier/zoom-filtered map query), called live from `MapScreen`;
 `create_party_with_invites`; `get_feed`, `get_post_comments`, `get_messages`,
 `get_party_chats` and `get_party_stories`/`get_story_rails` (all
