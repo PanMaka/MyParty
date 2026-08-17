@@ -445,9 +445,50 @@ one from Phase 0's base schema), owner-only RLS on `user_devices`, the
 retention rules above, pgTAP proving no-consent-no-row, cross-user-select
 denied, and the 24h job actually clearing the column.
 
-**7b Notification engine** — the two triggers + safety-net sweep from 7.1,
-dedupe, quiet hours, per-user daily cap, per-user radius preference. Query
-plans for both spatial queries must be shown, confirming GiST index usage.
+**7b Notification engine** — shipped in `20260817073507` /
+`20260817073508` / `20260817073509`. The two triggers + hourly safety-net
+sweep from 7.1, dedupe, quiet hours, per-user daily cap, per-user radius
+preference; `notification_jobs` as the outbox 7c drains. Five things were
+settled while building it:
+
+- **A per-user radius cannot drive a GiST index scan.** When the radius
+  comes from the row being spatially scanned, PostGIS has no constant to
+  expand the search box by and the planner demotes the whole predicate to
+  a join filter — `Seq Scan`, at 86ms/61k buffers against 6ms/7k for the
+  fixed form. So every spatial predicate in the engine is written twice:
+  a constant `st_dwithin(…, 5000)` that is indexable and bounds the box,
+  plus the exact `st_dwithin(…, pr.notify_radius_meters)` that is the
+  real rule. Neither may be "simplified" away — dropping the constant
+  loses the index, dropping the exact term silently gives everyone a 5km
+  radius. The 5000 literal is the `CHECK` cap on
+  `profiles.notify_radius_meters`, so raising the cap means editing both
+  in the same commit. `scripts/explain_proximity.sh` prints both plans at
+  ~20k devices / 5k parties plus the seq-scanning control.
+- **`can_access_party` answers about the caller, which the engine is not.**
+  Its body moved into `can_user_access_party(p_user_id, p_party_id)` and
+  the original became a one-line delegation bound to `auth.uid()`. One
+  implementation, two entry points — the alternative was a second copy of
+  the private-party rule in the code path that fans out to thousands of
+  users at once. All 227 pre-existing tests passed unchanged, which is
+  the only check that matters for a refactor under half the schema's
+  policies.
+- **Quiet hours defer; they do not suppress.** The dedupe row is claimed
+  immediately and the *job* is scheduled for the window's end, so the
+  sweep stays a pure safety net instead of becoming the primary path for
+  every overnight party. Jobs carry `expires_at = starts_at`, because an
+  08:00 push about a party that ended at 02:00 is worse than silence.
+- **The daily cap deliberately does NOT claim the dedupe row**, unlike
+  quiet hours. A capped notification is "not today", not "never", so the
+  slot has to survive for tomorrow's sweep. The cap is also soft — read
+  before the claim — because making it hard would need a per-user lock on
+  the hot path of every publish.
+- **The movement debounce needed no second geography column.** 7a already
+  rounds to a ~100m cell and only restamps when the cell changes, so
+  `old.last_location is distinct from new.last_location` *is* "moved
+  ~100m"; a `last_evaluated_at` floor handles boundary flip-flop. Storing
+  a `last_evaluated_location` would have doubled the location data under
+  retention and broken the "exactly two geography columns" assertion — a
+  bad trade in the one place where data minimisation is the point.
 
 **7c Delivery & client** — Edge Function (TypeScript) consuming the job
 queue via FCM HTTP v1 with backoff retry, deleting the device row on an

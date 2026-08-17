@@ -8,7 +8,8 @@ Session-by-session task scripts: `docs/MyParty-ClaudeCode-Prompts.md`.
 
 **Real today:** `profiles`/`parties`/`invitations`/`rsvps`/`follows`/`blocks`/
 `party_posts`/`post_likes`/`post_comments`/`reports`/`messages`/`party_reads`/
-`stories`/`story_views`/`user_devices`/`sent_notifications` tables with RLS;
+`stories`/`story_views`/`user_devices`/`sent_notifications`/
+`notification_jobs` tables with RLS;
 `get_parties_near_user` RPC
 (tier/zoom-filtered map query), called live from `MapScreen`;
 `create_party_with_invites`; `get_feed`, `get_post_comments`, `get_messages`,
@@ -16,9 +17,13 @@ Session-by-session task scripts: `docs/MyParty-ClaudeCode-Prompts.md`.
 keyset-paginated or time-bounded, all invoker-rights so RLS does the
 filtering); `hide_post`/`hide_comment`/`hide_message`/`hide_story`; the
 `can_access_party`, `can_chat_in_party`, `is_blocked`, `can_moderate_post`,
-`can_moderate_comment`, `can_moderate_message`, `can_moderate_story` and
-`has_location_consent` helpers; realtime group chat over **broadcast from
-database** (trigger on
+`can_moderate_comment`, `can_moderate_message`, `can_moderate_story`,
+`has_location_consent`, `can_user_access_party`, `wants_nearby_notifications`,
+`in_quiet_hours` and `quiet_hours_end_at` helpers; the **event-driven
+proximity notification engine** (publish trigger + device-movement trigger →
+`enqueue_nearby_party_notifications` → `notification_jobs`, with the hourly
+`nearby-notification-sweep` cron as a safety net only); realtime group chat
+over **broadcast from database** (trigger on
 `messages` → topic `party:{uuid}`, authorized by RLS on `realtime.messages`);
 the story upload handshake (`story_upload_target` → `story-media` edge
 function → signed PUT → `confirm_story_upload`) and the `pg_cron`
@@ -88,10 +93,35 @@ deliberately has none, since a map-pin viewer is exactly the passer-by
 `can_chat_in_party` excludes. Real story entry points are the feed's story
 rail and its "+ Story" picker.
 
-Phase 7a is **schema only** — nothing in Flutter touches `user_devices` yet
-and there is no `DeviceRepository`. Token capture, the location-permission
-pre-prompt and the upsert are 7c; the notification triggers and the
-proximity queries are 7b. `mp_store.dart` is unchanged by this phase.
+Phases 7a and 7b are **backend only** — nothing in Flutter touches
+`user_devices` or `notification_jobs` yet and there is no `DeviceRepository`.
+Token capture, the location-permission pre-prompt, the upsert and the FCM
+worker that drains `notification_jobs` are all 7c. `mp_store.dart` is
+unchanged by both phases.
+
+The notification engine is **event-driven, and the hourly sweep must stay a
+safety net**. Two triggers do the real work — party publish fans out from that
+one party, a device landing in a new ~100m cell fans in to that one user — and
+both funnel into `enqueue_nearby_party_notifications`, which is the single
+place the rules live. Don't add a second enqueue path; the movement trigger
+deliberately calls the same function with `p_only_user_id` set rather than
+writing its own. Three asymmetries in there are load-bearing and look like
+inconsistencies if you don't know why:
+
+- **Quiet hours claim the dedupe row; the daily cap does not.** Quiet hours
+  defer an already-decided job to the end of the window, so the slot is spent.
+  A cap is "not today" — burning the slot would make tomorrow's sweep skip it
+  permanently.
+- **`not is_private` on the party is not redundant with
+  `can_user_access_party`.** The helper answers "may this user see it", which
+  is true for an invitee of a private party. The guard asks something
+  narrower: may we push it at them unprompted. A proximity ping would put a
+  private party on a lock screen.
+- **The debounce stores no location.** `old.last_location is distinct from
+  new.last_location` already means "moved ~100m", because 7a rounds before
+  storing and only restamps on a real cell change. `last_evaluated_at` is only
+  the flip-flop floor. Adding a `last_evaluated_location` would double the
+  location data under retention and break the two-geography-column assertion.
 
 **Cross-phase gotchas worth remembering:**
 
@@ -159,8 +189,31 @@ proximity queries are 7b. `mp_store.dart` is unchanged by this phase.
    TRUNCATE**, so an RLS-perfect table is still one `anon` could empty if
    anything ever routed to it. `revoke all on <table> from anon,
    authenticated;` *before* the intended grants (`20260816083807`). Only
-   `user_devices` and `sent_notifications` have it today; the project-wide
-   sweep is a Phase 10 item.
+   `user_devices`, `sent_notifications` and `notification_jobs` have it
+   today; the project-wide sweep is a Phase 10 item.
+10. **A column-valued radius cannot drive a GiST index scan.** PostGIS turns
+    `st_dwithin(geom, point, <const>)` into `geom && _st_expand(point,
+    <const>)`, which the index can answer — but when the radius comes from
+    the row being scanned there is no constant to expand by, and the planner
+    demotes the whole predicate to a filter and seq-scans. So the proximity
+    engine writes every spatial predicate **twice**: `st_dwithin(…, 5000)` to
+    bound the box and make it indexable, plus `st_dwithin(…,
+    pr.notify_radius_meters)` for the real answer. Deleting either breaks
+    something different — the constant is the index, the column is the rule
+    — and the 5000 literal is only sound because of the `CHECK` cap on
+    `profiles.notify_radius_meters`, so the two move together.
+    `scripts/explain_proximity.sh` prints both plans plus the seq-scanning
+    control at ~20k devices; pgTAP cannot assert this, which is why the
+    control query exists.
+11. **A helper named for `auth.uid()` is unusable from a trigger.**
+    `can_access_party(party_id)` silently answers about the *caller*, so
+    calling it from an engine that fans out to other people returns the
+    wrong user's visibility. The fix is to parameterise rather than copy:
+    `can_user_access_party(user_id, party_id)` holds the body and
+    `can_access_party` delegates to it bound to `auth.uid()`. Any future
+    "does X apply to this other user" needs the same treatment — the
+    tempting alternative, inlining the rule, puts a second copy of party
+    visibility in the code path with the widest blast radius in the schema.
 
 ## Migration naming
 
@@ -199,6 +252,11 @@ supabase functions serve     # edge functions (story-media); no name argument
 # End-to-end story lifecycle, incl. proof the storage object is really gone.
 # Needs the stack up and `supabase functions serve` running in another shell.
 bash scripts/verify_story_lifecycle.sh
+
+# Query plans for both proximity spatial queries, at ~20k devices / 5k
+# parties generated in a transaction that rolls back. Prints the seq-scanning
+# control alongside, which is the argument for the two-term st_dwithin.
+bash scripts/explain_proximity.sh [N_USERS] [N_PARTIES]
 
 cd myparty
 flutter pub get
