@@ -218,3 +218,33 @@ select vault.create_secret(
   'story_cleanup_service_key',
   'Local demo service_role key, used by public.purge_story_media()'
 );
+
+
+-- ============================================================
+-- Notification worker credentials (Phase 7c, 20260817083542)
+--
+-- Same arrangement, same reasoning, same demo key: the insert trigger on
+-- notification_jobs and the every-minute cron both POST to the delivery edge
+-- function over pg_net, and both need a URL and a service_role bearer token.
+--
+-- `kong:8000/functions/v1/notification-worker` for the same docker-network
+-- reason as above -- and note this only resolves while `supabase functions
+-- serve` is running. When it is not, the trigger's exception handler logs a
+-- warning and party creation proceeds, which is the behaviour that handler
+-- exists for; the cron logs a real failure every minute, which is the honest
+-- signal that delivery is down.
+-- ============================================================
+delete from vault.secrets
+where name in ('notification_worker_url', 'notification_worker_service_key');
+
+select vault.create_secret(
+  'http://kong:8000/functions/v1/notification-worker',
+  'notification_worker_url',
+  'Delivery worker endpoint, used by public.post_to_notification_worker()'
+);
+
+select vault.create_secret(
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU',
+  'notification_worker_service_key',
+  'Local demo service_role key, used by public.post_to_notification_worker()'
+);
