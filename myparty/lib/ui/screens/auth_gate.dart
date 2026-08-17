@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../services/notifications.dart';
 import 'login_screen.dart';
 import 'home_screen.dart';
 import 'username_setup_screen.dart';
@@ -51,9 +54,23 @@ class _ProfileGateState extends State<_ProfileGate> {
   Future<bool> _checkOnboarding() async {
     final row = await Supabase.instance.client
         .from('profiles')
-        .select('onboarding_completed_at')
+        .select('onboarding_completed_at, push_consent, location_consent')
         .eq('id', widget.userId)
         .single();
+
+    // Phase 7c. The one place in the app that knows a session exists AND
+    // onboarding is settled, which is the earliest point a device row should
+    // be written — `user_devices.user_id` references `profiles`, and
+    // registering mid-signup would race the row `handle_new_user` creates.
+    //
+    // Both flags are read here and passed down rather than re-queried, so this
+    // stays one round trip. Nothing is prompted: a user who has never granted
+    // push consent is left alone until they open the settings screen.
+    unawaited(Notifications.onSignedIn(
+      pushConsent: (row['push_consent'] as bool?) ?? false,
+      locationConsent: (row['location_consent'] as bool?) ?? false,
+    ));
+
     return row['onboarding_completed_at'] == null;
   }
 

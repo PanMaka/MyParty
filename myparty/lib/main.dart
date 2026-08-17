@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'services/notifications.dart';
 import 'state/mp_store.dart';
 import 'ui/screens/auth_gate.dart';
 import 'ui/theme/app_theme.dart';
@@ -19,6 +20,12 @@ Future<void> main() async {
     url: dotenv.env['SUPABASE_URL']!,
     publishableKey: dotenv.env['SUPABASE_ANON_KEY']!,
   );
+
+  // Phase 7c. Firebase, plus the background message handler — which has to be
+  // registered before runApp, because a push can wake the app into a state
+  // where no widget has been built yet. Never throws: with no Firebase config
+  // present this logs and the app runs with push unavailable.
+  await Notifications.initialise();
 
   runApp(const MyPartyApp());
 }

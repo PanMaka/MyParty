@@ -11,6 +11,7 @@ import '../widgets/diagonal_placeholder.dart';
 import '../widgets/follow_button.dart';
 import '../widgets/party_detail_sheet.dart';
 import '../widgets/report_sheet.dart';
+import 'notification_settings_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key, this.userId});
@@ -241,6 +242,38 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: Text(
                 'Τα ιδιωτικά πάρτι στα οποία πας δεν φαίνονται ποτέ σε άτομα που δεν είναι καλεσμένα — ούτε στο προφίλ σου.',
                 style: TextStyle(fontSize: 11, height: 1.5, color: AppColors.textAlpha(0.38)),
+              ),
+            ),
+          ],
+        ),
+      ),
+      // Phase 7c. The consent toggles and the nearby preferences have to be
+      // reachable from somewhere, and this is the screen that already owns
+      // ΙΔΙΩΤΙΚΟΤΗΤΑ. Kept as its own section rather than folded into the
+      // privacy card above because two of its rows are consent — a legal state
+      // with a deletion consequence — and the rows above them are settings.
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('ΕΙΔΟΠΟΙΗΣΕΙΣ', style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.45))),
+            const SizedBox(height: 9),
+            Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(15),
+                color: Colors.white.withValues(alpha: 0.035),
+                border: Border.all(color: AppColors.hairline),
+              ),
+              child: _settingsRow(
+                'Ειδοποιήσεις & τοποθεσία',
+                'Πάρτι κοντά σου, ώρες ησυχίας, απόσταση',
+                chevron: true,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const NotificationSettingsScreen(),
+                  ),
+                ),
               ),
             ),
           ],
