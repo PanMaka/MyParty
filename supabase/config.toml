@@ -394,6 +394,19 @@ deno_version = 2
 enabled = true
 verify_jwt = true
 
+# Phase 7c. Drains notification_jobs and calls FCM HTTP v1. Woken by the insert
+# trigger on that table and by the every-minute cron, both over pg_net reading
+# vault (20260817083542) — never by a client.
+#
+# verify_jwt stays on as the gateway's coarse filter, but it is NOT the access
+# control here: it accepts any signed-in user's token, and this endpoint drains
+# a queue whose rows amount to "user X is within 500m of party Y". The function
+# additionally requires the Authorization header to be the service_role key
+# itself, which only the database and an operator hold.
+[functions.notification-worker]
+enabled = true
+verify_jwt = true
+
 [analytics]
 enabled = true
 port = 54327

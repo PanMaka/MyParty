@@ -1,6 +1,24 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- Phase 7c.
+
+         ACCESS_BACKGROUND_LOCATION is a SEPARATE grant on Android 10+, and the
+         OS refuses to show its prompt until while-in-use has already been
+         granted. The app therefore asks for while-in-use first and treats
+         background as an upgrade — proximity notifications already work with
+         foreground reporting, so demanding "always" up front would fail on
+         every device and train users to refuse. Play Store review also requires
+         a written justification for this permission.
+
+         POST_NOTIFICATIONS is required from Android 13. Without it a push is
+         delivered and silently dropped, which is indistinguishable from the
+         backend not having sent it. -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <application
         android:label="myparty"
         android:name="${applicationName}"
@@ -32,6 +50,19 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- Phase 7c. The channel the delivery worker names in its android
+             notification block. Android 8+ drops any notification whose channel
+             does not exist, and it creates this one from the meta-data at
+             install time — so without this line every proximity push is
+             discarded on arrival, with nothing logged anywhere the app can see.
+
+             Naming a channel at all is what lets a user silence proximity
+             notifications from the system settings without silencing invites
+             and messages too. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="nearby_parties" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

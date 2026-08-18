@@ -53,6 +53,18 @@ dependencies:
   # which is what StoryRepository.createStory wants, since the upload is a PUT
   # to a server-issued signed URL rather than a file the storage SDK opens.
   image_picker: ^1.2.3
+  # Phase 7c. FCM is the transport, not a preference: on Android there is no
+  # other way to wake a backgrounded app, and routing iOS through FCM too means
+  # the delivery worker has one send API instead of separate FCM and APNs paths.
+  #
+  # These do NOT require a Firebase project to be configured for the app to
+  # build or run. android/app/build.gradle.kts applies the google-services
+  # plugin only when google-services.json is actually present, and PushService
+  # catches the "no default app" failure and reports push as unavailable — which
+  # is also the correct behaviour on a handset with no Play Services. Run
+  # `flutterfire configure` to switch it on; nothing in Dart changes.
+  firebase_core: ^4.13.0
+  firebase_messaging: ^16.5.0
 
 dev_dependencies:
   flutter_test:

@@ -72,5 +72,29 @@
 	<string>Για να ανεβάσεις φωτογραφία στο story του πάρτι.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Για να τραβήξεις φωτογραφία για το story του πάρτι.</string>
+
+	<!-- Phase 7c. Missing here until now, which meant the map's existing
+	     Geolocator call was already relying on a string iOS requires: without
+	     it the app is terminated the instant location is requested.
+
+	     The wording matters more than usual. iOS shows this string verbatim in
+	     the permission dialog and Apple rejects builds whose purpose strings are
+	     vague, so it names what is stored (an approximate area) rather than
+	     "your location" — and the full explanation the user actually reads is
+	     the in-app sheet shown BEFORE this dialog ever appears. -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Για να σου δείχνουμε πάρτι κοντά σου. Αποθηκεύουμε μόνο μια περιοχή ~100μ, που σβήνεται μετά από 24 ώρες.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Για να σε ειδοποιούμε όταν ανοίγει πάρτι κοντά σου, ακόμη κι όταν η εφαρμογή είναι κλειστή. Αποθηκεύουμε μόνο μια περιοχή ~100μ, που σβήνεται μετά από 24 ώρες.</string>
+
+	<!-- `remote-notification` lets a data-only push wake the app; `location`
+	     is what allows position updates to continue in the background, which is
+	     the whole point of a proximity feature that fires while the phone is in
+	     a pocket. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+		<string>location</string>
+	</array>
 </dict>
 </plist>

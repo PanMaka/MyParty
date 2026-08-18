@@ -31,12 +31,20 @@ function → signed PUT → `confirm_story_upload`) and the `pg_cron`
 over pg_net; the `pg_cron` `location-retention` job (`purge_stale_locations`
 + `purge_old_sent_notifications`); `handle_new_user` (every `auth.users`
 insert gets a `profiles` row) + `check_username_available` and the
-onboarding/consent columns;
+onboarding/consent columns; the **delivery half** of the notification
+pipeline (`claim_notification_jobs`/`complete_notification_job`/
+`fail_notification_job`/`delete_device_by_push_token`, the
+`notification-worker` edge function calling FCM HTTP v1, the statement-level
+insert trigger and the every-minute `notification-worker-tick` cron that both
+POST to it over pg_net) and `upsert_user_device`, the client's only door into
+`user_devices`;
 `AuthService` (email signup/signin/signout via `supabase_flutter`);
-`PartyRepository`, `SocialRepository`, `FeedRepository`, `ChatRepository` and
-`StoryRepository` (all widget-level Supabase calls go through these — a widget
-reaching for `Supabase.instance` directly is a bug, and also unbuildable under
-`flutter test`).
+`PartyRepository`, `SocialRepository`, `FeedRepository`, `ChatRepository`,
+`StoryRepository` and `DeviceRepository` (all widget-level Supabase calls go
+through these — a widget reaching for `Supabase.instance` directly is a bug,
+and also unbuildable under `flutter test`); `PushService`, `LocationReporter`
+and the `Notifications` app-scoped wiring; `showLocationConsentSheet` and
+`NotificationSettingsScreen`.
 
 Story visibility uses the **wide** `can_access_party`, not
 `can_chat_in_party` — deliberately the opposite call from chat. A story is
@@ -93,11 +101,59 @@ deliberately has none, since a map-pin viewer is exactly the passer-by
 `can_chat_in_party` excludes. Real story entry points are the feed's story
 rail and its "+ Story" picker.
 
-Phases 7a and 7b are **backend only** — nothing in Flutter touches
-`user_devices` or `notification_jobs` yet and there is no `DeviceRepository`.
-Token capture, the location-permission pre-prompt, the upsert and the FCM
-worker that drains `notification_jobs` are all 7c. `mp_store.dart` is
-unchanged by both phases.
+Phase 7 is complete end to end, and `scripts/verify_notification_delivery.sh`
+measures it: 1s from `insert into parties` to a delivered push, one
+notification from three racing enqueue paths, quiet hours deferred.
+`mp_store.dart` is unchanged by all three sub-phases — 7c adds client surface
+but retires no mock; the map-visibility toggle is Phase 8's.
+
+**FCM is wired conditionally and that is deliberate.** Gradle applies
+`com.google.gms.google-services` only when `myparty/android/app/google-services.json`
+exists, and `PushService` degrades to `PushAvailability.notConfigured`, so
+`flutter build apk --debug` succeeds with no Firebase project. Don't "fix" this
+by applying the plugin unconditionally: an Android handset with no Play
+Services can never obtain a token either, so graceful degradation is the
+correct *runtime* behaviour and the build-time conditional is just the same
+fact expressed earlier. To switch it on: `flutterfire configure`, then set the
+`FCM_SERVICE_ACCOUNT` secret on the edge function.
+
+The **delivery worker holds the service key and therefore decides nothing** —
+the same split as `story-media`. It never issues an UPDATE against
+`notification_jobs`; it has three verbs (claim/complete/fail) and the queue's
+state machine keeps one owner. The rule that protects is the 5-attempt cap:
+a retry budget kept in worker memory resets on every redeploy and runs
+independently in every concurrent invocation, which is not a budget at all.
+
+**The claim re-asks the consent gates, and that is not redundant with the
+enqueue-time check.** Quiet hours mean a decision taken at 02:14 is delivered
+at 08:00; consent withdrawn in between has to take effect immediately (GDPR
+Art. 7(3)), not "for jobs enqueued from now on". `claim_notification_jobs`
+re-calls `wants_nearby_notifications` and re-checks the party is still
+published and public, marking anything that fails **`cancelled`** — a status
+added in 7c precisely so `failed` keeps meaning "we tried and could not".
+A healthy system correctly declining a thousand jobs must not read as a
+thousand delivery faults.
+
+**The insert trigger and the every-minute cron are not the same mechanism
+twice**, unlike 7b's sweep. Neither covers the other: the trigger fires within
+milliseconds of an enqueue, which is what makes the 60s target reachable at
+all; the cron is the *only* path for a deferred or retried job, because a
+quiet-hours job due at 08:00 gets no insert event at 08:00. The trigger is
+**statement-level** (one fan-out is a single INSERT of hundreds of rows) and
+swallows its own errors on purpose — publishing a party must not fail because
+vault has no worker secret.
+
+**Consent ordering is enforced as a type, not a convention.**
+`LocationReporter.requestConsent` takes a required `explanationAccepted`, so
+the OS dialog is unreachable without having shown `showLocationConsentSheet`
+first. The system prompt cannot say that what is stored is a ~100m cell, held
+24h, visible to nobody and erased on toggle-off; the sheet says all four and
+the widget test asserts each string. `location_consent` is written true only
+when the explanation was accepted **and** the OS granted. And the revocation
+path — a resume-time re-check that writes `location_consent = false` when the
+permission has gone — is the *mechanism*, not bookkeeping: 7a's trigger on
+that column erases every stored cell immediately, whereas merely stopping the
+position stream would leave the last one on disk and matchable for 24 hours.
 
 The notification engine is **event-driven, and the hourly sweep must stay a
 safety net**. Two triggers do the real work — party publish fans out from that
@@ -214,6 +270,27 @@ inconsistencies if you don't know why:
     "does X apply to this other user" needs the same treatment — the
     tempting alternative, inlining the rule, puts a second copy of party
     visibility in the code path with the widest blast radius in the schema.
+12. **A PostgREST upsert cannot satisfy asymmetric column grants.**
+    PostgREST puts *every* key of the request body into the `ON CONFLICT DO
+    UPDATE SET` list. `user_devices` grants `insert (id, user_id,
+    push_token, platform, last_location)` but only `update (push_token,
+    platform, last_location)` — deliberately, so `user_id` is settable once
+    and the derived columns never (gotcha #8) — so a body carrying
+    `user_id`, which the insert path *requires*, writes a column the update
+    path has no privilege on. It succeeds on the first run and fails with
+    42501 on every one after, which is the worst possible shape for a bug.
+    In plain SQL the two lists are checked separately, so the fix is a
+    function: `upsert_user_device`, `security invoker` so RLS and the
+    consent `with check` stay the authority. Any future table with
+    column-scoped write grants needs the same treatment.
+13. **`revoke execute … from public` also revokes it from `service_role`.**
+    Postgres grants EXECUTE on a new function to PUBLIC by default, and
+    that is where `service_role`'s privilege comes from — there is no
+    separate grant to survive the revoke. Everywhere before 7c that was
+    invisible, because nothing outside the database called those functions.
+    The moment an edge function does, the revoke has to be followed by an
+    explicit `grant execute … to service_role`, or every RPC returns 42501
+    on a function the developer can plainly see exists.
 
 ## Migration naming
 
@@ -257,6 +334,13 @@ bash scripts/verify_story_lifecycle.sh
 # parties generated in a transaction that rolls back. Prints the seq-scanning
 # control alongside, which is the argument for the two-term st_dwithin.
 bash scripts/explain_proximity.sh [N_USERS] [N_PARTIES]
+
+# Phase 7c's target, measured: party -> delivered push in under 60s, no
+# duplicates, quiet hours deferred, dead tokens cleaned up. Needs the stack up
+# and nothing else — it starts scripts/fcm_stub.py (a stand-in for Google) and
+# `functions serve` itself, and stops both on exit. pgTAP cannot cover any of
+# this: pg_net only dispatches after COMMIT and every test file rolls back.
+bash scripts/verify_notification_delivery.sh
 
 cd myparty
 flutter pub get

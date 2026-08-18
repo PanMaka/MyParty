@@ -490,14 +490,83 @@ settled while building it:
   retention and broken the "exactly two geography columns" assertion — a
   bad trade in the one place where data minimisation is the point.
 
-**7c Delivery & client** — Edge Function (TypeScript) consuming the job
-queue via FCM HTTP v1 with backoff retry, deleting the device row on an
-invalid-token response, structured logging. Flutter: capture FCM/APNs
-token, request background location permission, upsert `user_devices`, an
-in-app explanation of what's collected and why shown **before** the OS
-permission prompt (compliance requirement, not UX polish), and graceful
-handling of denied/revoked permission. Target: a new party within 500m
-produces a notification in under 60s, no duplicates, quiet hours respected.
+**7c Delivery & client** — shipped in `20260817083542`,
+`functions/notification-worker`, and the Flutter files below. Target met
+and measured by `scripts/verify_notification_delivery.sh`: **1s** from
+`insert into parties` to a delivered push, one notification from three
+racing enqueue paths, quiet hours deferred. Six things were settled while
+building it:
+
+- **The worker holds the service key, so it decides nothing.** It never
+  issues an UPDATE against `notification_jobs`; it has three verbs —
+  `claim_notification_jobs`, `complete_notification_job`,
+  `fail_notification_job` — and the queue's state machine keeps one
+  owner. The rule this protects is the 5-attempt cap: a retry budget kept
+  in worker memory resets on every redeploy and runs independently in
+  each concurrent invocation, which is not a budget. It lives on the row.
+  Same reasoning as `functions/story-media`, which holds the service key
+  and contains not one line of visibility logic.
+- **The consent gates are re-asked at DELIVERY time, not only at
+  enqueue.** Quiet hours mean a decision taken at 02:14 is delivered at
+  08:00, and consent withdrawn in between has to take effect immediately
+  (GDPR Art. 7(3)) — not "for jobs enqueued from now on". The claim
+  re-calls `wants_nearby_notifications` and re-checks the party is still
+  published and public. This is the assertion that fails if someone ever
+  removes the re-check as redundant with the enqueue-time gate.
+- **`cancelled` joined the status CHECK, because `failed` has to keep
+  meaning "we tried and could not".** Consent withdrawn, party cancelled
+  or gone private are all *decisions not to send*. Folded into `failed`,
+  a healthy system correctly declining a thousand jobs reads as a
+  thousand delivery faults on the one metric an operator watches.
+- **The insert trigger and the every-minute cron are not the same
+  mechanism twice.** Unlike 7b's sweep, neither covers the other: the
+  trigger fires within milliseconds of an enqueue, which is what makes
+  the 60s target reachable; the cron is the *only* path for a deferred or
+  retried job, because a quiet-hours job due at 08:00 gets no insert
+  event at 08:00. The trigger is statement-level (one fan-out is one
+  INSERT of hundreds of rows) and swallows its errors on purpose —
+  publishing a party must not fail because vault has no worker secret.
+- **A PostgREST upsert cannot satisfy 7a's column grants.** `user_devices`
+  grants `insert (id, user_id, push_token, platform, last_location)` but
+  only `update (push_token, platform, last_location)`, and PostgREST puts
+  every request-body key into the `ON CONFLICT DO UPDATE SET` list — so a
+  body carrying `user_id`, which the insert path requires, writes a column
+  the update path deliberately has no privilege on. It succeeds on first
+  run and fails on every one after. Hence `upsert_user_device`, and it is
+  `security invoker` so the RLS consent gate remains the authority rather
+  than being restated inside a definer function.
+- **Revocation is the path the feature was most likely to get wrong.**
+  The OS never tells an app that location permission was withdrawn, so
+  the client re-checks on every resume and, on finding it gone, writes
+  `location_consent = false`. That is the mechanism, not the record: the
+  7a trigger on that column erases every stored cell immediately. Merely
+  stopping the position stream would leave the last one on disk — and
+  matchable by the proximity queries — for up to 24 hours.
+
+Consent ordering is enforced as a type rather than a convention:
+`LocationReporter.requestConsent` takes a required `explanationAccepted`,
+so the OS dialog is unreachable without having shown the in-app sheet
+first. The system prompt cannot say that what is stored is a ~100m cell,
+held 24h, visible to nobody and erased on toggle-off; the sheet says all
+four, and `test/notifications_test.dart` asserts each string is on screen.
+`location_consent` is written true only when the explanation was accepted
+*and* the OS granted — recording it earlier would leave the flag claiming
+a permission the app does not hold.
+
+FCM is wired conditionally: Gradle applies `com.google.gms.google-services`
+only when `google-services.json` exists, and `PushService` degrades to
+`PushAvailability.notConfigured`. `flutter build apk --debug` therefore
+succeeds with no Firebase project — which is not merely a convenience for
+a fresh clone, since an Android handset with no Play Services can never
+obtain a token either and the app has to work there. Run
+`flutterfire configure` and add the `FCM_SERVICE_ACCOUNT` secret to switch
+it on; no Dart changes.
+
+New Flutter surface: `DeviceRepository`, `PushService`,
+`LocationReporter`, `Notifications` (app-scoped wiring),
+`NotificationPrefs`, `showLocationConsentSheet` and
+`NotificationSettingsScreen`. `mp_store.dart` is unchanged — 7c adds
+client surface but retires no mock; the map-visibility toggle is Phase 8's.
 
 ## Phase 8 — Profile wiring
 
