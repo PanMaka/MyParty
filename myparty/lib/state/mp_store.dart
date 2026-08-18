@@ -33,7 +33,11 @@ class MpStore extends ChangeNotifier {
     'zoi': false,
     'lefteris': false,
   };
-  bool _mapVisible = true;
+  // _mapVisible / toggleMapVisible lived here until Phase 8. They are gone
+  // rather than migrated: the real setting is profiles.map_visibility, which is
+  // three tiers instead of two and is read by get_parties_near_user, so keeping
+  // a mirror of it in memory would only create something that could disagree
+  // with the server. ProfileScreen holds the loaded value instead.
   bool _copied = false;
 
   Timer? _decayTimer;
@@ -42,7 +46,6 @@ class MpStore extends ChangeNotifier {
 
   int hypeOf(String id) => _hype[id] ?? 0;
   bool interestedIn(String id) => _interested[id] ?? false;
-  bool get mapVisible => _mapVisible;
   bool get copied => _copied;
   bool invited(String friendId) => _invited[friendId] ?? false;
   int get invitedCount => _invited.values.where((v) => v).length;
@@ -58,11 +61,6 @@ class MpStore extends ChangeNotifier {
     if (next && hypeBumpOnJoin > 0) {
       _hype[id] = math.min(100, (_hype[id] ?? 0) + hypeBumpOnJoin);
     }
-    notifyListeners();
-  }
-
-  void toggleMapVisible() {
-    _mapVisible = !_mapVisible;
     notifyListeners();
   }
 

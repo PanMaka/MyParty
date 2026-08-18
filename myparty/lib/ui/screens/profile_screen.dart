@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 
+import '../../data/profile_repository.dart';
 import '../../data/social_repository.dart';
 import '../../models/feed_post.dart';
 import '../../models/profile.dart';
+import '../../models/profile_privacy.dart';
+import '../../models/profile_stats.dart';
 import '../../services/auth_service.dart';
-import '../../state/mp_store.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
 import '../widgets/follow_button.dart';
@@ -14,7 +15,12 @@ import '../widgets/report_sheet.dart';
 import 'notification_settings_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({super.key, this.userId});
+  const ProfileScreen({super.key, this.userId, this.repository});
+
+  /// Injectable so widget tests can subclass [ProfileRepository] without a
+  /// Supabase client ever existing, the same way [NotificationSettingsScreen]
+  /// takes a [DeviceRepository].
+  final ProfileRepository? repository;
 
   /// Whose profile this is. Null means "no real profile selected", which is
   /// how `main_screen.dart` mounts it on the tab bar today — the public view
@@ -28,27 +34,65 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   final _social = SocialRepository();
+  late final ProfileRepository _profiles = widget.repository ?? ProfileRepository();
 
   bool _selfView = true;
   Future<List<Profile>>? _theirFollowing;
+
+  ProfilePrivacy? _privacy;
+  ProfileStats _stats = ProfileStats.empty;
+  bool _busy = false;
 
   @override
   void initState() {
     super.initState();
     final id = widget.userId;
     if (id != null) _theirFollowing = _social.fetchFollowing(userId: id);
+    _load();
+  }
+
+  Future<void> _load() async {
+    final privacy = await _profiles.fetchPrivacy();
+    final stats = await _profiles.fetchStats(userId: widget.userId);
+    if (!mounted) return;
+    setState(() {
+      _privacy = privacy;
+      _stats = stats;
+    });
+  }
+
+  /// Wraps every privacy write, exactly as [NotificationSettingsScreen] does:
+  /// two taps cannot race each other into the database, and a rejected write
+  /// reloads rather than leaving a switch showing a state the server never
+  /// accepted. That last part matters more here than on a notification
+  /// preference — a privacy control that displays a setting the server did not
+  /// store is worse than one that fails loudly.
+  Future<void> _mutate(Future<void> Function() action) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await action();
+      await _load();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Κάτι πήγε στραβά: $error'), behavior: SnackBarBehavior.floating),
+        );
+      }
+      await _load();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   void _comingSoon() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Έρχεται σύντομα'), behavior: SnackBarBehavior.floating),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Έρχεται σύντομα'), behavior: SnackBarBehavior.floating));
   }
 
   @override
   Widget build(BuildContext context) {
-    final store = context.watch<MpStore>();
-
     return Scaffold(
       backgroundColor: AppColors.bg,
       body: SafeArea(
@@ -61,10 +105,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('Προφίλ', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -0.5)),
+                  const Text(
+                    'Προφίλ',
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -0.5),
+                  ),
                   Container(
                     padding: const EdgeInsets.all(3),
-                    decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(99)),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.06),
+                      borderRadius: BorderRadius.circular(99),
+                    ),
                     child: Row(
                       children: [
                         _segment('ΕΓΩ', _selfView, () => setState(() => _selfView = true)),
@@ -83,16 +133,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     width: 74,
                     height: 74,
                     clipBehavior: Clip.antiAlias,
-                    decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: AppColors.purple.withValues(alpha: 0.5), width: 2)),
-                    child: const DiagonalStripePlaceholder(colors: [Color(0xFF241E3C), Color(0xFF1B1630)], label: 'avatar'),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: AppColors.purple.withValues(alpha: 0.5), width: 2),
+                    ),
+                    child: const DiagonalStripePlaceholder(
+                      colors: [Color(0xFF241E3C), Color(0xFF1B1630)],
+                      label: 'avatar',
+                    ),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('Κατερίνα Βλάχου', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
-                        Text('@katerina · ΕΚΠΑ, Ψυχολογία', style: TextStyle(fontSize: 12.5, color: AppColors.textAlpha(0.5))),
+                        const Text(
+                          'Κατερίνα Βλάχου',
+                          style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800, letterSpacing: -0.3),
+                        ),
+                        Text(
+                          '@katerina · ΕΚΠΑ, Ψυχολογία',
+                          style: TextStyle(fontSize: 12.5, color: AppColors.textAlpha(0.5)),
+                        ),
                         Padding(
                           padding: const EdgeInsets.only(top: 9),
                           child: Row(
@@ -113,22 +175,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
               child: Row(
                 children: [
-                  Expanded(child: _statTile('47', 'πάρτι φέτος')),
+                  // "πάρτι φέτος" is the OWNER'S tile and only the owner's.
+                  // get_profile_stats runs with invoker rights, and the rsvps
+                  // SELECT policy is `user_id = auth.uid() OR I host it` — so
+                  // for any other viewer this number is structurally zero, not
+                  // small. Rendering "0 πάρτι φέτος" on someone else's profile
+                  // would state something false ("they go to nothing") in place
+                  // of something unknowable. Hiding the tile says the true
+                  // thing, which is nothing at all.
+                  if (_selfView) ...[
+                    Expanded(child: _statTile('${_stats.partiesAttended}', 'πάρτι φέτος')),
+                    const SizedBox(width: 8),
+                  ],
+                  Expanded(child: _statTile('${_stats.partiesHosted}', 'διοργάνωσε', pink: true)),
                   const SizedBox(width: 8),
-                  Expanded(child: _statTile('5', 'διοργάνωσε', pink: true)),
-                  const SizedBox(width: 8),
-                  Expanded(child: _statTile('312', 'stories')),
+                  Expanded(child: _statTile('${_stats.storiesPosted}', 'stories')),
                 ],
               ),
             ),
-            if (_selfView) ..._selfSections(context, store) else ..._publicSections(context, store),
+            if (_selfView) ..._selfSections(context) else ..._publicSections(context),
           ],
         ),
       ),
     );
   }
 
-  List<Widget> _selfSections(BuildContext context, MpStore store) {
+  List<Widget> _selfSections(BuildContext context) {
     return [
       Padding(
         padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
@@ -159,15 +231,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         const Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Ταράτσα στο Κουκάκι', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700)),
+                            Text(
+                              'Ταράτσα στο Κουκάκι',
+                              style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700),
+                            ),
                             SizedBox(height: 2),
-                            Text('Απόψε · 18/24 δέχτηκαν', style: TextStyle(fontSize: 11.5, color: Color(0x8CF4F1F8))),
+                            Text(
+                              'Απόψε · 18/24 δέχτηκαν',
+                              style: TextStyle(fontSize: 11.5, color: Color(0x8CF4F1F8)),
+                            ),
                           ],
                         ),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                          decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.09), borderRadius: BorderRadius.circular(10)),
-                          child: const Text('Διαχείριση', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.09),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Text(
+                            'Διαχείριση',
+                            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+                          ),
                         ),
                       ],
                     ),
@@ -180,7 +264,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         child: FractionallySizedBox(
                           alignment: Alignment.centerLeft,
                           widthFactor: 0.75,
-                          child: Container(decoration: const BoxDecoration(gradient: LinearGradient(colors: [AppColors.purpleDeep, AppColors.pink]))),
+                          child: Container(
+                            decoration: const BoxDecoration(
+                              gradient: LinearGradient(colors: [AppColors.purpleDeep, AppColors.pink]),
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -202,7 +290,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
               children: [
                 Expanded(child: _historyTile('Kápsimo', const [Color(0xFF1A1522), Color(0xFF141020)])),
                 const SizedBox(width: 5),
-                Expanded(child: _historyTile('Εξάρχεια', const [Color(0xFF1C1622), Color(0xFF151020)], ring: AppColors.pink)),
+                Expanded(
+                  child: _historyTile('Εξάρχεια', const [
+                    Color(0xFF1C1622),
+                    Color(0xFF151020),
+                  ], ring: AppColors.pink),
+                ),
                 const SizedBox(width: 5),
                 Expanded(child: _historyTile('Anodos', const [Color(0xFF1D1730), Color(0xFF161126)])),
               ],
@@ -225,15 +318,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               child: Column(
                 children: [
-                  _settingsRow('Ποιος βλέπει σε ποια πάρτι πάω', 'Μόνο οι φίλοι μου', chevron: true, onTap: _comingSoon),
-                  Container(height: 1, color: AppColors.hairline),
+                  // Still unwired, and deliberately so: there is no column
+                  // behind it yet. It is also the reason the "πάρτι φέτος" tile
+                  // is owner-only — until this setting exists, the rsvps policy
+                  // IS the answer to "who sees where I go", and get_profile_stats
+                  // does not invent a different one.
                   _settingsRow(
-                    'Εμφάνιση στον χάρτη όταν είμαι σε πάρτι',
-                    'Οι φίλοι βλέπουν πού είσαι απόψε',
-                    trailing: _mapSwitch(store),
+                    'Ποιος βλέπει σε ποια πάρτι πάω',
+                    'Έρχεται σύντομα',
+                    chevron: true,
+                    onTap: _comingSoon,
                   ),
                   Container(height: 1, color: AppColors.hairline),
-                  _settingsRow('Ποιος μπορεί να με καλέσει', 'Φίλοι και φίλοι φίλων', chevron: true, onTap: _comingSoon),
+                  // Was a two-state switch on MpStore.mapVisible, which no
+                  // server ever read. Now three tiers on profiles.map_visibility,
+                  // enforced inside get_parties_near_user.
+                  _settingsRow(
+                    'Ποιος βλέπει τα πάρτι μου στον χάρτη',
+                    _privacy?.mapVisibility.label ?? '…',
+                    chevron: true,
+                    onTap: _privacy == null ? null : _pickMapVisibility,
+                  ),
+                  Container(height: 1, color: AppColors.hairline),
+                  _settingsRow(
+                    'Ποιος μπορεί να με καλέσει',
+                    _privacy?.invitePolicy.label ?? '…',
+                    chevron: true,
+                    onTap: _privacy == null ? null : _pickInvitePolicy,
+                  ),
                 ],
               ),
             ),
@@ -269,11 +381,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 'Ειδοποιήσεις & τοποθεσία',
                 'Πάρτι κοντά σου, ώρες ησυχίας, απόσταση',
                 chevron: true,
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const NotificationSettingsScreen(),
-                  ),
-                ),
+                onTap: () => Navigator.of(
+                  context,
+                ).push(MaterialPageRoute<void>(builder: (_) => const NotificationSettingsScreen())),
               ),
             ),
           ],
@@ -291,7 +401,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
               border: Border.all(color: AppColors.hairline),
             ),
             child: Center(
-              child: Text('Αποσύνδεση', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textAlpha(0.6))),
+              child: Text(
+                'Αποσύνδεση',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textAlpha(0.6)),
+              ),
             ),
           ),
         ),
@@ -299,7 +412,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     ];
   }
 
-  List<Widget> _publicSections(BuildContext context, MpStore store) {
+  List<Widget> _publicSections(BuildContext context) {
     return [
       Padding(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
@@ -317,8 +430,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           gradient: AppColors.purpleGradient,
                           borderRadius: BorderRadius.circular(13),
                         ),
-                        child: const Text('Ακολούθησε',
-                            style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
+                        child: const Text(
+                          'Ακολούθησε',
+                          style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
+                        ),
                       ),
                     ),
             ),
@@ -346,13 +461,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
               PopupMenuButton<String>(
                 icon: Icon(Icons.more_horiz, size: 20, color: AppColors.textAlpha(0.5)),
                 color: AppColors.sheet,
-                onSelected: (_) => showReportSheet(
-                  context,
-                  target: ReportTarget.profile,
-                  targetId: widget.userId!,
-                ),
+                onSelected: (_) =>
+                    showReportSheet(context, target: ReportTarget.profile, targetId: widget.userId!),
                 itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'report', child: Text('Αναφορά', style: TextStyle(fontSize: 13))),
+                  PopupMenuItem(
+                    value: 'report',
+                    child: Text('Αναφορά', style: TextStyle(fontSize: 13)),
+                  ),
                 ],
               ),
           ],
@@ -363,7 +478,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('ΔΗΜΟΣΙΑ ΠΑΡΤΙ ΠΟΥ ΔΙΟΡΓΑΝΩΣΕ', style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.45))),
+            Text(
+              'ΔΗΜΟΣΙΑ ΠΑΡΤΙ ΠΟΥ ΔΙΟΡΓΑΝΩΣΕ',
+              style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.45)),
+            ),
             const SizedBox(height: 9),
             Container(
               padding: const EdgeInsets.all(13),
@@ -377,7 +495,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 children: [
                   Text('Rooftop Σεπτεμβρίου', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700)),
                   SizedBox(height: 2),
-                  Text('Πέρσι · 140 ήρθαν · Κουκάκι', style: TextStyle(fontSize: 11.5, color: Color(0x8CF4F1F8))),
+                  Text(
+                    'Πέρσι · 140 ήρθαν · Κουκάκι',
+                    style: TextStyle(fontSize: 11.5, color: Color(0x8CF4F1F8)),
+                  ),
                 ],
               ),
             ),
@@ -399,8 +520,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
               Icon(Icons.lock_outline, size: 16, color: AppColors.textAlpha(0.45)),
               const SizedBox(width: 9),
               Expanded(
-                child: Text('Τα ιδιωτικά πάρτι της Κατερίνας και τα stories τους δεν είναι ορατά σε σένα.',
-                    style: TextStyle(fontSize: 12, height: 1.45, color: AppColors.textAlpha(0.5))),
+                child: Text(
+                  'Τα ιδιωτικά πάρτι της Κατερίνας και τα stories τους δεν είναι ορατά σε σένα.',
+                  style: TextStyle(fontSize: 12, height: 1.45, color: AppColors.textAlpha(0.5)),
+                ),
               ),
             ],
           ),
@@ -420,8 +543,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('ΑΚΟΛΟΥΘΕΙ · ${people.length}',
-                      style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.45))),
+                  Text(
+                    'ΑΚΟΛΟΥΘΕΙ · ${people.length}',
+                    style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.45)),
+                  ),
                   const SizedBox(height: 9),
                   Row(
                     children: [
@@ -438,8 +563,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 child: DiagonalStripePlaceholder(colors: f.placeholderColors),
                               ),
                               const SizedBox(height: 5),
-                              Text(f.username,
-                                  style: TextStyle(fontSize: 10.5, color: AppColors.textAlpha(0.55))),
+                              Text(
+                                f.username,
+                                style: TextStyle(fontSize: 10.5, color: AppColors.textAlpha(0.55)),
+                              ),
                             ],
                           ),
                         ),
@@ -462,7 +589,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
           color: active ? Colors.white.withValues(alpha: 0.12) : null,
           borderRadius: BorderRadius.circular(99),
         ),
-        child: Text(label, style: AppTextStyles.mono(size: 10.5, color: active ? AppColors.text : AppColors.textAlpha(0.45))),
+        child: Text(
+          label,
+          style: AppTextStyles.mono(size: 10.5, color: active ? AppColors.text : AppColors.textAlpha(0.45)),
+        ),
       ),
     );
   }
@@ -490,7 +620,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(value, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: -0.3, color: pink ? AppColors.pinkLight : AppColors.text)),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.3,
+              color: pink ? AppColors.pinkLight : AppColors.text,
+            ),
+          ),
           const SizedBox(height: 1),
           Text(label, style: TextStyle(fontSize: 10.5, color: AppColors.textAlpha(0.5))),
         ],
@@ -521,7 +659,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _settingsRow(String title, String sub, {bool chevron = false, Widget? trailing, VoidCallback? onTap}) {
+  Widget _settingsRow(String title, String sub, {bool chevron = false, VoidCallback? onTap}) {
     return InkWell(
       onTap: onTap,
       child: Padding(
@@ -538,7 +676,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ],
               ),
             ),
-            if (trailing != null) trailing,
             if (chevron) Icon(Icons.chevron_right, size: 18, color: AppColors.textAlpha(0.35)),
           ],
         ),
@@ -546,26 +683,115 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _mapSwitch(MpStore store) {
-    return GestureDetector(
-      onTap: store.toggleMapVisible,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        width: 42,
-        height: 25,
-        padding: const EdgeInsets.all(2.5),
-        decoration: BoxDecoration(
-          gradient: store.mapVisible ? AppColors.purpleGradient : null,
-          color: store.mapVisible ? null : Colors.white.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(99),
-        ),
-        child: AnimatedAlign(
-          duration: const Duration(milliseconds: 180),
-          alignment: store.mapVisible ? Alignment.centerRight : Alignment.centerLeft,
-          child: Container(
-            width: 20,
-            height: 20,
-            decoration: BoxDecoration(color: store.mapVisible ? Colors.white : Colors.white.withValues(alpha: 0.6), shape: BoxShape.circle),
+  /// A switch cannot express three tiers, and squeezing map_visibility into one
+  /// would have to drop a tier or overload it. A sheet also gives each option
+  /// room for the sentence that says what it actually does — which is the
+  /// difference between a control someone sets correctly and one they guess at.
+  Future<void> _pickMapVisibility() async {
+    final chosen = await _pickTier<MapVisibility>(
+      title: 'Ποιος βλέπει τα πάρτι μου στον χάρτη',
+      options: MapVisibility.values,
+      current: _privacy!.mapVisibility,
+      labelOf: (v) => v.label,
+      explanationOf: (v) => v.explanation,
+      // The one thing the tiers do NOT do, stated where the choice is made:
+      // people already tied to a specific party keep seeing it at every tier.
+      footnote:
+          'Όσοι έχουν πρόσκληση ή έχουν ήδη δηλώσει συμμετοχή '
+          'συνεχίζουν να βλέπουν το συγκεκριμένο πάρτι.',
+    );
+    if (chosen == null || chosen == _privacy!.mapVisibility) return;
+    await _mutate(() => _profiles.updatePrivacy(mapVisibility: chosen));
+  }
+
+  Future<void> _pickInvitePolicy() async {
+    final chosen = await _pickTier<InvitePolicy>(
+      title: 'Ποιος μπορεί να με καλέσει',
+      options: InvitePolicy.values,
+      current: _privacy!.invitePolicy,
+      labelOf: (v) => v.label,
+      explanationOf: (v) => v.explanation,
+    );
+    if (chosen == null || chosen == _privacy!.invitePolicy) return;
+    await _mutate(() => _profiles.updatePrivacy(invitePolicy: chosen));
+  }
+
+  Future<T?> _pickTier<T>({
+    required String title,
+    required List<T> options,
+    required T current,
+    required String Function(T) labelOf,
+    required String Function(T) explanationOf,
+    String? footnote,
+  }) {
+    return showModalBottomSheet<T>(
+      context: context,
+      backgroundColor: AppColors.sheet,
+      // Both are needed, and neither is cosmetic. A default modal sheet is
+      // capped at 9/16 of the screen, which three tiers plus their explanations
+      // and the footnote overflow on a short handset — and an overflowing sheet
+      // clips the last option rather than scrolling to it, so a tier would
+      // simply be unreachable. isScrollControlled lifts the cap;
+      // SingleChildScrollView covers the rest (large text scale, small screen).
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (sheetContext) => SafeArea(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
+                child: Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+              ),
+              for (final option in options)
+                InkWell(
+                  onTap: () => Navigator.of(sheetContext).pop(option),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                labelOf(option),
+                                style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                explanationOf(option),
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  height: 1.4,
+                                  color: AppColors.textAlpha(0.5),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (option == current)
+                          const Padding(
+                            padding: EdgeInsets.only(left: 10, top: 2),
+                            child: Icon(Icons.check, size: 18, color: AppColors.pinkLight),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              if (footnote != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                  child: Text(
+                    footnote,
+                    style: TextStyle(fontSize: 11, height: 1.5, color: AppColors.textAlpha(0.38)),
+                  ),
+                ),
+              const SizedBox(height: 8),
+            ],
           ),
         ),
       ),
