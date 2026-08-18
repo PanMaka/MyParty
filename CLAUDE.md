@@ -113,9 +113,14 @@ Phase 8 retired the first thing from `mp_store.dart`: `mapVisible` /
 `toggleMapVisible` are **deleted, not migrated**. The real setting is
 `profiles.map_visibility`, it has three tiers rather than two, and it is read
 by `get_parties_near_user` — a mirror of it in memory could only ever disagree
-with the server. `credibility_score` is still written by nothing; the option
-space and a recommendation are in `docs/backend-plan.md` 8.3, awaiting a
-product decision. Do not invent a formula.
+with the server. **`credibility_score` ships no score in v1 — decided, not
+pending.** The column and its `protect_credibility_score` trigger stay, written
+by nothing and read by nothing; the client plumbing (`Profile.credibilityScore`,
+the `SocialRepository` selects) was removed, because a field that is `0` for
+every user on a model the profile screen renders is an invitation to display it.
+Do not invent a formula, and do not derive one from tenure/volume — that is the
+option `docs/backend-plan.md` 8.3 explicitly rejected. The only honest input is
+host-confirmed reliability, which is a mechanism and its own phase.
 
 **FCM is wired conditionally and that is deliberate.** Gradle applies
 `com.google.gms.google-services` only when `myparty/android/app/google-services.json`

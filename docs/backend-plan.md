@@ -686,29 +686,37 @@ game and by far the most expensive: a periodic graph computation, plus the
 fairness problem that it entrenches early users and reads as arbitrary to
 everyone else.
 
-**The recommendation, if a v1 is wanted:** ship **nothing that scores people**
-yet, and instead make the column *honest about what it can observe*. Today
-that is D-plus-upheld-C, which is a vanity metric wearing the word
-"credibility" — the most likely outcome is a number users optimise and hosts
-learn to distrust.
+### DECIDED: v1 ships no score
 
-The cheap, non-committal v1 is to **stop showing a score and start showing the
-facts**: parties hosted, how long the account has existed, whether it is
-verified. `get_profile_stats` already returns two of the three. That defers the
-formula without leaving the profile screen empty, and it avoids the trap of
-shipping a number that is hard to change later because users have started
-caring about it.
+**Decision taken in the Phase 8 session: option (i) — no score, factual tiles
+only.** Everything observable today is either gameable (D) or purely punitive
+(C, with no "upheld" state, and therefore weaponisable). A number built from
+those inputs is a vanity metric wearing the word "credibility", and the
+likeliest outcome is one users optimise and hosts learn to distrust. A score is
+also unusually hard to withdraw once shipped, because people start caring about
+it — so not shipping one is the cheap, reversible direction and shipping one is
+not.
 
-If a real score is wanted in v1, the smallest defensible version is **A gated
-behind an explicit host-completion step**: after `ends_at`, the host marks the
-party as happened, attendees get one "were you there / did it happen" prompt,
-and the score is the ratio over a rolling window with a minimum sample size
-before any number is shown at all. That is honest, but it is a feature, not a
-formula — and the check-in question is a Phase 7-shaped consent problem.
+What this means concretely:
 
-**Decision needed:** whether Phase 8 ships (i) no score and factual tiles,
-(ii) a tenure/volume number, or (iii) the host-completion loop as its own
-phase. Nothing was implemented pending that call.
+- `public.profiles.credibility_score` **stays** — column, default `0`, and the
+  `protect_credibility_score` trigger. Nothing is dropped, so any later
+  decision is additive. It is simply written by nothing and read by nothing.
+- The **client plumbing is gone**: `Profile.credibilityScore` is removed and
+  `SocialRepository` no longer selects the column. A field carrying a value
+  that is `0` for every user, on a model the profile screen renders, is an
+  affordance — the obvious next step for whoever finds it is to display it.
+  Re-add it in the same change that gives it a meaning.
+- The profile screen shows facts instead: `get_profile_stats` already returns
+  parties hosted and stories posted, both RLS-filtered to the viewer.
+
+**If a real score is wanted later**, the only honest input is A, and it needs
+a mechanism rather than a formula: after `ends_at` the host marks the party as
+happened, attendees get one "were you there / did it happen" prompt, and the
+score is a ratio over a rolling window with a minimum sample size before any
+number is shown at all. That is its own phase, and the check-in question lands
+back in Phase 7's consent machinery. Do not shortcut it by deriving a score
+from D — that is the outcome this decision rejected.
 
 ## Phase 9 — Compliance
 

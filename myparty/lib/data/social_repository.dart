@@ -36,7 +36,7 @@ class SocialRepository {
 
     final rows = await _client
         .from('follows')
-        .select('profiles!follows_followee_id_fkey(id, username, credibility_score, follower_count, following_count)')
+        .select('profiles!follows_followee_id_fkey(id, username, follower_count, following_count)')
         .eq('follower_id', id)
         .order('created_at', ascending: false)
         .limit(200);
@@ -51,7 +51,7 @@ class SocialRepository {
 
     final rows = await _client
         .from('follows')
-        .select('profiles!follows_follower_id_fkey(id, username, credibility_score, follower_count, following_count)')
+        .select('profiles!follows_follower_id_fkey(id, username, follower_count, following_count)')
         .eq('followee_id', id)
         .order('created_at', ascending: false)
         .limit(200);
@@ -105,7 +105,7 @@ class SocialRepository {
 
     final rows = await _client
         .from('profiles')
-        .select('id, username, credibility_score, follower_count, following_count')
+        .select('id, username, follower_count, following_count')
         .ilike('username', '%$trimmed%')
         .neq('id', _uid ?? '00000000-0000-0000-0000-000000000000')
         .limit(limit);
@@ -148,7 +148,7 @@ class SocialRepository {
 
     final rows = await _client
         .from('blocks')
-        .select('profiles!blocks_blocked_id_fkey(id, username, credibility_score, follower_count, following_count)')
+        .select('profiles!blocks_blocked_id_fkey(id, username, follower_count, following_count)')
         .eq('blocker_id', id)
         .order('created_at', ascending: false)
         .limit(200);

@@ -3,17 +3,23 @@ import 'package:flutter/material.dart';
 /// A real `public.profiles` row. Replaces the const `MpFriend` mock list —
 /// there is no "friend" concept in the schema, only the asymmetric follow
 /// graph, so this is just a user.
+///
+/// Deliberately carries no `credibilityScore`. The column still exists and is
+/// still protected by `protect_credibility_score`, but Phase 8 decided that
+/// nothing writes it and nothing shows it in v1 (see `docs/backend-plan.md`
+/// 8.3) — so every value it could hold today is `0`. Fetching a column no
+/// screen may render is not neutral: it is an affordance, and the obvious next
+/// step for whoever finds it is to put the number on the profile. Add it back
+/// in the same change that gives it a meaning.
 class Profile {
   final String id;
   final String username;
-  final int credibilityScore;
   final int followerCount;
   final int followingCount;
 
   const Profile({
     required this.id,
     required this.username,
-    required this.credibilityScore,
     required this.followerCount,
     required this.followingCount,
   });
@@ -22,7 +28,6 @@ class Profile {
     return Profile(
       id: row['id'] as String,
       username: row['username'] as String,
-      credibilityScore: (row['credibility_score'] as int?) ?? 0,
       followerCount: (row['follower_count'] as int?) ?? 0,
       followingCount: (row['following_count'] as int?) ?? 0,
     );
