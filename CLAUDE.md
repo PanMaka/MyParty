@@ -38,9 +38,13 @@ pipeline (`claim_notification_jobs`/`complete_notification_job`/
 insert trigger and the every-minute `notification-worker-tick` cron that both
 POST to it over pg_net) and `upsert_user_device`, the client's only door into
 `user_devices`;
+`map_visibility`/`invite_policy` on `profiles` with `accepts_invite_from`,
+enforced in the `invitations` INSERT policy and inside `get_parties_near_user`
+respectively, plus `get_profile_stats`;
 `AuthService` (email signup/signin/signout via `supabase_flutter`);
 `PartyRepository`, `SocialRepository`, `FeedRepository`, `ChatRepository`,
-`StoryRepository` and `DeviceRepository` (all widget-level Supabase calls go
+`StoryRepository`, `DeviceRepository` and `ProfileRepository` (all
+widget-level Supabase calls go
 through these — a widget reaching for `Supabase.instance` directly is a bug,
 and also unbuildable under `flutter test`); `PushService`, `LocationReporter`
 and the `Notifications` app-scoped wiring; `showLocationConsentSheet` and
@@ -88,7 +92,7 @@ one without an explicit product decision. A follow grants **no** private-party
 visibility; that comes from `invitations` alone.
 
 **Mock today, ships real in later phases:** everything left in
-`lib/state/mp_store.dart` (hype, interested, invited, map-visibility) and the
+`lib/state/mp_store.dart` (hype, interested, invited) and the
 const `mpParties` list in `lib/models/` — `PartyCard` and `PartyDetailSheet`
 still read from it instead of Supabase. Note `mpParties` keys are strings like
 `'taratsa'`, not uuids, which is why the report action is wired into
@@ -104,8 +108,14 @@ rail and its "+ Story" picker.
 Phase 7 is complete end to end, and `scripts/verify_notification_delivery.sh`
 measures it: 1s from `insert into parties` to a delivered push, one
 notification from three racing enqueue paths, quiet hours deferred.
-`mp_store.dart` is unchanged by all three sub-phases — 7c adds client surface
-but retires no mock; the map-visibility toggle is Phase 8's.
+
+Phase 8 retired the first thing from `mp_store.dart`: `mapVisible` /
+`toggleMapVisible` are **deleted, not migrated**. The real setting is
+`profiles.map_visibility`, it has three tiers rather than two, and it is read
+by `get_parties_near_user` — a mirror of it in memory could only ever disagree
+with the server. `credibility_score` is still written by nothing; the option
+space and a recommendation are in `docs/backend-plan.md` 8.3, awaiting a
+product decision. Do not invent a formula.
 
 **FCM is wired conditionally and that is deliberate.** Gradle applies
 `com.google.gms.google-services` only when `myparty/android/app/google-services.json`
@@ -291,6 +301,25 @@ inconsistencies if you don't know why:
     The moment an edge function does, the revoke has to be followed by an
     explicit `grant execute … to service_role`, or every RPC returns 42501
     on a function the developer can plainly see exists.
+14. **The two privacy tiers point in opposite directions along the follow
+    edge, and it type-checks either way.** `map_visibility = 'followers'`
+    means people who follow ME (`follows.followee_id = me`);
+    `invite_policy = 'following'` means people I follow
+    (`follows.follower_id = me`). Swapping them compiles, passes analysis,
+    and produces a working feature that is wrong: "anyone who follows me may
+    invite me" is a spam vector, since following is unilateral and needs no
+    consent. Both directions are asserted separately in
+    `11_profile_privacy_and_stats.test.sql` for exactly that reason — one
+    passing tells you nothing about the other.
+15. **A control query in an RLS test is filtered by the RLS it is
+    controlling for.** Asserting "a stranger counts fewer than the owner"
+    against `(select count(*) from public.parties where host_id = …)`
+    evaluated AFTER `tests.authenticate_as(stranger)` compares two numbers
+    that shrink in lockstep — it passed against a leak-free function and
+    would have passed against a leaking one too. The control has to be
+    captured while still authenticated as the owner (a temp table works) or
+    it is not a control. Any assertion of the form "viewer A sees less than
+    viewer B" has this failure mode.
 
 ## Migration naming
 
@@ -341,6 +370,13 @@ bash scripts/explain_proximity.sh [N_USERS] [N_PARTIES]
 # `functions serve` itself, and stops both on exit. pgTAP cannot cover any of
 # this: pg_net only dispatches after COMMIT and every test file rolls back.
 bash scripts/verify_notification_delivery.sh
+
+# Phase 8: is get_profile_stats an aggregate or does it need counter columns?
+# Generates 20k users / 200k rsvps in a rolled-back transaction and prints
+# each count against its seq-scan control, plus the end-to-end RPC timing
+# under RLS. Answer as measured: aggregate — >90% of the 2ms is policy
+# evaluation, which a counter column would not touch.
+bash scripts/explain_profile_stats.sh [N_USERS] [N_PARTIES] [RSVPS_PER_USER]
 
 cd myparty
 flutter pub get

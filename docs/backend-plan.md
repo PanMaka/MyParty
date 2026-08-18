@@ -592,6 +592,124 @@ write it — no formula is decided yet. This phase lists the option space
 (host reliability, RSVP follow-through, report history, …) with tradeoffs;
 a v1 formula is a decision for that session, not something to invent here.
 
+### 8.1 What was built
+
+Three migrations. `20260818175435` adds `profiles.map_visibility`
+(`public`/`followers`/`private`) and `profiles.invite_policy`
+(`anyone`/`following`), both `not null` with the permissive default, plus the
+`accepts_invite_from(guest, inviter)` definer helper. `20260818175436` puts
+them where a client cannot reach: `invite_policy` becomes a conjunct of the
+`invitations` INSERT policy and a filter inside `create_party_with_invites`;
+`map_visibility` becomes a filter inside `get_parties_near_user`.
+`20260818175437` adds `get_profile_stats` and the two indexes it needed.
+
+**The two tiers point in opposite directions along the follow edge.**
+`followers` means people who follow *me*; `following` means people *I* follow.
+Following is unilateral, so "anyone who follows me may invite me" is a spam
+vector with no consent in it, while "only people I follow may see my parties"
+would hide someone from the audience that asked to see them. Both directions
+are asserted in `11_profile_privacy_and_stats.test.sql`, because swapping them
+is the single easiest bug in this area and it type-checks perfectly.
+
+**The map gate has a party-specific override.** Being the host, holding an
+invitation, or having an RSVP beats the tier — including at `private`. An
+invitation is a deliberate act aimed at one person and outranks a blanket
+preference; without the override a host who tightened the setting would make
+their own party unfindable for people they had just invited. The test asserts
+the *limit* as well as the rule: the override is scoped to that party, never
+to the host.
+
+`map_visibility` deliberately does **not** gate the proximity notification
+engine. That engine asks about the recipient ("may we push this at them"); the
+column is a statement about the host. Its guard for that question is
+`not p.is_private`, and it stays the only one.
+
+### 8.2 Stats: measured, and the answer was "no counters"
+
+`scripts/explain_profile_stats.sh` generates 20k users / 5k parties / 200k
+rsvps / 60k stories in a rolled-back transaction, because `db reset` leaves
+zero rsvps and counting an empty table predicts nothing.
+
+| query | with index | seq-scan control |
+|---|---|---|
+| `parties_attended` | 0.062 ms, 23 buffers | ~1.5 ms, 1967 buffers |
+| `parties_hosted` | 0.049 ms, 3 buffers | 0.343 ms, 97 buffers |
+| `stories_posted` | 0.029 ms, 5 buffers | — (index pre-existed) |
+| **whole RPC, RLS applied** | **2.0–3.2 ms** | |
+
+The last row decides it. The three aggregates together are ~0.15 ms of a 2 ms
+call, so **>90% of the cost is policy evaluation, not counting**. Counter
+columns would optimize the 7% and leave the 93%, while adding three triggers
+and a backfill — and a stored counter cannot be RLS-filtered, so
+`parties_hosted` would have to either expose the private parties or drift from
+what the caller may actually see. Keep the aggregate.
+
+The phase did surface two genuinely missing indexes: `rsvps` had none on
+`user_id` (its PK is `(party_id, user_id)` and every prior access pattern
+asked the mirror question) and `parties` had none on `host_id` at all.
+
+### 8.3 credibility_score — the option space, no formula
+
+Still unwritten by anything, deliberately. `protect_credibility_score` keeps it
+out of client hands; what should move it is a product decision. The options,
+with what each actually costs:
+
+**A. Host reliability.** Did the party happen, did it start near its
+`starts_at`, did the people who RSVP'd `going` find a real event. The signal
+users most want, and the one the app cannot observe: nothing in the schema
+records that a party occurred. It needs either a host confirmation (gameable —
+the host grades themselves) or attendee confirmation (needs a check-in
+mechanism that does not exist, and check-in is a location disclosure, so it
+lands back in Phase 7's consent machinery).
+
+**B. Guest RSVP follow-through.** `going` and then not showing up is the
+complaint hosts have about guests. Same blocker as A: no attendance signal.
+Approximating it with "posted a story or a message at that party" is
+measurable today, but it scores *being a poster* rather than *turning up*, and
+it would quietly penalise the people who came and stayed off their phone.
+
+**C. Report and moderation history.** Fully observable right now — `reports`,
+`hidden_at`/`hidden_by` on the four UGC tables. It is also the one input that
+can only move the score DOWN, which makes it a punishment record, not a
+credibility score. And reports are trivially weaponisable in a social app:
+without a "report upheld" state (which nothing writes either) a coordinated
+group could drop anyone's score. If this is used at all, it must count
+*upheld* reports, which means moderation tooling first.
+
+**D. Tenure and volume.** Account age, parties hosted, parties attended,
+follower count. Costless — `get_profile_stats` already computes most of it —
+and entirely gameable, since every input is something a user can simply do
+more of. Measures activity and calls it trust.
+
+**E. Graph-derived trust.** Weight by *who* follows you or attends. Hardest to
+game and by far the most expensive: a periodic graph computation, plus the
+fairness problem that it entrenches early users and reads as arbitrary to
+everyone else.
+
+**The recommendation, if a v1 is wanted:** ship **nothing that scores people**
+yet, and instead make the column *honest about what it can observe*. Today
+that is D-plus-upheld-C, which is a vanity metric wearing the word
+"credibility" — the most likely outcome is a number users optimise and hosts
+learn to distrust.
+
+The cheap, non-committal v1 is to **stop showing a score and start showing the
+facts**: parties hosted, how long the account has existed, whether it is
+verified. `get_profile_stats` already returns two of the three. That defers the
+formula without leaving the profile screen empty, and it avoids the trap of
+shipping a number that is hard to change later because users have started
+caring about it.
+
+If a real score is wanted in v1, the smallest defensible version is **A gated
+behind an explicit host-completion step**: after `ends_at`, the host marks the
+party as happened, attendees get one "were you there / did it happen" prompt,
+and the score is the ratio over a rolling window with a minimum sample size
+before any number is shown at all. That is honest, but it is a feature, not a
+formula — and the check-in question is a Phase 7-shaped consent problem.
+
+**Decision needed:** whether Phase 8 ships (i) no score and factual tiles,
+(ii) a tenure/volume number, or (iii) the host-completion loop as its own
+phase. Nothing was implemented pending that call.
+
 ## Phase 9 — Compliance
 
 Soft-delete (`profiles.deleted_at`, 30-day grace) then hard delete via Edge
