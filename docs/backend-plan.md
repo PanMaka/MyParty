@@ -718,18 +718,95 @@ number is shown at all. That is its own phase, and the check-in question lands
 back in Phase 7's consent machinery. Do not shortcut it by deriving a score
 from D — that is the outcome this decision rejected.
 
-## Phase 9 — Compliance
+## Phase 9 — Compliance  ✅ shipped
 
-Soft-delete (`profiles.deleted_at`, 30-day grace) then hard delete via Edge
-Function (auth user + storage objects + cascades). In-app deletion entry
-point (App Store requirement wherever accounts can be created). Data export
-Edge Function (JSON: profile, parties, rsvps, posts, messages). Before
-writing any migration: audit every FK and classify cascade / set-null /
-anonymize per table — group-chat messages from a deleted user should very
-likely read as "Διαγραμμένος χρήστης" rather than vanish and break the
-thread, but this needs an explicit table-by-table decision, not an assumed
-default. Retention to document: locations 24h (from 7.2), sent_notifications
-90d, ended parties indefinite.
+Soft delete with a 30-day grace period, then hard delete via edge function;
+in-app deletion entry point; GDPR data export. The full FK audit that had to
+come first is `docs/phase-09-fk-audit.md` — read it before touching any
+deletion path, because the decisions below are not recoverable from the code.
+
+### 9.1 What the audit found
+
+23 of the schema's 36 foreign keys point at `public.profiles(id)`, 18 of them
+`on delete cascade`, and `profiles.id` cascaded from `auth.users`. Deleting one
+user therefore erased **every message every other user had written in any party
+that user hosted** — via `parties.host_id`. That was the live behaviour of the
+Supabase dashboard's delete-user button, not a hypothetical.
+
+### 9.2 The mechanism: a tombstone profile
+
+`auth.users` is hard-deleted; the `profiles` row **survives**, scrubbed —
+`deleted_at`/`erased_at` set, username replaced with an opaque
+`deleted_<uuid>` handle, consent flags false, counters zeroed. Authored content
+keeps pointing at a real row, so nothing became nullable and no policy changed.
+
+The alternative — nullable `author_id` with `on delete set null` — was rejected
+for a specific reason worth keeping: `get_feed`, `get_messages`,
+`get_party_chats`, `get_post_comments`, `get_party_stories` and
+`get_parties_near_user` all reach the author through an **inner join** on
+`public.profiles` under invoker rights. A profile row that is missing, or
+merely invisible under RLS, does not render as "deleted user" — it drops the
+message out of the result entirely. Six RPCs plus every `is_blocked` term in
+every authored-content policy would have had to move, to render one label.
+
+**The corollary is the thing most likely to be "fixed" by a future reviewer:**
+adding `and deleted_at is null` to the `profiles` SELECT policy re-breaks every
+thread, permanently for a tombstone. Discovery is suppressed where the
+discovery question is asked (`accepts_invite_from`,
+`wants_nearby_notifications`, the client's username search), never in the
+policy that content rendering depends on. Asserted in
+`12_account_lifecycle.test.sql`.
+
+### 9.3 Classification, as decided
+
+- **Retained, re-pointed at the tombstone:** `parties.host_id` (past parties
+  kept; not-yet-started ones cancelled at T+0), `messages.author_id`,
+  `party_posts.author_id`, `post_comments.author_id`, `reports.reporter_id`,
+  and **both** `blocks` columns.
+- **Deleted at erasure:** `rsvps`, `invitations`, `follows` (both directions),
+  `post_likes`, `stories`, `story_views`, `party_reads`.
+- **Purged at T+0, not T+30d:** `user_devices`, `notification_jobs`,
+  `sent_notifications`.
+
+Two of these are non-obvious. **`blocks` must not cascade**: `is_blocked` is
+symmetric, so removing the edge in either direction un-hides content the
+surviving user deliberately hid — B blocks A, A deletes, A's old messages
+reappear in B's chat. And **`user_devices` goes at T+0**: `last_location` is
+the highest-risk column in the schema, and a grace period is for recovering an
+account, not a licence to keep processing someone's location for another month.
+
+Message and post **bodies are retained verbatim**; `reports.reporter_id` is
+**retained** (Art. 17(3)(e), legal claims — cascading would make "report, then
+delete your account" an evidence-destruction path); the
+`profiles.id -> auth.users` FK is **dropped**, replaced by a pgTAP assertion
+that every profile with `deleted_at is null` has a matching `auth.users` row.
+
+### 9.4 Retention policy
+
+| Data | Retention | Mechanism |
+|---|---|---|
+| `user_devices.last_location` | **24h**, and immediately on consent withdrawal | `purge_stale_locations` on a `*/10` cron plus the `location_consent` true→false trigger (`20260816083809`). Rounded to ~100m before it reaches disk. No history table, ever. |
+| `sent_notifications` | **90 days**, hard delete | `purge_old_sent_notifications`, batched at 10k, same cron job. |
+| Stories and their media | **24h** | `story-cleanup` cron; bytes go via `purge_story_media` over pg_net. |
+| Ended parties, and their posts/messages/comments | **Indefinite** | Deliberate. A party is a shared record: the host's identity is anonymised on account deletion, the event is not erased. |
+| Soft-deleted accounts | **30 days**, then hard delete | `account_erasure_grace()` is the single source of truth for the number; `account-erasure-sweep` cron at 03:30 UTC. |
+| Moderation reports | **Indefinite** | Art. 17(3)(e); reporter pseudonymised on their own deletion. |
+
+### 9.5 The split, again
+
+`account-eraser` holds the service key and decides nothing — three verbs
+(claim/complete/fail), and `complete_account_erasure` re-checks the grace
+period itself, so calling the endpoint directly with a service key still cannot
+erase somebody early. `account-export` is the one edge function that must
+**never** hold the service key: it forwards the caller's own token, and
+`export_account_data` takes no user id at all, so there is no id in the path to
+tamper with.
+
+Story media is enrolled into `story_media_purges` and dispatched by the
+existing `purge_story_media` (taught to pick up undispatched rows), rather than
+the eraser sending its own DELETE at the bucket. Two senders aimed at one path
+would race, and only one would be writing the ledger row that proves the object
+left — which is gotcha #7's failure mode with an extra step.
 
 ## Phase 10 — Hardening
 
