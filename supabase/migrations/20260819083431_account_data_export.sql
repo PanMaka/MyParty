@@ -69,7 +69,7 @@ begin
         'description', pa.description,
         'longitude', public.st_x(pa.location::public.geometry),
         'latitude', public.st_y(pa.location::public.geometry),
-        'start_time', pa.start_time,
+        'starts_at', pa.starts_at,
         'ends_at', pa.ends_at,
         'status', pa.status,
         'is_private', pa.is_private,

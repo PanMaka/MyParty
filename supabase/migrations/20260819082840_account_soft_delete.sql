@@ -246,7 +246,7 @@ begin
   set status = 'cancelled'
   where host_id = v_uid
     and status = 'published'
-    and start_time > v_now;
+    and starts_at > v_now;
 
   return v_now;
 end;

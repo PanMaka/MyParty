@@ -109,16 +109,21 @@ security definer
 set search_path = ''
 as $$
 begin
-  -- Enrol anyone whose grace period has expired. `on conflict do nothing`
+  -- Enrol anyone whose grace period has expired. `do nothing` on conflict
   -- because an account already in the queue -- claimed, failed, whatever --
   -- must not have its attempt count reset by the next sweep.
+  --
+  -- Targeted by CONSTRAINT NAME rather than by column: this function has an
+  -- OUT parameter called user_id, and `on conflict (user_id)` is the one place
+  -- in plpgsql where that name cannot be schema-qualified to disambiguate, so
+  -- it resolves as the variable and fails at runtime with 42702.
   insert into public.account_erasures (user_id)
   select p.id
   from public.profiles p
   where p.deleted_at is not null
     and p.erased_at is null
     and p.deleted_at < now() - public.account_erasure_grace()
-  on conflict (user_id) do nothing;
+  on conflict on constraint account_erasures_pkey do nothing;
 
   return query
   with claimable as (
