@@ -248,3 +248,33 @@ select vault.create_secret(
   'notification_worker_service_key',
   'Local demo service_role key, used by public.post_to_notification_worker()'
 );
+
+
+-- ============================================================
+-- Account eraser credentials (Phase 9, 20260819083207)
+--
+-- Same arrangement and same demo key as the two blocks above: the daily
+-- account-erasure-sweep cron POSTs to the erasure edge function over pg_net,
+-- and needs a URL and a service_role bearer token to do it.
+--
+-- `kong:8000/functions/v1/account-eraser` for the same docker-network reason,
+-- and it likewise only resolves while `supabase functions serve` is running.
+-- When it is not, the cron logs a real failure once a day -- which is the
+-- honest signal that erasure is down, and unlike the story and notification
+-- jobs there is no exception handler softening it, because nothing else is
+-- waiting on this transaction.
+-- ============================================================
+delete from vault.secrets
+where name in ('account_eraser_url', 'account_eraser_service_key');
+
+select vault.create_secret(
+  'http://kong:8000/functions/v1/account-eraser',
+  'account_eraser_url',
+  'Erasure worker endpoint, used by public.post_to_account_eraser()'
+);
+
+select vault.create_secret(
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU',
+  'account_eraser_service_key',
+  'Local demo service_role key, used by public.post_to_account_eraser()'
+);

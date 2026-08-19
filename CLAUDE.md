@@ -429,6 +429,15 @@ bash scripts/explain_proximity.sh [N_USERS] [N_PARTIES]
 # this: pg_net only dispatches after COMMIT and every test file rolls back.
 bash scripts/verify_notification_delivery.sh
 
+# Phase 9's irreversible half, measured: soft delete -> 30 days -> the account
+# is gone, the bytes are gone from the storage container's DISK, and the
+# conversation is not. pgTAP cannot reach any of this — storage objects are not
+# in Postgres (gotcha #7), the auth delete is a GoTrue admin call, and the
+# story-media purge only dispatches after COMMIT while every test file rolls
+# back. DESTRUCTIVE: permanently erases seed persona friend_not_invited; run
+# `supabase db reset` afterwards. Starts `functions serve` itself.
+bash scripts/verify_account_erasure.sh
+
 # Phase 8: is get_profile_stats an aggregate or does it need counter columns?
 # Generates 20k users / 200k rsvps in a rolled-back transaction and prints
 # each count against its seq-scan control, plus the end-to-end RPC timing
