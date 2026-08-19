@@ -407,6 +407,32 @@ verify_jwt = true
 enabled = true
 verify_jwt = true
 
+# Phase 9. Hard-deletes accounts whose 30-day grace period has expired: storage
+# objects, then rows (via complete_account_erasure), then the auth.users row.
+# Woken only by the daily account-erasure-sweep cron over pg_net reading vault
+# (20260819083207).
+#
+# Same reasoning as notification-worker, one notch more serious: verify_jwt is
+# the gateway's coarse filter, and the function additionally requires the
+# Authorization header to BE the service_role key. This endpoint destroys
+# accounts irreversibly, so "any signed-in user's token" is nowhere near a
+# sufficient credential.
+[functions.account-eraser]
+enabled = true
+verify_jwt = true
+
+# Phase 9. GDPR Art. 20 export, returned as a downloadable JSON file.
+#
+# The one edge function in the project that must NEVER hold the service key: it
+# forwards the caller's own token to PostgREST and export_account_data resolves
+# auth.uid() from it. There is no user id parameter in the whole path, so there
+# is no IDOR to get wrong. verify_jwt on, and here it IS meaningful access
+# control rather than a coarse filter — the token identifies the only person
+# whose data the call can return.
+[functions.account-export]
+enabled = true
+verify_jwt = true
+
 [analytics]
 enabled = true
 port = 54327

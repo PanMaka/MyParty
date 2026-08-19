@@ -40,15 +40,21 @@ POST to it over pg_net) and `upsert_user_device`, the client's only door into
 `user_devices`;
 `map_visibility`/`invite_policy` on `profiles` with `accepts_invite_from`,
 enforced in the `invitations` INSERT policy and inside `get_parties_near_user`
-respectively, plus `get_profile_stats`;
+respectively, plus `get_profile_stats`; the **account lifecycle** —
+`profiles.deleted_at`/`erased_at`, `request_account_deletion` /
+`cancel_account_deletion`, the `account_erasures` queue with
+`claim_accounts_for_erasure`/`complete_account_erasure`/`fail_account_erasure`,
+the daily `account-erasure-sweep` cron, the `account-eraser` and
+`account-export` edge functions and `export_account_data`;
 `AuthService` (email signup/signin/signout via `supabase_flutter`);
 `PartyRepository`, `SocialRepository`, `FeedRepository`, `ChatRepository`,
-`StoryRepository`, `DeviceRepository` and `ProfileRepository` (all
+`StoryRepository`, `DeviceRepository`, `ProfileRepository` and
+`AccountRepository` (all
 widget-level Supabase calls go
 through these — a widget reaching for `Supabase.instance` directly is a bug,
 and also unbuildable under `flutter test`); `PushService`, `LocationReporter`
-and the `Notifications` app-scoped wiring; `showLocationConsentSheet` and
-`NotificationSettingsScreen`.
+and the `Notifications` app-scoped wiring; `showLocationConsentSheet`,
+`NotificationSettingsScreen` and `AccountDeletionScreen`.
 
 Story visibility uses the **wide** `can_access_party`, not
 `can_chat_in_party` — deliberately the opposite call from chat. A story is
@@ -121,6 +127,38 @@ every user on a model the profile screen renders is an invitation to display it.
 Do not invent a formula, and do not derive one from tenure/volume — that is the
 option `docs/backend-plan.md` 8.3 explicitly rejected. The only honest input is
 host-confirmed reliability, which is a mechanism and its own phase.
+
+**Phase 9 made profiles rows undeletable, on purpose.** Account deletion is a
+soft delete (`deleted_at`) with a 30-day grace period, then a **tombstone**:
+`auth.users` is hard-deleted, the `profiles` row survives with its username
+scrubbed to an opaque `deleted_<uuid>` handle. Seven cascades into `profiles`
+became `no action` and the `profiles.id -> auth.users` FK was dropped, because
+a primary key cannot be `on delete set null` and the tombstone has to outlive
+the auth user. Full reasoning and the table-by-table classification:
+`docs/phase-09-fk-audit.md`; retention policy: `docs/backend-plan.md` 9.4.
+
+Three things there are load-bearing and look wrong without the argument:
+
+- **The tombstone profile MUST stay visible to the `profiles` SELECT policy.**
+  Adding `and deleted_at is null` there is the obvious privacy fix and it is
+  the one change that must never happen: `get_feed`, `get_messages`,
+  `get_party_chats`, `get_post_comments`, `get_party_stories` and
+  `get_parties_near_user` all reach the author through an **inner join** on
+  `public.profiles` under invoker rights, so a profile made invisible by policy
+  does not render as "Διαγραμμένος χρήστης" — it drops the message out of the
+  thread, permanently. Discovery is suppressed where the discovery question is
+  asked (`accepts_invite_from`, `wants_nearby_notifications`, and a client-side
+  filter in `SocialRepository.searchProfiles` that is UX, not enforcement).
+- **`blocks` must not cascade, in either direction.** `is_blocked` is
+  symmetric, so deleting the edge un-hides content the *surviving* user
+  deliberately hid: B blocks A, A deletes their account, and A's retained
+  messages reappear in B's chat. It is the one FK where cascading harms
+  somebody who is still here.
+- **`user_devices` is purged at T+0, not T+30d**, along with
+  `notification_jobs` and `sent_notifications`. The grace period is for
+  recovering an account, not a licence to keep processing someone's location
+  for another month — same GDPR Art. 7(3) immediacy argument that made
+  `claim_notification_jobs` re-ask the consent gates.
 
 **FCM is wired conditionally and that is deliberate.** Gradle applies
 `com.google.gms.google-services` only when `myparty/android/app/google-services.json`
@@ -316,7 +354,22 @@ inconsistencies if you don't know why:
     consent. Both directions are asserted separately in
     `11_profile_privacy_and_stats.test.sql` for exactly that reason — one
     passing tells you nothing about the other.
-15. **A control query in an RLS test is filtered by the RLS it is
+15. **plpgsql resolves column names at RUNTIME, so a migration can apply
+    cleanly and still be wrong.** `supabase db reset` only parses a function
+    body; it does not check that `parties.start_time` exists (it is
+    `starts_at`). Both Phase 9 migrations applied green and
+    `request_account_deletion` would have cancelled nothing, silently, the
+    first time a real user tapped delete. The only thing that catches this is
+    a test that actually CALLS the function — which is why every RPC added
+    from here on needs at least one `lives_ok`, even a trivial one. A green
+    `db reset` is not evidence that a function works.
+16. **An OUT parameter shadows a column name in `on conflict (col)`.** That
+    clause is the one place in plpgsql where the name cannot be
+    schema-qualified to disambiguate, so a function returning
+    `table (user_id uuid, ...)` that also upserts into a table keyed on
+    `user_id` fails at runtime with 42702. Target the constraint instead:
+    `on conflict on constraint <pkey_name> do nothing`.
+17. **A control query in an RLS test is filtered by the RLS it is
     controlling for.** Asserting "a stranger counts fewer than the owner"
     against `(select count(*) from public.parties where host_id = …)`
     evaluated AFTER `tests.authenticate_as(stranger)` compares two numbers
@@ -375,6 +428,15 @@ bash scripts/explain_proximity.sh [N_USERS] [N_PARTIES]
 # `functions serve` itself, and stops both on exit. pgTAP cannot cover any of
 # this: pg_net only dispatches after COMMIT and every test file rolls back.
 bash scripts/verify_notification_delivery.sh
+
+# Phase 9's irreversible half, measured: soft delete -> 30 days -> the account
+# is gone, the bytes are gone from the storage container's DISK, and the
+# conversation is not. pgTAP cannot reach any of this — storage objects are not
+# in Postgres (gotcha #7), the auth delete is a GoTrue admin call, and the
+# story-media purge only dispatches after COMMIT while every test file rolls
+# back. DESTRUCTIVE: permanently erases seed persona friend_not_invited; run
+# `supabase db reset` afterwards. Starts `functions serve` itself.
+bash scripts/verify_account_erasure.sh
 
 # Phase 8: is get_profile_stats an aggregate or does it need counter columns?
 # Generates 20k users / 200k rsvps in a rolled-back transaction and prints

@@ -12,6 +12,7 @@ import '../widgets/diagonal_placeholder.dart';
 import '../widgets/follow_button.dart';
 import '../widgets/party_detail_sheet.dart';
 import '../widgets/report_sheet.dart';
+import 'account_deletion_screen.dart';
 import 'notification_settings_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -384,6 +385,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 onTap: () => Navigator.of(
                   context,
                 ).push(MaterialPageRoute<void>(builder: (_) => const NotificationSettingsScreen())),
+              ),
+            ),
+          ],
+        ),
+      ),
+      // Phase 9. App Store Review Guideline 5.1.1(v) requires an in-app
+      // deletion path wherever an account can be created, and requires it to
+      // actually start the deletion rather than link to support. Placed
+      // directly above sign-out because that is where a user looks for it, and
+      // kept as its own section rather than a row in ΕΙΔΟΠΟΙΗΣΕΙΣ because
+      // everything under that heading is reversible and this is not.
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('ΛΟΓΑΡΙΑΣΜΟΣ', style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.45))),
+            const SizedBox(height: 9),
+            Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(15),
+                color: Colors.white.withValues(alpha: 0.035),
+                border: Border.all(color: AppColors.hairline),
+              ),
+              child: _settingsRow(
+                'Δεδομένα & διαγραφή',
+                'Εξαγωγή των δεδομένων σου, διαγραφή λογαριασμού',
+                chevron: true,
+                onTap: () => Navigator.of(
+                  context,
+                ).push(MaterialPageRoute<void>(builder: (_) => const AccountDeletionScreen())),
               ),
             ),
           ],

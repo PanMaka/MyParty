@@ -99,6 +99,19 @@ class SocialRepository {
 
   /// Username search. Blocked users are absent because the `profiles` SELECT
   /// policy filters them, not because of anything done here.
+  ///
+  /// The `deleted_at` filter, by contrast, IS done here, and that asymmetry is
+  /// deliberate rather than an oversight. It cannot go in the SELECT policy:
+  /// `get_feed`, `get_messages` and four other RPCs reach the author through
+  /// an inner join on `profiles` under invoker rights, so a profile made
+  /// invisible by policy does not render as "deleted user" — it drops the
+  /// message out of the thread entirely, permanently for a tombstone.
+  ///
+  /// So this filter is UX, not enforcement, and it does not need to be more
+  /// than that. A soft-deleted account is still a real account its owner can
+  /// take back within 30 days, and an erased one has had its username replaced
+  /// with an opaque handle nobody will ever type — the tombstone is unfindable
+  /// by construction rather than by being filtered.
   Future<List<Profile>> searchProfiles(String query, {int limit = 30}) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return [];
@@ -107,6 +120,7 @@ class SocialRepository {
         .from('profiles')
         .select('id, username, follower_count, following_count')
         .ilike('username', '%$trimmed%')
+        .isFilter('deleted_at', null)
         .neq('id', _uid ?? '00000000-0000-0000-0000-000000000000')
         .limit(limit);
 
