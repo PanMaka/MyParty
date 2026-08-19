@@ -830,3 +830,37 @@ pgTAP rather than manual reading. Rate limiting on all write paths (posts,
 stories, messages, invites). Load test `get_parties_near_user` at 10k
 parties / 50k rsvps (not the ~20 seeded), report p50/p95, identify what
 breaks first.
+
+### Outcome (2026-08-19)
+
+Done, with numbers, in `docs/phase-10-hardening-audit.md`. Migrations
+`20260819092958` (ACL sweep + default privileges), `20260819093230` (seven
+indexes), `20260819093446` (post/comment/invite rate limits) and
+`20260819095452` (search_path on the eight invoker read RPCs), plus
+`13_hardening.test.sql` — 39 assertions that turn each advisor rule into
+something CI enforces, verify the parties/invitations matrix at 203 rows with a
+gotcha-#17-safe control, and prove all five write limits including against bulk
+inserts.
+
+Two findings changed the plan rather than following it:
+
+- **The index audit's real driver is Phase 9, not a screen.**
+  `complete_account_erasure` and `export_account_data` are the only workloads
+  that filter every child table by one user id, and they are where the missing
+  indexes were. Five `hidden_by` FKs and `story_media_purges.story_id` were
+  deliberately left unindexed — their parent rows are never deleted, so the
+  scan the index would serve cannot happen.
+- **The load test's answer is not about the query.** 995ms p50 at 5km / 10k
+  parties, of which 99.7% is the `parties` row policy: `can_access_party` runs
+  per row, and because it is a security barrier the non-leakproof `st_dwithin`
+  cannot be pushed below it, so the GiST index is never used. Same query with
+  policies off: 2ms. The proposed fix — hoist `is_private`/`host_id` out of the
+  helper into the policy so public parties short-circuit — is specified in the
+  audit doc and **deliberately not applied here**: it is the widest-blast-radius
+  policy in the schema and wants its own branch.
+
+Left open: PostGIS in `public` (and therefore `spatial_ref_sys`, which
+`postgres` cannot alter), leaked-password protection (a dashboard toggle), and
+pushing the 42 unapplied migrations to the hosted project, which is a deployment
+decision.
+

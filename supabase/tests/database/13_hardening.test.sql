@@ -3,8 +3,8 @@
 -- Three groups that look unrelated and are not:
 --
 --   A. The Supabase linter's rules, re-expressed as assertions. The hosted
---      advisor cannot see this schema -- the linked project is 36 migrations
---      behind -- and even if it could, a dashboard nobody opens is not a
+--      advisor cannot see this schema -- the linked project is still on
+--      Phase 1's -- and even if it could, a dashboard nobody opens is not a
 --      control. These run on every `supabase test db`.
 --   B. The parties <-> invitations cross-table RLS, verified rather than read.
 --   C. The three write rate limits this phase added, plus the property the

@@ -46,6 +46,9 @@ respectively, plus `get_profile_stats`; the **account lifecycle** —
 `claim_accounts_for_erasure`/`complete_account_erasure`/`fail_account_erasure`,
 the daily `account-erasure-sweep` cron, the `account-eraser` and
 `account-export` edge functions and `export_account_data`;
+**server-side write rate limits on all five client-writable content paths** —
+messages (20/10s per user+party), stories (10/h), posts (30/h), comments
+(100/h) and invitations (500 per party, 1000/h per host, statement-level);
 `AuthService` (email signup/signin/signout via `supabase_flutter`);
 `PartyRepository`, `SocialRepository`, `FeedRepository`, `ChatRepository`,
 `StoryRepository`, `DeviceRepository`, `ProfileRepository` and
@@ -232,6 +235,19 @@ inconsistencies if you don't know why:
   the flip-flop floor. Adding a `last_evaluated_location` would double the
   location data under retention and break the two-geography-column assertion.
 
+**Phase 10 hardened the schema and found one thing it did not fix.** The
+default ACL is swept project-wide and cannot come back (gotcha 9); the eight
+invoker read RPCs pin their `search_path`; seven indexes were added, all of
+them for Phase 9's erasure and export engines rather than for a screen; and the
+Supabase linter's rules now live as pgTAP assertions in `13_hardening.test.sql`
+instead of on a dashboard pointed at a project stuck on Phase 1's schema.
+
+The thing it did not fix is the headline: **`get_parties_near_user` costs ~1s
+at 10k parties and ~99% of that is the `parties` row policy**, which also
+defeats the GiST index (gotcha 19). The measurement, the plans and the proposed
+policy rewrite are in `docs/phase-10-hardening-audit.md`. Do not drop
+`parties_location` because an advisor calls it unused.
+
 **Cross-phase gotchas worth remembering:**
 
 1. The `profiles` SELECT policy is no longer `using (true)` — it is
@@ -297,9 +313,15 @@ inconsistencies if you don't know why:
    privilege, so RLS is not bypassed — but **RLS does not mediate
    TRUNCATE**, so an RLS-perfect table is still one `anon` could empty if
    anything ever routed to it. `revoke all on <table> from anon,
-   authenticated;` *before* the intended grants (`20260816083807`). Only
-   `user_devices`, `sent_notifications` and `notification_jobs` have it
-   today; the project-wide sweep is a Phase 10 item.
+   authenticated;` *before* the intended grants (`20260816083807`). Phase 10
+   swept the other fifteen tables, the three sequences (`UPDATE` on a
+   sequence is what `setval()` checks) and — the part that matters more than
+   the fifteen — the **default privileges themselves**, so table twenty
+   inherits nothing (`20260819092958`). `13_hardening.test.sql` asserts all
+   three, so a regression is a red test rather than an audit finding.
+   `spatial_ref_sys` is the one exception and cannot be fixed from a
+   migration: supabase_admin owns it, `postgres` is not a member, and both
+   the `revoke` and the `enable row level security` fail with 42501.
 10. **A column-valued radius cannot drive a GiST index scan.** PostGIS turns
     `st_dwithin(geom, point, <const>)` into `geom && _st_expand(point,
     <const>)`, which the index can answer — but when the radius comes from
@@ -379,6 +401,48 @@ inconsistencies if you don't know why:
     it is not a control. Any assertion of the form "viewer A sees less than
     viewer B" has this failure mode.
 
+18. **A BEFORE ROW trigger DOES see the rows its own statement inserted
+    earlier**, which is the opposite of what READ COMMITTED suggests and the
+    reason every per-row rate limit here is sound. A query inside a volatile
+    plpgsql function takes a fresh snapshot whose `curcid` is the current
+    command id, so rows with `cmin` equal to it are visible. Measured, not
+    reasoned: one `insert into stories select … from generate_series(1,15)`
+    is refused at row 11, and 25 messages in one statement at 21. Without
+    that property a PostgREST array insert — `POST /rest/v1/party_posts`
+    with 50 objects is ONE statement — would walk past posts, comments,
+    messages and stories alike, and all four would still pass their
+    one-row-at-a-time tests. Asserted in `13_hardening.test.sql`. The
+    invitations limit is statement-level anyway, but for **cost**:
+    `create_party_with_invites` writes the guest list as a single
+    `insert … select`, so a row trigger would run 500 counting queries to
+    answer a question with one answer.
+
+19. **An RLS policy is a security barrier, and a non-leakproof predicate
+    cannot be pushed past it — which is how a policy deletes an index.**
+    `get_parties_near_user` under RLS seq-scans all 10k parties and calls
+    `can_access_party` on every one, because `st_dwithin` is not leakproof
+    and therefore may not be evaluated ahead of the policy; the GiST index
+    on `parties.location` never gets an index condition to work with.
+    Measured at 10k parties: **995ms p50 with RLS, 2ms with the policies
+    off** — 99.7% of p95. It gets *worse zoomed in*, because the wide-zoom
+    tiers have a cheap non-leaky `party_tier` filter that runs first and the
+    5km branch has none. So `parties_location` reads as an unused index in
+    the advisor and is not: the fix is to make the query able to reach it,
+    not to drop it. Numbers, plans and the proposed policy rewrite (hoist
+    `is_private`/`host_id` out of the helper into the policy, so a public
+    party short-circuits without a function call) are in
+    `docs/phase-10-hardening-audit.md` §5. **Not applied** — it is the
+    policy with the widest blast radius in the schema.
+
+20. **A `language sql` set-returning function is inlined only if it is not
+    SECURITY DEFINER, not VOLATILE, and has no SET clause.** All eight read
+    RPCs are VOLATILE by default, so none has ever been inlined —
+    `explain select * from get_parties_near_user(…)` prints one line,
+    `Function Scan`, while the identical body declared STABLE prints a
+    37-line plan. That is why `20260819095452` could pin `search_path` on
+    all eight for free: it forecloses inlining, and there was none to lose.
+    Worth re-pricing if gotcha 19's fix ever lands.
+
 ## Migration naming
 
 `YYYYMMDDHHMMSS_snake_case_description.sql` in `supabase/migrations/`.
@@ -444,6 +508,14 @@ bash scripts/verify_account_erasure.sh
 # under RLS. Answer as measured: aggregate — >90% of the 2ms is policy
 # evaluation, which a counter column would not touch.
 bash scripts/explain_profile_stats.sh [N_USERS] [N_PARTIES] [RSVPS_PER_USER]
+
+# Phase 10: what does the map query cost at 10k parties / 50k rsvps, and what
+# breaks first? Measures get_parties_near_user p50/p95 per zoom tier as an
+# authenticated viewer, in four variants -- as shipped, search_path pinned,
+# STABLE (inlinable), and an RLS-bypassed control. The answer is the control:
+# the row policy costs ~99% of p95 and defeats the GiST index entirely.
+# Rolled back; the seeded fixtures are untouched.
+bash scripts/loadtest_map_query.sh [N_PARTIES] [N_RSVPS] [N_USERS] [ITERATIONS]
 
 cd myparty
 flutter pub get
