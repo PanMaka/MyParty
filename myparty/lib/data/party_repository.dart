@@ -104,7 +104,7 @@ class PartyRepository {
 
     final base = _client
         .from('parties')
-        .select('id, title, starts_at, is_private, going_count, interested_count, max_capacity')
+        .select('id, title, starts_at, is_private, going_count, interested_count, max_capacity, cover_path, area')
         .eq('host_id', id)
         .eq('status', 'published');
 
@@ -142,7 +142,7 @@ class PartyRepository {
     final rows = await _client
         .from('rsvps')
         .select(
-          'parties!inner(id, title, starts_at, is_private, going_count, interested_count, max_capacity)',
+          'parties!inner(id, title, starts_at, is_private, going_count, interested_count, max_capacity, cover_path, area)',
         )
         .eq('user_id', userId)
         .eq('status', 'going')

@@ -46,18 +46,25 @@ class ProfileRepository {
   /// not distinguished: the two are indistinguishable from here by design, and
   /// a caller that could tell them apart would be a block-detection oracle.
   ///
-  /// Selects four columns and no more. `credibility_score` is omitted for the
+  /// Selects six columns and no more. `credibility_score` is omitted for the
   /// reason in [Profile]; `deleted_at` is omitted because this is not a
   /// discovery surface — you reached a specific profile, and a tombstone should
   /// render as its scrubbed handle rather than vanish (see the inner-join
   /// argument in [SocialRepository.searchProfiles]).
+  ///
+  /// `bio` and `avatar_path` need no extra filtering here, and asking for them
+  /// changes nothing about who gets a row. They ride the same block-filtered
+  /// `profiles` SELECT policy as `username` does, because RLS gates rows rather
+  /// than columns — a blocked viewer gets no row at all, which is why the null
+  /// return above already covers them. On a tombstone both come back null:
+  /// `complete_account_erasure` scrubs them alongside the handle.
   Future<Profile?> fetchProfile({String? userId}) async {
     final id = userId ?? currentUserId;
     if (id == null) return null;
 
     final row = await _client
         .from('profiles')
-        .select('id, username, follower_count, following_count')
+        .select('id, username, bio, avatar_path, follower_count, following_count')
         .eq('id', id)
         .maybeSingle();
 

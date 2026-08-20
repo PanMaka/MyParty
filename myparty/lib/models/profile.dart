@@ -17,11 +17,35 @@ class Profile {
   final int followerCount;
   final int followingCount;
 
+  /// The single line rendered under `@username`, or null when the user has not
+  /// written one. **Null is the only way this is absent** — `20260820095801`
+  /// rejects the empty string and the whitespace-only string with a CHECK
+  /// constraint, precisely so that no renderer downstream needs its own
+  /// `.trim().isEmpty` guard to avoid drawing a blank line under the handle.
+  ///
+  /// Guaranteed by the same constraint to be at most 160 characters and to
+  /// contain no newline, so it can be handed straight to a `Text` widget. Do
+  /// not substitute a placeholder sentence when it is null: a bio is the user's
+  /// own words, and a generated one presented in that slot reads as theirs.
+  final String? bio;
+
+  /// Path into the public `avatars` bucket (`{user_id}/…`), never a URL, and
+  /// null when the user has no avatar. The column stores a key because the
+  /// bucket is public-read here and private elsewhere — turning the key into
+  /// something loadable is the caller's decision, not the row's.
+  ///
+  /// Null means "no avatar" and nothing else. [placeholderColors] is the honest
+  /// fallback; it is a gradient that visibly is not a photograph, rather than a
+  /// stock face that would read as one.
+  final String? avatarPath;
+
   const Profile({
     required this.id,
     required this.username,
     required this.followerCount,
     required this.followingCount,
+    this.bio,
+    this.avatarPath,
   });
 
   factory Profile.fromRow(Map<String, dynamic> row) {
@@ -30,13 +54,32 @@ class Profile {
       username: row['username'] as String,
       followerCount: (row['follower_count'] as int?) ?? 0,
       followingCount: (row['following_count'] as int?) ?? 0,
+      // No `?? ''` and no `.trim()` on either: the database has already refused
+      // every blank spelling, so collapsing null into '' here would throw away
+      // the one distinction the constraint exists to preserve.
+      bio: row['bio'] as String?,
+      avatarPath: row['avatar_path'] as String?,
     );
   }
 
-  /// Stand-in for the avatar the `avatars` bucket will eventually serve.
-  /// Derived from the uuid so a given user always gets the same pair and the
-  /// list stops looking like it reshuffles on every rebuild — the const
-  /// `MpFriend.colors` used to provide this by hand.
+  /// True only when there is a real key to load. Guards the image widget, the
+  /// same way [PartySummary.hasCapacity] guards the progress bar — an
+  /// `Image.network` on an empty string is a broken-image icon, which is a
+  /// worse "no avatar" than no avatar.
+  bool get hasAvatar => avatarPath != null;
+
+  /// True only when the user wrote a line. Named rather than left to callers
+  /// checking `bio != null`, so the "no fabricated value" rule has one place to
+  /// live if the emptiness question ever gets more complicated.
+  bool get hasBio => bio != null;
+
+  /// The avatar fallback, for the [hasAvatar] == false case. Derived from the
+  /// uuid so a given user always gets the same pair and the list stops looking
+  /// like it reshuffles on every rebuild — the const `MpFriend.colors` used to
+  /// provide this by hand.
+  ///
+  /// No longer a stand-in for a column that does not exist: [avatarPath] exists
+  /// now, and this is what gets drawn when it is null.
   List<Color> get placeholderColors {
     final hue = (id.hashCode.abs() % 360).toDouble();
     return [
