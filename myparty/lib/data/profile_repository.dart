@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../models/profile.dart';
 import '../models/profile_privacy.dart';
 import '../models/profile_stats.dart';
 
@@ -29,6 +30,40 @@ class ProfileRepository {
   SupabaseClient get _client => _clientOverride ?? Supabase.instance.client;
 
   String? get currentUserId => _client.auth.currentUser?.id;
+
+  /// The identity row behind the profile header: who this is and their two
+  /// follow counters.
+  ///
+  /// [userId] null means **the signed-in user**, resolved from the session here
+  /// rather than accepted from the caller. That asymmetry is the point: a screen
+  /// may say "whoever I am" or it may name someone, and it must not be able to
+  /// say "I am this uuid". Nothing downstream treats the argument as an
+  /// identity claim either — the row comes back through the `profiles` SELECT
+  /// policy exactly like any other user's would.
+  ///
+  /// Returns null for both "no such row" and "the policy filtered it" (the
+  /// caller has blocked them, or they have blocked the caller). Deliberately
+  /// not distinguished: the two are indistinguishable from here by design, and
+  /// a caller that could tell them apart would be a block-detection oracle.
+  ///
+  /// Selects four columns and no more. `credibility_score` is omitted for the
+  /// reason in [Profile]; `deleted_at` is omitted because this is not a
+  /// discovery surface — you reached a specific profile, and a tombstone should
+  /// render as its scrubbed handle rather than vanish (see the inner-join
+  /// argument in [SocialRepository.searchProfiles]).
+  Future<Profile?> fetchProfile({String? userId}) async {
+    final id = userId ?? currentUserId;
+    if (id == null) return null;
+
+    final row = await _client
+        .from('profiles')
+        .select('id, username, follower_count, following_count')
+        .eq('id', id)
+        .maybeSingle();
+
+    if (row == null) return null;
+    return Profile.fromRow(row);
+  }
 
   /// Reads the current user's own privacy tiers.
   ///

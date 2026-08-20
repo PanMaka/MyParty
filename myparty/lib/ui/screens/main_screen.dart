@@ -31,7 +31,14 @@ class _MainScreenState extends State<MainScreen> {
               EventsScreen(onNavigate: _select),
               const MapScreen(),
               const MessagesScreen(),
-              const ProfileScreen(),
+              // The signed-in user's own profile. Deliberately NOT their uuid
+              // read out of the session here: ProfileRepository.fetchProfile
+              // resolves the owner from auth.uid() itself, so passing one from
+              // a widget would be both redundant and the only place in the app
+              // where an identity travelled as an argument. It would also mean
+              // reaching for Supabase.instance from a widget, which is the
+              // thing the repository layer exists to prevent.
+              const ProfileScreen(target: OwnProfile()),
             ],
           ),
           Positioned(

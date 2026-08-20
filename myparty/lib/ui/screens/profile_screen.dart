@@ -15,51 +15,168 @@ import '../widgets/report_sheet.dart';
 import 'account_deletion_screen.dart';
 import 'notification_settings_screen.dart';
 
+/// Whose profile the screen is showing, and — when it is the owner's — whether
+/// they are previewing how it looks to everybody else.
+///
+/// This replaces a `String? userId` paired with a `bool _selfView`, which
+/// spelled four states when only three exist. The missing constraint was
+/// `userId != null && _selfView == true`: someone else's profile rendering the
+/// OWNER sections, which is to say your privacy tiers (`fetchPrivacy` is
+/// self-only and would have loaded YOURS under THEIR name), your notification
+/// settings, your account-deletion row and your sign-out button. Nothing in the
+/// old type prevented it — the tab bar simply never passed a `userId`, so it
+/// never happened. The moment step 5 makes the tab bar pass one, "never
+/// happens" stops being true, so the state is made unrepresentable instead.
+///
+/// The two render questions are answered here, once, rather than at each of the
+/// six call sites that used to re-derive them from the bool.
+sealed class ProfileTarget {
+  const ProfileTarget();
+
+  /// What to hand a repository, where null means "resolve from the session".
+  ///
+  /// Never an identity claim: [ProfileRepository.fetchProfile] resolves the
+  /// owner from `auth.uid()` itself, and [OwnProfile] deliberately carries no
+  /// uuid to pass — there is nothing here that could be wrong.
+  String? get userIdOrNull;
+
+  /// Whether the owner-only sections render — privacy, notifications, account
+  /// deletion, sign out.
+  bool get showsOwnerSections;
+
+  /// Whether the follow button and the report menu render.
+  ///
+  /// True only on another user's profile. You cannot follow or report yourself,
+  /// and no value of this type makes both this and [showsOwnerSections] true.
+  bool get showsRelationshipActions;
+}
+
+/// The signed-in user's own profile. Carries no uuid on purpose — see
+/// [ProfileTarget.userIdOrNull].
+final class OwnProfile extends ProfileTarget {
+  const OwnProfile({this.previewingPublicView = false});
+
+  /// The ΕΓΩ / ΔΗΜΟΣΙΑ segment. Changes which sections render, and nothing else
+  /// — previewing your public profile does not make you a stranger to yourself,
+  /// so the relationship actions stay off.
+  final bool previewingPublicView;
+
+  @override
+  String? get userIdOrNull => null;
+
+  @override
+  bool get showsOwnerSections => !previewingPublicView;
+
+  @override
+  bool get showsRelationshipActions => false;
+}
+
+/// Somebody else's profile. There is no public-view toggle because there is no
+/// other view to toggle to.
+final class OtherProfile extends ProfileTarget {
+  const OtherProfile(this.userId);
+
+  final String userId;
+
+  @override
+  String? get userIdOrNull => userId;
+
+  @override
+  bool get showsOwnerSections => false;
+
+  @override
+  bool get showsRelationshipActions => true;
+}
+
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({super.key, this.userId, this.repository});
+  const ProfileScreen({
+    super.key,
+    this.target = const OwnProfile(),
+    this.repository,
+    this.social,
+  });
 
   /// Injectable so widget tests can subclass [ProfileRepository] without a
   /// Supabase client ever existing, the same way [NotificationSettingsScreen]
   /// takes a [DeviceRepository].
   final ProfileRepository? repository;
 
-  /// Whose profile this is. Null means "no real profile selected", which is
-  /// how `main_screen.dart` mounts it on the tab bar today — the public view
-  /// then keeps its design-prototype strings, because nothing in the app
-  /// navigates to another user yet (that arrives with search, Phase 8).
-  final String? userId;
+  /// Injectable for the same reason. Needed now that the ΑΚΟΛΟΥΘΕΙ rail loads
+  /// on the owner's public preview too: it used to be unreachable without a
+  /// `userId`, so no test ever caused a [SocialRepository] method to run.
+  final SocialRepository? social;
+
+  /// Whose profile this is. Defaults to the signed-in user, which is how the
+  /// tab bar mounts it.
+  final ProfileTarget target;
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  final _social = SocialRepository();
+  late final SocialRepository _social = widget.social ?? SocialRepository();
   late final ProfileRepository _profiles = widget.repository ?? ProfileRepository();
 
-  bool _selfView = true;
-  Future<List<Profile>>? _theirFollowing;
+  /// Mutable only through the ΕΓΩ / ΔΗΜΟΣΙΑ segment, and only ever between the
+  /// two [OwnProfile] values — an [OtherProfile] never becomes an [OwnProfile].
+  late ProfileTarget _target = widget.target;
 
+  late final Future<List<Profile>> _theirFollowing = _social.fetchFollowing(
+    userId: widget.target.userIdOrNull,
+  );
+
+  Profile? _profile;
   ProfilePrivacy? _privacy;
   ProfileStats _stats = ProfileStats.empty;
+
+  /// Header state. [_profile] non-null wins over both of these, so a privacy
+  /// write reloading in the background never blanks a header that already has
+  /// something true to show.
+  bool _loading = true;
+  Object? _loadError;
+
   bool _busy = false;
 
   @override
   void initState() {
     super.initState();
-    final id = widget.userId;
-    if (id != null) _theirFollowing = _social.fetchFollowing(userId: id);
     _load();
   }
 
   Future<void> _load() async {
-    final privacy = await _profiles.fetchPrivacy();
-    final stats = await _profiles.fetchStats(userId: widget.userId);
-    if (!mounted) return;
+    final id = _target.userIdOrNull;
+    try {
+      final profile = await _profiles.fetchProfile(userId: id);
+      final stats = await _profiles.fetchStats(userId: id);
+      // Self-only by construction, and pointless on someone else's profile —
+      // it would load the VIEWER's tiers, which is the bug the old bool made
+      // possible. Skipped rather than merely hidden.
+      final privacy = _target is OwnProfile ? await _profiles.fetchPrivacy() : null;
+
+      if (!mounted) return;
+      setState(() {
+        _profile = profile;
+        _stats = stats;
+        _privacy = privacy;
+        _loading = false;
+        _loadError = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _loadError = error;
+      });
+    }
+  }
+
+  Future<void> _retryLoad() async {
     setState(() {
-      _privacy = privacy;
-      _stats = stats;
+      _loading = true;
+      _loadError = null;
     });
+    await _load();
   }
 
   /// Wraps every privacy write, exactly as [NotificationSettingsScreen] does:
@@ -110,68 +227,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     'Προφίλ',
                     style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -0.5),
                   ),
-                  Container(
-                    padding: const EdgeInsets.all(3),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.06),
-                      borderRadius: BorderRadius.circular(99),
-                    ),
-                    child: Row(
-                      children: [
-                        _segment('ΕΓΩ', _selfView, () => setState(() => _selfView = true)),
-                        _segment('ΔΗΜΟΣΙΑ', !_selfView, () => setState(() => _selfView = false)),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
-              child: Row(
-                children: [
-                  Container(
-                    width: 74,
-                    height: 74,
-                    clipBehavior: Clip.antiAlias,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: AppColors.purple.withValues(alpha: 0.5), width: 2),
-                    ),
-                    child: const DiagonalStripePlaceholder(
-                      colors: [Color(0xFF241E3C), Color(0xFF1B1630)],
-                      label: 'avatar',
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Κατερίνα Βλάχου',
-                          style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800, letterSpacing: -0.3),
-                        ),
-                        Text(
-                          '@katerina · ΕΚΠΑ, Ψυχολογία',
-                          style: TextStyle(fontSize: 12.5, color: AppColors.textAlpha(0.5)),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.only(top: 9),
-                          child: Row(
-                            children: [
-                              _countPair('184', 'φίλοι'),
-                              const SizedBox(width: 16),
-                              _countPair('23', 'ακολουθεί'),
-                            ],
+                  // Only the owner gets the toggle: it previews YOUR public
+                  // profile, and there is no second view of somebody else's.
+                  if (_target case final OwnProfile own)
+                    Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.06),
+                        borderRadius: BorderRadius.circular(99),
+                      ),
+                      child: Row(
+                        children: [
+                          _segment(
+                            'ΕΓΩ',
+                            !own.previewingPublicView,
+                            () => setState(() => _target = const OwnProfile()),
                           ),
-                        ),
-                      ],
+                          _segment(
+                            'ΔΗΜΟΣΙΑ',
+                            own.previewingPublicView,
+                            () => setState(() => _target = const OwnProfile(previewingPublicView: true)),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
                 ],
               ),
             ),
+            _header(),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
               child: Row(
@@ -184,7 +267,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   // would state something false ("they go to nothing") in place
                   // of something unknowable. Hiding the tile says the true
                   // thing, which is nothing at all.
-                  if (_selfView) ...[
+                  if (_target.showsOwnerSections) ...[
                     Expanded(child: _statTile('${_stats.partiesAttended}', 'πάρτι φέτος')),
                     const SizedBox(width: 8),
                   ],
@@ -194,7 +277,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ],
               ),
             ),
-            if (_selfView) ..._selfSections(context) else ..._publicSections(context),
+            if (_target.showsOwnerSections) ..._selfSections(context) else ..._publicSections(context),
           ],
         ),
       ),
@@ -445,56 +528,44 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   List<Widget> _publicSections(BuildContext context) {
+    final target = _target;
+
     return [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-        child: Row(
-          children: [
-            Expanded(
-              child: widget.userId != null
-                  ? FollowButton(targetUserId: widget.userId!)
-                  : GestureDetector(
-                      onTap: _comingSoon,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          gradient: AppColors.purpleGradient,
-                          borderRadius: BorderRadius.circular(13),
-                        ),
-                        child: const Text(
-                          'Ακολούθησε',
-                          style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
-                        ),
-                      ),
+      // Follow, message and report exist only in relation to somebody else, so
+      // the whole row is bound to an OtherProfile rather than each control
+      // testing a nullable id. That is also what keeps `targetUserId` and
+      // `reports.target_id` non-null without a `!` — the uuid comes from the
+      // pattern match, so there is no branch in which it is absent.
+      if (target case final OtherProfile other)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+          child: Row(
+            children: [
+              Expanded(child: FollowButton(targetUserId: other.userId)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: GestureDetector(
+                  onTap: _comingSoon,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.07),
+                      border: Border.all(color: AppColors.hairline),
+                      borderRadius: BorderRadius.circular(13),
                     ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: GestureDetector(
-                onTap: _comingSoon,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.07),
-                    border: Border.all(color: AppColors.hairline),
-                    borderRadius: BorderRadius.circular(13),
+                    child: const Text(
+                      'Μήνυμα',
+                      style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
+                    ),
                   ),
-                  child: const Text('Μήνυμα', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
                 ),
               ),
-            ),
-            // Report is offered only when there is a real profile behind the
-            // view. Mounted on the tab bar, ProfileScreen still renders the
-            // design prototype's strings with userId == null — there would be
-            // nothing to put in reports.target_id.
-            if (widget.userId != null)
               PopupMenuButton<String>(
                 icon: Icon(Icons.more_horiz, size: 20, color: AppColors.textAlpha(0.5)),
                 color: AppColors.sheet,
                 onSelected: (_) =>
-                    showReportSheet(context, target: ReportTarget.profile, targetId: widget.userId!),
+                    showReportSheet(context, target: ReportTarget.profile, targetId: other.userId),
                 itemBuilder: (_) => const [
                   PopupMenuItem(
                     value: 'report',
@@ -502,9 +573,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ],
               ),
-          ],
+            ],
+          ),
         ),
-      ),
       Padding(
         padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
         child: Column(
@@ -551,9 +622,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
             children: [
               Icon(Icons.lock_outline, size: 16, color: AppColors.textAlpha(0.45)),
               const SizedBox(width: 9),
+              // Was "τα ιδιωτικά πάρτι της Κατερίνας". Not merely a stale
+              // literal now: under a real header it would name the wrong
+              // person, and on the owner's own public preview it would name
+              // somebody else entirely. Phrased without a possessive rather
+              // than interpolating the handle, because Greek would force a
+              // gendered article (του/της) onto a schema that stores no gender
+              // and has no business guessing one.
               Expanded(
                 child: Text(
-                  'Τα ιδιωτικά πάρτι της Κατερίνας και τα stories τους δεν είναι ορατά σε σένα.',
+                  'Τα ιδιωτικά πάρτι αυτού του προφίλ και τα stories τους δεν είναι ορατά σε σένα.',
                   style: TextStyle(fontSize: 12, height: 1.45, color: AppColors.textAlpha(0.5)),
                 ),
               ),
@@ -564,8 +642,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       // Was "ΚΟΙΝΟΙ ΦΙΛΟΙ", rendered from the const mpFriends list. There is
       // no friendship in the schema — only the asymmetric follow graph — so
       // this is now who they follow, and it only renders for a real profile.
-      if (_theirFollowing != null)
-        Padding(
+      // Now loads on the owner's public preview too, not just on somebody
+      // else's profile: the rail is part of what other people see, so a preview
+      // that omitted it would be previewing the wrong page.
+      Padding(
           padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
           child: FutureBuilder<List<Profile>>(
             future: _theirFollowing,
@@ -610,6 +690,113 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ),
     ];
+  }
+
+  /// The identity block: avatar, handle, follow counters.
+  ///
+  /// Everything here now comes from a `public.profiles` row. What is NOT here
+  /// is as deliberate as what is — the prototype's display name
+  /// ("Κατερίνα Βλάχου") and its "· ΕΚΠΑ, Ψυχολογία" subtitle are gone rather
+  /// than defaulted, because there is no `display_name` and no `school` column
+  /// to default FROM. A fabricated name on a real account is worse than a
+  /// handle: it is wrong about a person, and it looks authoritative while being
+  /// wrong. `@username` is the whole of what the schema knows.
+  Widget _header() {
+    final profile = _profile;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
+      child: Row(
+        children: [
+          Container(
+            width: 74,
+            height: 74,
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: AppColors.purple.withValues(alpha: 0.5), width: 2),
+            ),
+            // Still a placeholder, and still the honest thing to draw: the
+            // `avatars` bucket exists, but no column points into it, so there
+            // is no object to ask for. Keyed off the uuid once we have one, so
+            // a user looks the same here as in the ΑΚΟΛΟΥΘΕΙ rail below.
+            child: DiagonalStripePlaceholder(
+              colors: profile?.placeholderColors ?? const [Color(0xFF241E3C), Color(0xFF1B1630)],
+              label: 'avatar',
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(child: _headerBody(profile)),
+        ],
+      ),
+    );
+  }
+
+  Widget _headerBody(Profile? profile) {
+    if (profile != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '@${profile.username}',
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800, letterSpacing: -0.3),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 9),
+            child: Row(
+              children: [
+                // follower_count, and labelled as such. The prototype said
+                // "184 φίλοι", naming a relation this schema cannot represent:
+                // the graph is follows-only and asymmetric, there is no
+                // `friendships` table, and its absence is a decision rather
+                // than a gap (docs/backend-plan.md 3.1, reversed on purpose).
+                // Calling followers friends would imply a mutual, consented
+                // edge to a user looking at a number that is neither.
+                _countPair('${profile.followerCount}', 'ακόλουθοι'),
+                const SizedBox(width: 16),
+                _countPair('${profile.followingCount}', 'ακολουθεί'),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    if (_loading) {
+      return Text(
+        '…',
+        style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800, color: AppColors.textAlpha(0.35)),
+      );
+    }
+
+    if (_loadError != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Δεν φόρτωσε το προφίλ',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textAlpha(0.7)),
+          ),
+          const SizedBox(height: 4),
+          GestureDetector(
+            onTap: _retryLoad,
+            child: const Text(
+              'Δοκίμασε ξανά',
+              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.pinkLight),
+            ),
+          ),
+        ],
+      );
+    }
+
+    // fetchProfile returned null. Either there is no such row or the `profiles`
+    // SELECT policy filtered it — a block, in either direction. Rendered
+    // identically because they are indistinguishable from the client by design,
+    // and a screen that could tell them apart would be a block oracle.
+    return Text(
+      'Το προφίλ δεν είναι διαθέσιμο',
+      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textAlpha(0.55)),
+    );
   }
 
   Widget _segment(String label, bool active, VoidCallback onTap) {

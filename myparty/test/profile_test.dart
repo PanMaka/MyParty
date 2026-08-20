@@ -2,18 +2,26 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:myparty/data/profile_repository.dart';
+import 'package:myparty/data/social_repository.dart';
+import 'package:myparty/models/profile.dart';
 import 'package:myparty/models/profile_privacy.dart';
 import 'package:myparty/models/profile_stats.dart';
 import 'package:myparty/ui/screens/profile_screen.dart';
+import 'package:myparty/ui/widgets/follow_button.dart';
 
 /// Stands in for the real repository. Subclasses rather than implements so it
 /// stays in sync with the real constructor, and overrides every method that
 /// touches the network — `ProfileRepository` resolves its client lazily, so no
 /// Supabase client is ever constructed here.
 class _FakeProfileRepository extends ProfileRepository {
-  _FakeProfileRepository({ProfilePrivacy? privacy, ProfileStats? stats, this.failWrites = false})
-    : _privacy = privacy ?? _defaultPrivacy,
-      _stats = stats ?? _defaultStats;
+  _FakeProfileRepository({
+    ProfilePrivacy? privacy,
+    ProfileStats? stats,
+    this.failWrites = false,
+    this.profile = _defaultProfile,
+    this.failLoad = false,
+  }) : _privacy = privacy ?? _defaultPrivacy,
+       _stats = stats ?? _defaultStats;
 
   static const _defaultPrivacy = ProfilePrivacy(
     mapVisibility: MapVisibility.public,
@@ -22,7 +30,20 @@ class _FakeProfileRepository extends ProfileRepository {
 
   static const _defaultStats = ProfileStats(partiesAttended: 7, partiesHosted: 3, storiesPosted: 12);
 
+  /// Counters chosen not to collide with the stat tiles (7 / 3 / 12), so a
+  /// `findsOneWidget` on either cannot pass by matching the other.
+  static const _defaultProfile = Profile(
+    id: 'me',
+    username: 'nikos',
+    followerCount: 42,
+    followingCount: 9,
+  );
+
   final bool failWrites;
+
+  /// Null models both "no such row" and "the SELECT policy filtered it".
+  final Profile? profile;
+  final bool failLoad;
 
   ProfilePrivacy _privacy;
   final ProfileStats _stats;
@@ -36,6 +57,12 @@ class _FakeProfileRepository extends ProfileRepository {
 
   @override
   String? get currentUserId => 'me';
+
+  @override
+  Future<Profile?> fetchProfile({String? userId}) async {
+    if (failLoad) throw Exception('offline');
+    return profile;
+  }
 
   @override
   Future<ProfilePrivacy?> fetchPrivacy() async => _privacy;
@@ -56,8 +83,33 @@ class _FakeProfileRepository extends ProfileRepository {
   }
 }
 
-Future<void> _pumpProfile(WidgetTester tester, _FakeProfileRepository repo) async {
-  await tester.pumpWidget(MaterialApp(home: ProfileScreen(repository: repo)));
+/// The ΑΚΟΛΟΥΘΕΙ rail now loads on the owner's public preview as well, so a
+/// [SocialRepository] method actually runs during these tests — it never did
+/// before, which is why only the profile repository used to be injected.
+class _FakeSocialRepository extends SocialRepository {
+  _FakeSocialRepository({this.following = const []});
+
+  final List<Profile> following;
+
+  @override
+  Future<List<Profile>> fetchFollowing({String? userId}) async => following;
+}
+
+Future<void> _pumpProfile(
+  WidgetTester tester,
+  _FakeProfileRepository repo, {
+  ProfileTarget target = const OwnProfile(),
+  List<Profile> following = const [],
+}) async {
+  await tester.pumpWidget(
+    MaterialApp(
+      home: ProfileScreen(
+        target: target,
+        repository: repo,
+        social: _FakeSocialRepository(following: following),
+      ),
+    ),
+  );
   await tester.pumpAndSettle();
 }
 
@@ -79,6 +131,112 @@ Future<void> _scrollTo(WidgetTester tester, Finder finder) async {
 }
 
 void main() {
+  group('header', () {
+    testWidgets('renders the profiles row, not the prototype identity', (tester) async {
+      await _pumpProfile(tester, _FakeProfileRepository());
+
+      expect(find.text('@nikos'), findsOneWidget);
+      expect(find.text('42'), findsOneWidget);
+      expect(find.text('9'), findsOneWidget);
+
+      // The design-prototype literals this step replaced.
+      expect(find.text('Κατερίνα Βλάχου'), findsNothing);
+      expect(find.text('@katerina · ΕΚΠΑ, Ψυχολογία'), findsNothing);
+      expect(find.text('184'), findsNothing);
+      expect(find.text('23'), findsNothing);
+    });
+
+    testWidgets('labels the follower count followers, never friends', (tester) async {
+      await _pumpProfile(tester, _FakeProfileRepository());
+
+      // There is no friendships table and none is to be added — the graph is
+      // follows-only and asymmetric. "φίλοι" named a mutual, consented edge
+      // over a number that is neither.
+      expect(find.text('ακόλουθοι'), findsOneWidget);
+      expect(find.text('ακολουθεί'), findsOneWidget);
+      expect(find.text('φίλοι'), findsNothing);
+    });
+
+    testWidgets('invents no display name or school', (tester) async {
+      await _pumpProfile(tester, _FakeProfileRepository());
+
+      // No display_name column and no school column exist, so the handle is
+      // the whole of the identity. A placeholder here would be a fabricated
+      // claim about a real person rendered in the authoritative slot.
+      expect(find.textContaining('ΕΚΠΑ'), findsNothing);
+      expect(find.textContaining('Ψυχολογία'), findsNothing);
+
+      // Scoped to the handle rather than asserting no '·' anywhere on screen:
+      // the ΩΣ ΔΙΟΡΓΑΝΩΤΡΙΑ card is still mock copy that legitimately contains
+      // one ('Απόψε · 18/24 δέχτηκαν'), so the broad form would fail for a
+      // reason that has nothing to do with the header.
+      expect(find.textContaining('@nikos ·'), findsNothing);
+    });
+
+    testWidgets('a failed load offers a retry rather than an empty header', (tester) async {
+      await _pumpProfile(tester, _FakeProfileRepository(failLoad: true));
+
+      expect(find.text('Δεν φόρτωσε το προφίλ'), findsOneWidget);
+      expect(find.text('Δοκίμασε ξανά'), findsOneWidget);
+      expect(find.text('@nikos'), findsNothing);
+    });
+
+    testWidgets('a filtered or missing row says so instead of rendering zeros', (tester) async {
+      await _pumpProfile(tester, _FakeProfileRepository(profile: null));
+
+      // Rendering "@" with 0/0 would assert that an account exists and has no
+      // followers, when what actually happened is that the SELECT policy
+      // filtered it or it is not there at all.
+      expect(find.text('Το προφίλ δεν είναι διαθέσιμο'), findsOneWidget);
+      expect(find.text('0'), findsNothing);
+    });
+  });
+
+  group('self vs other', () {
+    testWidgets('the owner never sees a follow button or a report menu', (tester) async {
+      await _pumpProfile(tester, _FakeProfileRepository());
+
+      // Not even in the public preview, which is the state the old
+      // `bool _selfView` + nullable id combination could not rule out.
+      await tester.tap(find.text('ΔΗΜΟΣΙΑ'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(FollowButton), findsNothing);
+      expect(find.byType(PopupMenuButton<String>), findsNothing);
+      expect(find.text('Μήνυμα'), findsNothing);
+    });
+
+    testWidgets('another user gets the relationship actions', (tester) async {
+      await _pumpProfile(
+        tester,
+        _FakeProfileRepository(),
+        target: const OtherProfile('someone-else'),
+      );
+
+      expect(find.byType(FollowButton), findsOneWidget);
+      expect(find.byType(PopupMenuButton<String>), findsOneWidget);
+    });
+
+    testWidgets('another user never gets the owner sections', (tester) async {
+      await _pumpProfile(
+        tester,
+        _FakeProfileRepository(),
+        target: const OtherProfile('someone-else'),
+      );
+
+      // fetchPrivacy is self-only, so these rows on somebody else's profile
+      // would be showing the VIEWER's tiers under their name. Same for the
+      // sign-out button and the account-deletion row.
+      expect(find.text('Ποιος βλέπει τα πάρτι μου στον χάρτη'), findsNothing);
+      expect(find.text('Αποσύνδεση'), findsNothing);
+      expect(find.text('Δεδομένα & διαγραφή'), findsNothing);
+
+      // And there is no second view of someone else's profile to toggle to.
+      expect(find.text('ΕΓΩ'), findsNothing);
+      expect(find.text('ΔΗΜΟΣΙΑ'), findsNothing);
+    });
+  });
+
   group('stat tiles', () {
     testWidgets('render the values from get_profile_stats, not the mock strings', (tester) async {
       await _pumpProfile(tester, _FakeProfileRepository());
