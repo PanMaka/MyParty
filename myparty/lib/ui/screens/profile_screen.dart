@@ -1,16 +1,18 @@
 import 'package:flutter/material.dart';
 
+import '../../data/party_repository.dart';
 import '../../data/profile_repository.dart';
 import '../../data/social_repository.dart';
 import '../../models/feed_post.dart';
+import '../../models/party_summary.dart';
 import '../../models/profile.dart';
 import '../../models/profile_privacy.dart';
 import '../../models/profile_stats.dart';
 import '../../services/auth_service.dart';
+import '../../utils/greek_date.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
 import '../widgets/follow_button.dart';
-import '../widgets/party_detail_sheet.dart';
 import '../widgets/report_sheet.dart';
 import 'account_deletion_screen.dart';
 import 'notification_settings_screen.dart';
@@ -94,6 +96,7 @@ class ProfileScreen extends StatefulWidget {
     this.target = const OwnProfile(),
     this.repository,
     this.social,
+    this.parties,
   });
 
   /// Injectable so widget tests can subclass [ProfileRepository] without a
@@ -106,6 +109,10 @@ class ProfileScreen extends StatefulWidget {
   /// `userId`, so no test ever caused a [SocialRepository] method to run.
   final SocialRepository? social;
 
+  /// Injectable for the same reason again. [PartyRepository] had to be moved
+  /// to a lazy client before this was possible at all.
+  final PartyRepository? parties;
+
   /// Whose profile this is. Defaults to the signed-in user, which is how the
   /// tab bar mounts it.
   final ProfileTarget target;
@@ -117,6 +124,7 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   late final SocialRepository _social = widget.social ?? SocialRepository();
   late final ProfileRepository _profiles = widget.repository ?? ProfileRepository();
+  late final PartyRepository _parties = widget.parties ?? PartyRepository();
 
   /// Mutable only through the ΕΓΩ / ΔΗΜΟΣΙΑ segment, and only ever between the
   /// two [OwnProfile] values — an [OtherProfile] never becomes an [OwnProfile].
@@ -125,6 +133,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
   late final Future<List<Profile>> _theirFollowing = _social.fetchFollowing(
     userId: widget.target.userIdOrNull,
   );
+
+  /// Upcoming parties this profile is hosting — the ΩΣ ΔΙΟΡΓΑΝΩΤΡΙΑ card.
+  late final Future<List<PartySummary>> _hostingNow = _parties.fetchHostedParties(
+    hostId: widget.target.userIdOrNull,
+    window: PartyWindow.upcoming,
+    limit: 5,
+  );
+
+  /// Public parties this profile has already hosted — the ΔΗΜΟΣΙΑ ΠΑΡΤΙ card.
+  /// `publicOnly` because the heading says public; see [PartyRepository].
+  late final Future<List<PartySummary>> _hostedPublicPast = _parties.fetchHostedParties(
+    hostId: widget.target.userIdOrNull,
+    window: PartyWindow.past,
+    publicOnly: true,
+    limit: 3,
+  );
+
+  /// Where the owner has actually been — the ΤΟ ΙΣΤΟΡΙΚΟ ΜΟΥ strip. Owner-only
+  /// by construction: the `rsvps` policy makes the question unanswerable about
+  /// anyone else, which is why this takes no id.
+  late final Future<List<PartySummary>> _myHistory = _parties.fetchAttendedParties();
 
   Profile? _profile;
   ProfilePrivacy? _privacy;
@@ -293,72 +322,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
           children: [
             Text('ΩΣ ΔΙΟΡΓΑΝΩΤΡΙΑ', style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.45))),
             const SizedBox(height: 9),
-            GestureDetector(
-              onTap: () => showPartyDetailSheet(context, 'taratsa'),
-              child: Container(
-                padding: const EdgeInsets.all(13),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(15),
-                  border: Border.all(color: AppColors.pink.withValues(alpha: 0.28)),
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [AppColors.pink.withValues(alpha: 0.14), Colors.white.withValues(alpha: 0.03)],
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+            FutureBuilder<List<PartySummary>>(
+              future: _hostingNow,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return _sectionNotice('…');
+                }
+                if (snapshot.hasError) {
+                  return _sectionNotice('Δεν φόρτωσαν τα πάρτι σου');
+                }
+                final parties = snapshot.data ?? const <PartySummary>[];
+                if (parties.isEmpty) {
+                  // The prototype's answer to "you host nothing" was a party
+                  // called Ταράτσα στο Κουκάκι. An empty state is the only
+                  // honest one: a host with no upcoming party has no card.
+                  return _sectionNotice('Δεν διοργανώνεις κάποιο πάρτι αυτή τη στιγμή.');
+                }
+                return Column(
                   children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Ταράτσα στο Κουκάκι',
-                              style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700),
-                            ),
-                            SizedBox(height: 2),
-                            Text(
-                              'Απόψε · 18/24 δέχτηκαν',
-                              style: TextStyle(fontSize: 11.5, color: Color(0x8CF4F1F8)),
-                            ),
-                          ],
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.09),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: const Text(
-                            'Διαχείριση',
-                            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 11),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(99),
-                      child: Container(
-                        height: 6,
-                        color: Colors.white.withValues(alpha: 0.08),
-                        child: FractionallySizedBox(
-                          alignment: Alignment.centerLeft,
-                          widthFactor: 0.75,
-                          child: Container(
-                            decoration: const BoxDecoration(
-                              gradient: LinearGradient(colors: [AppColors.purpleDeep, AppColors.pink]),
-                            ),
-                          ),
-                        ),
+                    for (final party in parties)
+                      Padding(
+                        padding: EdgeInsets.only(bottom: party == parties.last ? 0 : 8),
+                        child: _hostedPartyCard(party),
                       ),
-                    ),
                   ],
-                ),
-              ),
+                );
+              },
             ),
           ],
         ),
@@ -370,19 +359,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
           children: [
             Text('ΤΟ ΙΣΤΟΡΙΚΟ ΜΟΥ', style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.45))),
             const SizedBox(height: 9),
-            Row(
-              children: [
-                Expanded(child: _historyTile('Kápsimo', const [Color(0xFF1A1522), Color(0xFF141020)])),
-                const SizedBox(width: 5),
-                Expanded(
-                  child: _historyTile('Εξάρχεια', const [
-                    Color(0xFF1C1622),
-                    Color(0xFF151020),
-                  ], ring: AppColors.pink),
-                ),
-                const SizedBox(width: 5),
-                Expanded(child: _historyTile('Anodos', const [Color(0xFF1D1730), Color(0xFF161126)])),
-              ],
+            // Parties you WENT to, not ones you hosted -- the section above is
+            // explicitly "as organizer", and this pairs with the "πάρτι φέτος"
+            // tile at the top, which counts the same `going` RSVPs. Owner-only
+            // by construction: the rsvps SELECT policy makes the question
+            // unanswerable about anybody else.
+            FutureBuilder<List<PartySummary>>(
+              future: _myHistory,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return _sectionNotice('…');
+                }
+                if (snapshot.hasError) {
+                  return _sectionNotice('Δεν φόρτωσε το ιστορικό σου');
+                }
+                final parties = snapshot.data ?? const <PartySummary>[];
+                if (parties.isEmpty) {
+                  return _sectionNotice('Δεν έχεις πάει ακόμα σε κάποιο πάρτι.');
+                }
+                final tiles = parties.take(3).toList();
+                return Row(
+                  children: [
+                    for (var i = 0; i < tiles.length; i++) ...[
+                      if (i > 0) const SizedBox(width: 5),
+                      Expanded(child: _historyTile(tiles[i])),
+                    ],
+                    // Keeps three columns' worth of width when there are fewer
+                    // than three, so one past party does not render as a single
+                    // tile stretched across the screen.
+                    for (var i = tiles.length; i < 3; i++) ...[
+                      const SizedBox(width: 5),
+                      const Expanded(child: SizedBox.shrink()),
+                    ],
+                  ],
+                );
+              },
             ),
           ],
         ),
@@ -586,24 +597,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
               style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.45)),
             ),
             const SizedBox(height: 9),
-            Container(
-              padding: const EdgeInsets.all(13),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(15),
-                color: Colors.white.withValues(alpha: 0.035),
-                border: Border.all(color: AppColors.purple.withValues(alpha: 0.25)),
-              ),
-              child: const Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Rooftop Σεπτεμβρίου', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700)),
-                  SizedBox(height: 2),
-                  Text(
-                    'Πέρσι · 140 ήρθαν · Κουκάκι',
-                    style: TextStyle(fontSize: 11.5, color: Color(0x8CF4F1F8)),
-                  ),
-                ],
-              ),
+            FutureBuilder<List<PartySummary>>(
+              future: _hostedPublicPast,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return _sectionNotice('…');
+                }
+                if (snapshot.hasError) {
+                  return _sectionNotice('Δεν φόρτωσαν τα πάρτι');
+                }
+                final parties = snapshot.data ?? const <PartySummary>[];
+                if (parties.isEmpty) {
+                  return _sectionNotice('Κανένα δημόσιο πάρτι ακόμα.');
+                }
+                return Column(
+                  children: [
+                    for (final party in parties)
+                      Padding(
+                        padding: EdgeInsets.only(bottom: party == parties.last ? 0 : 8),
+                        child: _pastPublicPartyCard(party),
+                      ),
+                  ],
+                );
+              },
             ),
           ],
         ),
@@ -855,25 +871,161 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _historyTile(String label, List<Color> colors, {Color? ring}) {
+  /// One upcoming party the profile is hosting.
+  ///
+  /// The "Διαχείριση" pill the prototype drew here is gone rather than wired:
+  /// there is no management screen to send anyone to, and a button that does
+  /// nothing is the same fabrication as a fake party title -- it just fails a
+  /// beat later. The card is informational until that screen exists.
+  Widget _hostedPartyCard(PartySummary party) {
+    return Container(
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: AppColors.pink.withValues(alpha: 0.28)),
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [AppColors.pink.withValues(alpha: 0.14), Colors.white.withValues(alpha: 0.03)],
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  party.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700),
+                ),
+              ),
+              if (party.isPrivate)
+                Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: Icon(Icons.lock_outline, size: 14, color: AppColors.textAlpha(0.45)),
+                ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(
+            // "18/24 δέχτηκαν" needed a denominator nothing computed. going_count
+            // is a real trigger-maintained column; the only real denominator is
+            // max_capacity, which is nullable -- so a host who set no cap gets
+            // the count on its own instead of a ratio against an invented target.
+            party.hasCapacity
+                ? '${formatPartyStart(party.startsAt)} · ${party.goingCount}/${party.maxCapacity} θέσεις'
+                : '${formatPartyStart(party.startsAt)} · ${party.goingCount} δηλώσεις συμμετοχής',
+            style: const TextStyle(fontSize: 11.5, color: Color(0x8CF4F1F8)),
+          ),
+          // Only drawn when there is something to be a fraction OF. The
+          // prototype's widthFactor: 0.75 was a picture of a ratio, not a ratio.
+          if (party.hasCapacity) ...[
+            const SizedBox(height: 11),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(99),
+              child: Container(
+                height: 6,
+                color: Colors.white.withValues(alpha: 0.08),
+                child: FractionallySizedBox(
+                  alignment: Alignment.centerLeft,
+                  widthFactor: party.capacityFraction,
+                  child: Container(
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(colors: [AppColors.purpleDeep, AppColors.pink]),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// One public party the profile has already hosted.
+  ///
+  /// The prototype's "Πέρσι · 140 ήρθαν · Κουκάκι" loses its third clause:
+  /// `going_count` is real, the date is real, and the neighbourhood has no
+  /// column anywhere in the schema -- `parties.location` is a geography point.
+  Widget _pastPublicPartyCard(PartySummary party) {
+    return Container(
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(15),
+        color: Colors.white.withValues(alpha: 0.035),
+        border: Border.all(color: AppColors.purple.withValues(alpha: 0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            party.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            '${formatPartyPast(party.startsAt)} · ${party.goingCount} ήρθαν',
+            style: const TextStyle(fontSize: 11.5, color: Color(0x8CF4F1F8)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// A past party as one square in the ΤΟ ΙΣΤΟΡΙΚΟ ΜΟΥ strip.
+  ///
+  /// The title is real; the image is not, because there is none. `party-covers`
+  /// is a real bucket with a `{party_id}/…` convention and nothing points into
+  /// it, so the stripe is the same acknowledged placeholder the avatars use --
+  /// keyed off the uuid so a party keeps its colours between rebuilds.
+  Widget _historyTile(PartySummary party) {
     return AspectRatio(
       aspectRatio: 1,
       child: Container(
         clipBehavior: Clip.antiAlias,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(11),
-          border: ring != null ? Border.all(color: ring.withValues(alpha: 0.5), width: 1.5) : null,
-        ),
+        decoration: BoxDecoration(borderRadius: BorderRadius.circular(11)),
         child: Stack(
+          fit: StackFit.expand,
           children: [
-            DiagonalStripePlaceholder(colors: colors),
+            DiagonalStripePlaceholder(colors: party.placeholderColors),
             Positioned(
               bottom: 5,
               left: 6,
-              child: Text(label, style: AppTextStyles.mono(size: 8, color: AppColors.textAlpha(0.4))),
+              right: 6,
+              child: Text(
+                party.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.mono(size: 8, color: AppColors.textAlpha(0.55)),
+              ),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// The one-line stand-in a section shows when it is loading, broken, or
+  /// genuinely empty. Deliberately plain: an empty section should read as an
+  /// absence of parties, not as a broken card.
+  Widget _sectionNotice(String message) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(15),
+        color: Colors.white.withValues(alpha: 0.03),
+        border: Border.all(color: AppColors.hairline),
+      ),
+      child: Text(
+        message,
+        style: TextStyle(fontSize: 12, height: 1.4, color: AppColors.textAlpha(0.45)),
       ),
     );
   }

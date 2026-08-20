@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:myparty/data/party_repository.dart';
 import 'package:myparty/data/profile_repository.dart';
 import 'package:myparty/data/social_repository.dart';
+import 'package:myparty/models/party_summary.dart';
 import 'package:myparty/models/profile.dart';
 import 'package:myparty/models/profile_privacy.dart';
 import 'package:myparty/models/profile_stats.dart';
@@ -95,11 +97,72 @@ class _FakeSocialRepository extends SocialRepository {
   Future<List<Profile>> fetchFollowing({String? userId}) async => following;
 }
 
+/// [PartyRepository] had to move to a lazily-resolved client before this was
+/// possible -- it was the last repository still building one in its
+/// constructor, which is why nothing had ever faked a party.
+class _FakePartyRepository extends PartyRepository {
+  _FakePartyRepository({
+    this.hosting = const [],
+    this.hostedPublicPast = const [],
+    this.attended = const [],
+    this.fail = false,
+  });
+
+  final List<PartySummary> hosting;
+  final List<PartySummary> hostedPublicPast;
+  final List<PartySummary> attended;
+  final bool fail;
+
+  /// Every (window, publicOnly) pair the screen actually asked for. The public
+  /// section's `publicOnly: true` is the whole difference between "parties they
+  /// hosted that were public" and "parties they hosted that you happen to be
+  /// allowed to see", so it is asserted rather than assumed.
+  final List<String> hostedQueries = [];
+
+  @override
+  Future<List<PartySummary>> fetchHostedParties({
+    String? hostId,
+    required PartyWindow window,
+    bool publicOnly = false,
+    int limit = 12,
+  }) async {
+    hostedQueries.add('${window.name}:publicOnly=$publicOnly');
+    if (fail) throw Exception('offline');
+    return window == PartyWindow.upcoming ? hosting : hostedPublicPast;
+  }
+
+  @override
+  Future<List<PartySummary>> fetchAttendedParties({int limit = 50}) async {
+    if (fail) throw Exception('offline');
+    return attended;
+  }
+}
+
+PartySummary _party(
+  String id,
+  String title, {
+  DateTime? startsAt,
+  int goingCount = 0,
+  int? maxCapacity,
+  bool isPrivate = false,
+}) {
+  return PartySummary(
+    id: id,
+    title: title,
+    startsAt: startsAt ?? DateTime(2026, 9, 8, 22, 30),
+    isPrivate: isPrivate,
+    goingCount: goingCount,
+    interestedCount: 0,
+    maxCapacity: maxCapacity,
+  );
+}
+
 Future<void> _pumpProfile(
   WidgetTester tester,
   _FakeProfileRepository repo, {
   ProfileTarget target = const OwnProfile(),
   List<Profile> following = const [],
+  _FakePartyRepository? parties,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
@@ -107,6 +170,7 @@ Future<void> _pumpProfile(
         target: target,
         repository: repo,
         social: _FakeSocialRepository(following: following),
+        parties: parties ?? _FakePartyRepository(),
       ),
     ),
   );
@@ -234,6 +298,131 @@ void main() {
       // And there is no second view of someone else's profile to toggle to.
       expect(find.text('ΕΓΩ'), findsNothing);
       expect(find.text('ΔΗΜΟΣΙΑ'), findsNothing);
+    });
+  });
+
+  group('hosted parties', () {
+    testWidgets('the ΩΣ ΔΙΟΡΓΑΝΩΤΡΙΑ card renders real parties', (tester) async {
+      final parties = _FakePartyRepository(
+        hosting: [_party('p1', 'Ταράτσα Θησείου', goingCount: 18, maxCapacity: 24)],
+      );
+      await _pumpProfile(tester, _FakeProfileRepository(), parties: parties);
+      await _scrollTo(tester, find.text('Ταράτσα Θησείου'));
+
+      expect(find.text('Ταράτσα Θησείου'), findsOneWidget);
+      expect(find.textContaining('18/24 θέσεις'), findsOneWidget);
+
+      // The prototype's party, and the button that had no screen behind it.
+      expect(find.text('Ταράτσα στο Κουκάκι'), findsNothing);
+      expect(find.text('Διαχείριση'), findsNothing);
+    });
+
+    testWidgets('a party with no capacity shows a count, not a ratio', (tester) async {
+      final parties = _FakePartyRepository(
+        hosting: [_party('p1', 'Χωρίς όριο', goingCount: 7)],
+      );
+      await _pumpProfile(tester, _FakeProfileRepository(), parties: parties);
+      await _scrollTo(tester, find.text('Χωρίς όριο'));
+
+      // max_capacity is nullable and is the only real denominator a party has.
+      // Inventing one to divide by is what the hardcoded 0.75 bar did.
+      expect(find.textContaining('7 δηλώσεις συμμετοχής'), findsOneWidget);
+      expect(find.byType(FractionallySizedBox), findsNothing);
+    });
+
+    testWidgets('hosting nothing renders an empty state, not a fake party', (tester) async {
+      await _pumpProfile(tester, _FakeProfileRepository(), parties: _FakePartyRepository());
+      await _scrollTo(tester, find.text('Δεν διοργανώνεις κάποιο πάρτι αυτή τη στιγμή.'));
+
+      expect(find.text('Δεν διοργανώνεις κάποιο πάρτι αυτή τη στιγμή.'), findsOneWidget);
+      expect(find.text('Ταράτσα στο Κουκάκι'), findsNothing);
+    });
+
+    testWidgets('a failed load says so rather than showing nothing', (tester) async {
+      await _pumpProfile(
+        tester,
+        _FakeProfileRepository(),
+        parties: _FakePartyRepository(fail: true),
+      );
+      await _scrollTo(tester, find.text('Δεν φόρτωσαν τα πάρτι σου'));
+
+      expect(find.text('Δεν φόρτωσαν τα πάρτι σου'), findsOneWidget);
+    });
+  });
+
+  group('history strip', () {
+    testWidgets('renders past parties you attended', (tester) async {
+      final parties = _FakePartyRepository(
+        attended: [_party('a1', 'Kápsimo'), _party('a2', 'Εξάρχεια')],
+      );
+      await _pumpProfile(tester, _FakeProfileRepository(), parties: parties);
+      await _scrollTo(tester, find.text('Kápsimo'));
+
+      expect(find.text('Kápsimo'), findsOneWidget);
+      expect(find.text('Εξάρχεια'), findsOneWidget);
+      // The third prototype tile had no party behind it at all.
+      expect(find.text('Anodos'), findsNothing);
+    });
+
+    testWidgets('no history renders an empty state', (tester) async {
+      await _pumpProfile(tester, _FakeProfileRepository(), parties: _FakePartyRepository());
+      await _scrollTo(tester, find.text('Δεν έχεις πάει ακόμα σε κάποιο πάρτι.'));
+
+      expect(find.text('Δεν έχεις πάει ακόμα σε κάποιο πάρτι.'), findsOneWidget);
+    });
+  });
+
+  group('public hosted parties', () {
+    testWidgets('renders real past public parties', (tester) async {
+      final parties = _FakePartyRepository(
+        hostedPublicPast: [
+          _party('h1', 'Rooftop Αυγούστου', startsAt: DateTime(2025, 8, 9), goingCount: 140),
+        ],
+      );
+      await _pumpProfile(
+        tester,
+        _FakeProfileRepository(),
+        target: const OtherProfile('someone-else'),
+        parties: parties,
+      );
+      await _scrollTo(tester, find.text('Rooftop Αυγούστου'));
+
+      expect(find.text('Rooftop Αυγούστου'), findsOneWidget);
+      expect(find.textContaining('140 ήρθαν'), findsOneWidget);
+      // The year is printed because the party is not from this year.
+      expect(find.textContaining('9 Αύγ 2025'), findsOneWidget);
+
+      expect(find.text('Rooftop Σεπτεμβρίου'), findsNothing);
+      // "Κουκάκι" had no column behind it -- parties.location is a point.
+      expect(find.textContaining('Κουκάκι'), findsNothing);
+    });
+
+    testWidgets('asks for public parties specifically, not merely visible ones', (tester) async {
+      final parties = _FakePartyRepository();
+      await _pumpProfile(
+        tester,
+        _FakeProfileRepository(),
+        target: const OtherProfile('someone-else'),
+        parties: parties,
+      );
+
+      // RLS already hides parties this viewer may not see -- but it would let
+      // through a PRIVATE party they hold an invitation to, which under a
+      // heading reading "public parties" would misdescribe it.
+      expect(parties.hostedQueries, contains('past:publicOnly=true'));
+      expect(parties.hostedQueries, isNot(contains('past:publicOnly=false')));
+    });
+
+    testWidgets('no public parties renders an empty state', (tester) async {
+      await _pumpProfile(
+        tester,
+        _FakeProfileRepository(),
+        target: const OtherProfile('someone-else'),
+        parties: _FakePartyRepository(),
+      );
+      await _scrollTo(tester, find.text('Κανένα δημόσιο πάρτι ακόμα.'));
+
+      expect(find.text('Κανένα δημόσιο πάρτι ακόμα.'), findsOneWidget);
     });
   });
 
