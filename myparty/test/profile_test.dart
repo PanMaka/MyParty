@@ -9,6 +9,7 @@ import 'package:myparty/models/profile.dart';
 import 'package:myparty/models/profile_privacy.dart';
 import 'package:myparty/models/profile_stats.dart';
 import 'package:myparty/ui/screens/profile_screen.dart';
+import 'package:myparty/ui/widgets/diagonal_placeholder.dart';
 import 'package:myparty/ui/widgets/follow_button.dart';
 
 /// Stands in for the real repository. Subclasses rather than implements so it
@@ -34,11 +35,16 @@ class _FakeProfileRepository extends ProfileRepository {
 
   /// Counters chosen not to collide with the stat tiles (7 / 3 / 12), so a
   /// `findsOneWidget` on either cannot pass by matching the other.
+  ///
+  /// Carries a bio and an avatar so the header has both optional halves to
+  /// render; the tests that care about their absence pass an explicit profile.
   static const _defaultProfile = Profile(
     id: 'me',
     username: 'nikos',
     followerCount: 42,
     followingCount: 9,
+    bio: 'Στα δεκαπέντε λεπτά από παντού.',
+    avatarPath: 'me/avatar.jpg',
   );
 
   final bool failWrites;
@@ -57,6 +63,15 @@ class _FakeProfileRepository extends ProfileRepository {
   final List<String> mapVisibilityWrites = [];
   final List<String> invitePolicyWrites = [];
 
+  /// Every path the header asked Storage to resolve.
+  ///
+  /// Asserting on this rather than on the rendered `Image` is the point: a
+  /// widget that interpolated `/object/public/avatars/<path>` itself would draw
+  /// an identical circle and still be the bug — the bucket's policy decides how
+  /// its objects are reached, so the call has to leave the widget layer. See
+  /// [ProfileRepository.avatarUrl].
+  final List<String> avatarUrlRequests = [];
+
   @override
   String? get currentUserId => 'me';
 
@@ -71,6 +86,17 @@ class _FakeProfileRepository extends ProfileRepository {
 
   @override
   Future<ProfileStats> fetchStats({String? userId}) async => _stats;
+
+  /// Stands in for `storage.from('avatars').getPublicUrl(path)`. The host is
+  /// deliberately unresolvable: `flutter_test` answers every request with a 400
+  /// anyway, so this exercises the `errorBuilder` fallback rather than pretending
+  /// a real object exists.
+  @override
+  String? avatarUrl(String? path) {
+    if (path == null) return null;
+    avatarUrlRequests.add(path);
+    return 'https://stub.invalid/avatars/$path';
+  }
 
   @override
   Future<void> updatePrivacy({MapVisibility? mapVisibility, InvitePolicy? invitePolicy}) async {
@@ -201,7 +227,6 @@ void main() {
 
       expect(find.text('@nikos'), findsOneWidget);
       expect(find.text('42'), findsOneWidget);
-      expect(find.text('9'), findsOneWidget);
 
       // The design-prototype literals this step replaced.
       expect(find.text('Κατερίνα Βλάχου'), findsNothing);
@@ -216,25 +241,82 @@ void main() {
       // There is no friendships table and none is to be added — the graph is
       // follows-only and asymmetric. "φίλοι" named a mutual, consented edge
       // over a number that is neither.
-      expect(find.text('ακόλουθοι'), findsOneWidget);
-      expect(find.text('ακολουθεί'), findsOneWidget);
+      expect(find.text('ΑΚΟΛΟΥΘΟΙ'), findsOneWidget);
       expect(find.text('φίλοι'), findsNothing);
+      expect(find.text('ακόλουθοι'), findsNothing);
     });
 
-    testWidgets('invents no display name or school', (tester) async {
+    testWidgets('renders exactly two lines of text: the handle and the bio', (tester) async {
       await _pumpProfile(tester, _FakeProfileRepository());
 
-      // No display_name column and no school column exist, so the handle is
-      // the whole of the identity. A placeholder here would be a fabricated
-      // claim about a real person rendered in the authoritative slot.
+      expect(find.text('@nikos'), findsOneWidget);
+      expect(find.text('Στα δεκαπέντε λεπτά από παντού.'), findsOneWidget);
+
+      // `following_count` used to be a third thing in this block. It is not
+      // rendered anywhere now — 9 is the fake's followingCount, and 42 is the
+      // one follower number that survives, in the ΑΚΟΛΟΥΘΟΙ tile.
+      expect(find.text('9'), findsNothing);
+      expect(find.text('ακολουθεί'), findsNothing);
+    });
+
+    testWidgets('a profile with no bio renders one line, not a blank second one', (tester) async {
+      await _pumpProfile(
+        tester,
+        _FakeProfileRepository(
+          profile: const Profile(id: 'me', username: 'nikos', followerCount: 0, followingCount: 0),
+        ),
+      );
+
+      // Every account looks like this the day it is created, so this is the
+      // common case rather than the degraded one. Nothing may be substituted
+      // in that slot: a generated sentence where a bio goes reads as the user's
+      // own words.
+      expect(find.text('@nikos'), findsOneWidget);
+      expect(find.text(''), findsNothing);
+      expect(find.textContaining('Γράψε κάτι'), findsNothing);
+      expect(find.textContaining('Χωρίς bio'), findsNothing);
+    });
+
+    testWidgets('invents no display name, school or department', (tester) async {
+      await _pumpProfile(tester, _FakeProfileRepository());
+
+      // No display_name, no school and no department column exist, so the
+      // handle plus the user's own bio is the whole of the identity. A
+      // placeholder in any of those slots would be a fabricated claim about a
+      // real person rendered where an authoritative one goes.
       expect(find.textContaining('ΕΚΠΑ'), findsNothing);
       expect(find.textContaining('Ψυχολογία'), findsNothing);
+      expect(find.textContaining('Τμήμα'), findsNothing);
 
       // Scoped to the handle rather than asserting no '·' anywhere on screen:
       // the ΩΣ ΔΙΟΡΓΑΝΩΤΡΙΑ card is still mock copy that legitimately contains
       // one ('Απόψε · 18/24 δέχτηκαν'), so the broad form would fail for a
       // reason that has nothing to do with the header.
       expect(find.textContaining('@nikos ·'), findsNothing);
+    });
+
+    testWidgets('resolves the avatar through the repository, not by path convention', (tester) async {
+      final repo = _FakeProfileRepository();
+      await _pumpProfile(tester, repo);
+
+      // The rule is not "an image appears" — it is that the URL came from
+      // Storage. `avatars` is public today and private buckets need a signed
+      // URL with a lifetime; a widget building the path itself would keep
+      // compiling on the day that changes.
+      expect(repo.avatarUrlRequests, ['me/avatar.jpg']);
+    });
+
+    testWidgets('falls back to the placeholder when avatar_path is null', (tester) async {
+      final repo = _FakeProfileRepository(
+        profile: const Profile(id: 'me', username: 'nikos', followerCount: 0, followingCount: 0),
+      );
+      await _pumpProfile(tester, repo);
+
+      // Null means "no avatar" and nothing else, so nothing is asked of
+      // Storage and the uuid-keyed gradient is drawn instead — visibly not a
+      // photograph, rather than a stock face that would read as one.
+      expect(repo.avatarUrlRequests, isEmpty);
+      expect(find.byType(DiagonalStripePlaceholder), findsWidgets);
     });
 
     testWidgets('a failed load offers a retry rather than an empty header', (tester) async {
@@ -250,9 +332,13 @@ void main() {
 
       // Rendering "@" with 0/0 would assert that an account exists and has no
       // followers, when what actually happened is that the SELECT policy
-      // filtered it or it is not there at all.
+      // filtered it or it is not there at all. Same argument now covers the
+      // tiles, which is why they are gated on a loaded profile rather than
+      // defaulting the counts to zero.
       expect(find.text('Το προφίλ δεν είναι διαθέσιμο'), findsOneWidget);
       expect(find.text('0'), findsNothing);
+      expect(find.text('ΑΚΟΛΟΥΘΟΙ'), findsNothing);
+      expect(find.text('ΔΙΟΡΓΑΝΩΣΕ'), findsNothing);
     });
   });
 
@@ -268,6 +354,13 @@ void main() {
       expect(find.byType(FollowButton), findsNothing);
       expect(find.byType(PopupMenuButton<String>), findsNothing);
       expect(find.text('Μήνυμα'), findsNothing);
+
+      // The owner's own pair renders instead, in the public preview too: the
+      // action row switches on the ProfileTarget's TYPE and deliberately
+      // ignores previewingPublicView, because previewing your public profile
+      // does not make you a stranger to yourself.
+      expect(find.text('Διοργάνωσε πάρτι'), findsOneWidget);
+      expect(find.text('Επεξεργασία προφίλ'), findsOneWidget);
     });
 
     testWidgets('another user gets the relationship actions', (tester) async {
@@ -279,6 +372,13 @@ void main() {
 
       expect(find.byType(FollowButton), findsOneWidget);
       expect(find.byType(PopupMenuButton<String>), findsOneWidget);
+      expect(find.text('Μήνυμα'), findsOneWidget);
+
+      // And never the owner's pair. There is no bool that could put these on
+      // somebody else's profile — the switch is over the sealed type, so the
+      // two cases are exhaustive and mutually exclusive by construction.
+      expect(find.text('Διοργάνωσε πάρτι'), findsNothing);
+      expect(find.text('Επεξεργασία προφίλ'), findsNothing);
     });
 
     testWidgets('another user never gets the owner sections', (tester) async {
@@ -427,12 +527,15 @@ void main() {
   });
 
   group('stat tiles', () {
-    testWidgets('render the values from get_profile_stats, not the mock strings', (tester) async {
+    testWidgets('are the two the layout calls for, sourced from the row and the RPC', (tester) async {
       await _pumpProfile(tester, _FakeProfileRepository());
 
-      expect(find.text('7'), findsOneWidget);
+      // followerCount off the profiles row, partiesHosted off
+      // get_profile_stats. Two tiles, two numbers.
+      expect(find.text('ΑΚΟΛΟΥΘΟΙ'), findsOneWidget);
+      expect(find.text('42'), findsOneWidget);
+      expect(find.text('ΔΙΟΡΓΑΝΩΣΕ'), findsOneWidget);
       expect(find.text('3'), findsOneWidget);
-      expect(find.text('12'), findsOneWidget);
 
       // The design-prototype literals this phase replaced.
       expect(find.text('47'), findsNothing);
@@ -440,20 +543,34 @@ void main() {
       expect(find.text('312'), findsNothing);
     });
 
-    testWidgets('the attendance tile is absent in the public view', (tester) async {
+    testWidgets('drop the three counters that have no tile, rather than showing them small', (tester) async {
       await _pumpProfile(tester, _FakeProfileRepository());
-      expect(find.text('πάρτι φέτος'), findsOneWidget);
+
+      // 7 = partiesAttended, 12 = storiesPosted, 9 = followingCount. All three
+      // are still fetched and still on ProfileStats/Profile; none is rendered.
+      // Chosen as a decision, not an oversight — a half-size fourth number
+      // under two large tiles is the shape this layout exists to avoid.
+      expect(find.text('7'), findsNothing);
+      expect(find.text('12'), findsNothing);
+      expect(find.text('9'), findsNothing);
+      expect(find.text('πάρτι φέτος'), findsNothing);
+      expect(find.text('stories'), findsNothing);
+    });
+
+    testWidgets('are the same two tiles for every viewer', (tester) async {
+      await _pumpProfile(tester, _FakeProfileRepository());
+      expect(find.text('ΑΚΟΛΟΥΘΟΙ'), findsOneWidget);
+      expect(find.text('ΔΙΟΡΓΑΝΩΣΕ'), findsOneWidget);
 
       await tester.tap(find.text('ΔΗΜΟΣΙΑ'));
       await tester.pumpAndSettle();
 
-      // get_profile_stats runs with invoker rights and the rsvps SELECT policy
-      // is owner-only, so this count is structurally zero for any other viewer.
-      // Showing "0 πάρτι φέτος" would assert something false about them; the
-      // tile is dropped instead.
-      expect(find.text('πάρτι φέτος'), findsNothing);
-      expect(find.text('διοργάνωσε'), findsOneWidget);
-      expect(find.text('stories'), findsOneWidget);
+      // Nothing in this row is viewer-dependent any more. The tile that was —
+      // "πάρτι φέτος", structurally zero for anyone but the owner because
+      // get_profile_stats runs with invoker rights over an owner-scoped rsvps
+      // policy — is gone, so the row's shape no longer encodes who is looking.
+      expect(find.text('ΑΚΟΛΟΥΘΟΙ'), findsOneWidget);
+      expect(find.text('ΔΙΟΡΓΑΝΩΣΕ'), findsOneWidget);
     });
   });
 

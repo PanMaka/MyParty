@@ -15,6 +15,7 @@ import '../widgets/diagonal_placeholder.dart';
 import '../widgets/follow_button.dart';
 import '../widgets/report_sheet.dart';
 import 'account_deletion_screen.dart';
+import 'host_wizard_screen.dart';
 import 'notification_settings_screen.dart';
 
 /// Whose profile the screen is showing, and — when it is the owner's — whether
@@ -284,28 +285,46 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
             _header(),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-              child: Row(
-                children: [
-                  // "πάρτι φέτος" is the OWNER'S tile and only the owner's.
-                  // get_profile_stats runs with invoker rights, and the rsvps
-                  // SELECT policy is `user_id = auth.uid() OR I host it` — so
-                  // for any other viewer this number is structurally zero, not
-                  // small. Rendering "0 πάρτι φέτος" on someone else's profile
-                  // would state something false ("they go to nothing") in place
-                  // of something unknowable. Hiding the tile says the true
-                  // thing, which is nothing at all.
-                  if (_target.showsOwnerSections) ...[
-                    Expanded(child: _statTile('${_stats.partiesAttended}', 'πάρτι φέτος')),
-                    const SizedBox(width: 8),
+            // Two tiles, and the same two for every viewer.
+            //
+            // Gated on a loaded profile rather than defaulting to 0, for the
+            // reason _headerBody already gives below: "0 ΑΚΟΛΟΥΘΟΙ" sitting
+            // under "Το προφίλ δεν είναι διαθέσιμο" asserts that an account
+            // exists and that nobody follows it, when what actually happened is
+            // that the SELECT policy filtered the row or it is not there.
+            //
+            // Three counters that used to render here are gone rather than
+            // moved. ProfileStats still carries all of them and
+            // get_profile_stats still returns them; nothing draws them:
+            //
+            //  * `stories` — no tile in the two-tile layout.
+            //  * `πάρτι φέτος` (`parties_attended`) — was owner-only, because
+            //    get_profile_stats runs with invoker rights and the `rsvps`
+            //    SELECT policy is `user_id = auth.uid() OR I host it`, which
+            //    makes it structurally zero for any other viewer. Dropping it
+            //    also removes the last thing that made this row's SHAPE depend
+            //    on who is looking.
+            //  * `following_count` — see _headerBody.
+            if (_profile case final loaded?)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                child: Row(
+                  children: [
+                    // follower_count, and labelled as followers. The prototype
+                    // said "184 φίλοι", naming a relation this schema cannot
+                    // represent: the graph is follows-only and asymmetric,
+                    // there is no `friendships` table, and its absence is a
+                    // decision rather than a gap (docs/backend-plan.md 3.1,
+                    // reversed on purpose). Calling followers friends would
+                    // imply a mutual, consented edge to a user looking at a
+                    // number that is neither.
+                    Expanded(child: _statTile('${loaded.followerCount}', 'ΑΚΟΛΟΥΘΟΙ')),
+                    const SizedBox(width: 10),
+                    Expanded(child: _statTile('${_stats.partiesHosted}', 'ΔΙΟΡΓΑΝΩΣΕ', pink: true)),
                   ],
-                  Expanded(child: _statTile('${_stats.partiesHosted}', 'διοργάνωσε', pink: true)),
-                  const SizedBox(width: 8),
-                  Expanded(child: _statTile('${_stats.storiesPosted}', 'stories')),
-                ],
+                ),
               ),
-            ),
+            _actionRow(),
             if (_target.showsOwnerSections) ..._selfSections(context) else ..._publicSections(context),
           ],
         ),
@@ -539,54 +558,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   List<Widget> _publicSections(BuildContext context) {
-    final target = _target;
-
+    // The follow / message / report row used to open this list, gated on an
+    // OtherProfile. It has moved into _actionRow directly under the header,
+    // because the owner now has a pair of buttons in that same slot — and one
+    // widget switching on the target beats two sections each rendering half the
+    // answer to the same question.
     return [
-      // Follow, message and report exist only in relation to somebody else, so
-      // the whole row is bound to an OtherProfile rather than each control
-      // testing a nullable id. That is also what keeps `targetUserId` and
-      // `reports.target_id` non-null without a `!` — the uuid comes from the
-      // pattern match, so there is no branch in which it is absent.
-      if (target case final OtherProfile other)
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-          child: Row(
-            children: [
-              Expanded(child: FollowButton(targetUserId: other.userId)),
-              const SizedBox(width: 8),
-              Expanded(
-                child: GestureDetector(
-                  onTap: _comingSoon,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.07),
-                      border: Border.all(color: AppColors.hairline),
-                      borderRadius: BorderRadius.circular(13),
-                    ),
-                    child: const Text(
-                      'Μήνυμα',
-                      style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                ),
-              ),
-              PopupMenuButton<String>(
-                icon: Icon(Icons.more_horiz, size: 20, color: AppColors.textAlpha(0.5)),
-                color: AppColors.sheet,
-                onSelected: (_) =>
-                    showReportSheet(context, target: ReportTarget.profile, targetId: other.userId),
-                itemBuilder: (_) => const [
-                  PopupMenuItem(
-                    value: 'report',
-                    child: Text('Αναφορά', style: TextStyle(fontSize: 13)),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
       Padding(
         padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
         child: Column(
@@ -708,15 +685,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
     ];
   }
 
-  /// The identity block: avatar, handle, follow counters.
+  /// The identity block: an avatar and exactly two lines of text.
   ///
-  /// Everything here now comes from a `public.profiles` row. What is NOT here
-  /// is as deliberate as what is — the prototype's display name
-  /// ("Κατερίνα Βλάχου") and its "· ΕΚΠΑ, Ψυχολογία" subtitle are gone rather
-  /// than defaulted, because there is no `display_name` and no `school` column
-  /// to default FROM. A fabricated name on a real account is worse than a
-  /// handle: it is wrong about a person, and it looks authoritative while being
-  /// wrong. `@username` is the whole of what the schema knows.
+  /// What is NOT here is as deliberate as what is. The prototype's display name
+  /// ("Κατερίνα Βλάχου") and its "· ΕΚΠΑ, Ψυχολογία" subtitle stay gone rather
+  /// than defaulted: there is no `display_name`, no `school` and no `department`
+  /// column to default FROM, and a fabricated name on a real account is worse
+  /// than a handle — it is wrong about a person while looking authoritative.
   Widget _header() {
     final profile = _profile;
 
@@ -724,27 +699,58 @@ class _ProfileScreenState extends State<ProfileScreen> {
       padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
       child: Row(
         children: [
-          Container(
-            width: 74,
-            height: 74,
-            clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: AppColors.purple.withValues(alpha: 0.5), width: 2),
-            ),
-            // Still a placeholder, and still the honest thing to draw: the
-            // `avatars` bucket exists, but no column points into it, so there
-            // is no object to ask for. Keyed off the uuid once we have one, so
-            // a user looks the same here as in the ΑΚΟΛΟΥΘΕΙ rail below.
-            child: DiagonalStripePlaceholder(
-              colors: profile?.placeholderColors ?? const [Color(0xFF241E3C), Color(0xFF1B1630)],
-              label: 'avatar',
-            ),
-          ),
+          _avatar(profile),
           const SizedBox(width: 14),
           Expanded(child: _headerBody(profile)),
         ],
       ),
+    );
+  }
+
+  /// The avatar, from the `avatars` bucket when `avatar_path` points at one.
+  ///
+  /// The URL comes back from [ProfileRepository.avatarUrl], which asks Storage
+  /// for it — nothing here builds `/object/public/avatars/<path>` by
+  /// convention, so the bucket stays the single authority on how its objects
+  /// are reached and a change of policy is a change in one method.
+  ///
+  /// [DiagonalStripePlaceholder] is the fallback in three cases that are one
+  /// case to whoever is looking: no profile row loaded, `avatar_path` null, and
+  /// an object that failed to load. The third is why the `errorBuilder` is not
+  /// optional — an `Image.network` without one renders a broken-image glyph,
+  /// which is a worse "no avatar" than no avatar. The gradient is keyed off the
+  /// uuid, so a user looks the same here as in the ΑΚΟΛΟΥΘΕΙ rail below, and it
+  /// visibly is not a photograph rather than being a stock face that reads as
+  /// one.
+  ///
+  /// The `label: 'avatar'` the placeholder used to carry is gone with it. It
+  /// labelled a slot that had no column behind it; there is a column now, so a
+  /// bare circle means "this user has not set one" rather than "this feature is
+  /// unbuilt".
+  Widget _avatar(Profile? profile) {
+    final placeholder = DiagonalStripePlaceholder(
+      colors: profile?.placeholderColors ?? const [Color(0xFF241E3C), Color(0xFF1B1630)],
+    );
+    final url = _profiles.avatarUrl(profile?.avatarPath);
+
+    return Container(
+      width: 74,
+      height: 74,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: AppColors.purple.withValues(alpha: 0.5), width: 2),
+      ),
+      child: url == null
+          ? placeholder
+          : Image.network(
+              url,
+              width: 74,
+              height: 74,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) => placeholder,
+              loadingBuilder: (_, child, progress) => progress == null ? child : placeholder,
+            ),
     );
   }
 
@@ -757,23 +763,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
             '@${profile.username}',
             style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800, letterSpacing: -0.3),
           ),
-          Padding(
-            padding: const EdgeInsets.only(top: 9),
-            child: Row(
-              children: [
-                // follower_count, and labelled as such. The prototype said
-                // "184 φίλοι", naming a relation this schema cannot represent:
-                // the graph is follows-only and asymmetric, there is no
-                // `friendships` table, and its absence is a decision rather
-                // than a gap (docs/backend-plan.md 3.1, reversed on purpose).
-                // Calling followers friends would imply a mutual, consented
-                // edge to a user looking at a number that is neither.
-                _countPair('${profile.followerCount}', 'ακόλουθοι'),
-                const SizedBox(width: 16),
-                _countPair('${profile.followingCount}', 'ακολουθεί'),
-              ],
+          // The whole of the second line, or no second line at all — never a
+          // blank one. `hasBio` is the only guard needed: the
+          // `profiles_bio_one_short_line` CHECK already refuses '' and the
+          // whitespace-only string, so null is the single spelling of "unset"
+          // (see [Profile.bio]).
+          //
+          // Nothing is substituted when it is null. A bio is the user's own
+          // words, and a generated sentence rendered in that slot reads as
+          // theirs — which is also why the header has to look finished with
+          // `@username` alone. That is what every account looks like the day it
+          // is created, so it is the common case, not the degraded one.
+          //
+          // One line, capped by the design rather than by the data: the column
+          // allows 160 characters and forbids newlines, so without the ellipsis
+          // a long bio would silently change the header's height.
+          if (profile.hasBio)
+            Padding(
+              padding: const EdgeInsets.only(top: 5),
+              child: Text(
+                profile.bio!,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 13, height: 1.35, color: AppColors.textAlpha(0.55)),
+              ),
             ),
-          ),
+          // `following_count` was a second inline pair here and is now rendered
+          // nowhere: the header is two lines, and `follower_count` moved to the
+          // ΑΚΟΛΟΥΘΟΙ tile. [Profile] still carries it.
         ],
       );
     }
@@ -832,24 +849,97 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _countPair(String value, String label) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.baseline,
-      textBaseline: TextBaseline.alphabetic,
-      children: [
-        Text(value, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800)),
-        const SizedBox(width: 4),
-        Text(label, style: TextStyle(fontSize: 11, color: AppColors.textAlpha(0.5))),
-      ],
+  /// The two header actions.
+  ///
+  /// Which pair renders is a question about the [ProfileTarget] and about
+  /// nothing else, so a switch on the sealed type answers it: the compiler
+  /// proves the two cases exhaustive, there is no third state in which the
+  /// wrong pair could appear, and no bool is reintroduced to carry a
+  /// distinction the type already carries. `userId` comes out of the pattern,
+  /// which is what keeps [FollowButton.targetUserId] and `reports.target_id`
+  /// non-null without a `!`.
+  ///
+  /// It deliberately does not consult [OwnProfile.previewingPublicView].
+  /// Previewing your own public profile does not make you a stranger to
+  /// yourself, and "Ακολούθησε" over your own row would offer an action the
+  /// `follows` INSERT policy refuses anyway (`follower_id <> followee_id`).
+  Widget _actionRow() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+      child: switch (_target) {
+        OwnProfile() => Row(
+          children: [
+            Expanded(
+              child: _actionButton(
+                'Διοργάνωσε πάρτι',
+                primary: true,
+                onTap: () => Navigator.of(
+                  context,
+                ).push(MaterialPageRoute(builder: (_) => const HostWizardScreen())),
+              ),
+            ),
+            const SizedBox(width: 8),
+            // There is no profile-editing screen yet, so this says so rather
+            // than pretending — the same treatment "Μήνυμα" already gets, and
+            // the same reason the ΩΣ ΔΙΟΡΓΑΝΩΤΡΙΑ card's "Διαχείριση" pill was
+            // deleted instead of wired.
+            Expanded(child: _actionButton('Επεξεργασία προφίλ', onTap: _comingSoon)),
+          ],
+        ),
+        OtherProfile(:final userId) => Row(
+          children: [
+            Expanded(child: FollowButton(targetUserId: userId)),
+            const SizedBox(width: 8),
+            Expanded(child: _actionButton('Μήνυμα', onTap: _comingSoon)),
+            PopupMenuButton<String>(
+              icon: Icon(Icons.more_horiz, size: 20, color: AppColors.textAlpha(0.5)),
+              color: AppColors.sheet,
+              onSelected: (_) =>
+                  showReportSheet(context, target: ReportTarget.profile, targetId: userId),
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                  value: 'report',
+                  child: Text('Αναφορά', style: TextStyle(fontSize: 13)),
+                ),
+              ],
+            ),
+          ],
+        ),
+      },
     );
   }
 
+  /// One header action button. Deliberately the same metrics as
+  /// [FollowButton]'s non-compact shape — same vertical padding, same radius,
+  /// same gradient — because on an [OtherProfile] the two sit side by side and
+  /// any drift between them shows immediately.
+  Widget _actionButton(String label, {required VoidCallback onTap, bool primary = false}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          gradient: primary ? AppColors.purpleGradient : null,
+          color: primary ? null : Colors.white.withValues(alpha: 0.07),
+          border: primary ? null : Border.all(color: AppColors.hairline),
+          borderRadius: BorderRadius.circular(13),
+        ),
+        child: Text(label, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
+      ),
+    );
+  }
+
+  /// One of the two large tiles. Grown from the three-across version — more
+  /// padding, a bigger number — because two tiles have the width to spend, and
+  /// the label is mono uppercase now to match every other heading on the screen
+  /// (ΩΣ ΔΙΟΡΓΑΝΩΤΡΙΑ, ΙΔΙΩΤΙΚΟΤΗΤΑ, ΑΚΟΛΟΥΘΕΙ).
   Widget _statTile(String value, String label, {bool pink = false}) {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(15, 14, 15, 13),
       decoration: BoxDecoration(
         color: pink ? AppColors.pink.withValues(alpha: 0.1) : Colors.white.withValues(alpha: 0.04),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: pink ? AppColors.pink.withValues(alpha: 0.3) : AppColors.hairline),
       ),
       child: Column(
@@ -858,14 +948,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
           Text(
             value,
             style: TextStyle(
-              fontSize: 20,
+              fontSize: 26,
               fontWeight: FontWeight.w800,
-              letterSpacing: -0.3,
+              letterSpacing: -0.5,
               color: pink ? AppColors.pinkLight : AppColors.text,
             ),
           ),
-          const SizedBox(height: 1),
-          Text(label, style: TextStyle(fontSize: 10.5, color: AppColors.textAlpha(0.5))),
+          const SizedBox(height: 3),
+          Text(label, style: AppTextStyles.mono(size: 10, color: AppColors.textAlpha(0.5))),
         ],
       ),
     );

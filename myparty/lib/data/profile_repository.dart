@@ -72,6 +72,32 @@ class ProfileRepository {
     return Profile.fromRow(row);
   }
 
+  /// A loadable URL for a [Profile.avatarPath], or null when there is no avatar.
+  ///
+  /// Asks Storage for the URL rather than interpolating
+  /// `/storage/v1/object/public/avatars/<path>` at the call site. `avatars` is
+  /// the one bucket created with `public => true` (`20260812124217`), so today
+  /// the SDK hands back an unsigned URL and this cannot fail — but public-read
+  /// is a property of the BUCKET, not of the profile screen. The day that
+  /// changes, the correct URL becomes a signed one with a lifetime, and every
+  /// hand-built path keeps compiling while quietly returning 403s from a widget
+  /// that never knew it was making a policy claim. Same argument that made the
+  /// column store a key instead of a URL (`20260820095801` §2): the row holds
+  /// the key, one place decides what to do with it.
+  ///
+  /// Synchronous, because a public URL is pure string construction inside the
+  /// SDK. A signed one would make this a `Future` — which is precisely the kind
+  /// of change that should be impossible to miss at the call site rather than
+  /// absorbed silently.
+  ///
+  /// Takes the nullable path rather than a [Profile] so the "no avatar" case
+  /// and the "no profile loaded yet" case collapse into one null here instead
+  /// of into two branches in the widget.
+  String? avatarUrl(String? path) {
+    if (path == null) return null;
+    return _client.storage.from('avatars').getPublicUrl(path);
+  }
+
   /// Reads the current user's own privacy tiers.
   ///
   /// Only ever the current user's: the values are a preference, and there is no
