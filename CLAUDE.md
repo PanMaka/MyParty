@@ -443,6 +443,27 @@ policy rewrite are in `docs/phase-10-hardening-audit.md`. Do not drop
     all eight for free: it forecloses inlining, and there was none to lose.
     Worth re-pricing if gotcha 19's fix ever lands.
 
+21. **`get_parties_near_user` filters on `ends_at` and never on `starts_at`,
+    so a party with a null `ends_at` is on the map forever.** The predicate is
+    `p.status = 'published' and (p.ends_at is null or p.ends_at > now())`.
+    `ends_at` is nullable with no default and the host wizard does not require
+    it, so "a party that already happened" is not a state the map query can
+    currently recognise — a finished party with no end time keeps its pin, and
+    keeps it at full tier weight, indefinitely.
+    **Open decision, deliberately not fixed.** The obvious repair — `or
+    (p.ends_at is null and p.starts_at > now() - interval 'N hours')` — needs
+    a number nobody has chosen, and it is the wrong kind of guess: an
+    all-nighter and a Sunday afternoon barbecue disagree about N by a factor
+    of six, and picking wrong either drops live parties off the map or leaves
+    dead ones on it. The honest fixes are to make `ends_at` required at
+    creation, or to add an explicit lifecycle transition to `party_status`
+    (there is already a `cancelled` value and no `ended` one) — both are
+    product decisions with a migration behind them, not a where-clause tweak.
+    Until then: **anything that writes a past party must set `ends_at`**, which
+    is why every past party in `seed.sql` carries one and says so in a comment.
+    The failure is silent and cumulative — nothing errors, the map just slowly
+    fills with parties that are over.
+
 ## Migration naming
 
 `YYYYMMDDHHMMSS_snake_case_description.sql` in `supabase/migrations/`.
