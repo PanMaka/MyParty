@@ -88,3 +88,86 @@ class Profile {
     ];
   }
 }
+
+/// The client-side mirror of the `profiles_bio_one_short_line` CHECK
+/// constraint (`20260820095801` §1).
+///
+/// This is a **convenience, not a boundary**. The constraint is the boundary:
+/// it runs inside the transaction, it cannot be skipped by a definer function
+/// that forgot about it, and it is what makes `Profile.bio` safe to hand
+/// straight to a `Text` widget everywhere downstream. Everything here exists so
+/// the user finds out before the round trip instead of after — delete it and
+/// the database still refuses exactly the same values, with a worse error.
+///
+/// Which is also why it is written as a mirror of the four SQL conditions in
+/// the same order rather than as "whatever the form needs". Any drift between
+/// the two is a bug in this file by definition, and `profile_edit_test.dart`
+/// asserts each condition separately for that reason.
+class BioConstraint {
+  BioConstraint._();
+
+  /// `char_length(bio) <= 160`. See the migration for why 160 and not 280.
+  static const maxCharacters = 160;
+
+  /// The length the CHECK will measure.
+  ///
+  /// Postgres `char_length` counts **characters**; Dart's `String.length`
+  /// counts UTF-16 code units. They agree across Greek and Latin and disagree
+  /// outside the BMP — an emoji is 1 to `char_length` and 2 to `.length`. So
+  /// `.length` would refuse bios the column accepts, and would do it only to
+  /// people who use emoji, which is the same shape of bug as the byte-vs-char
+  /// cap the migration rejected for Greek. `runes` is the exact mirror.
+  static int length(String value) => value.runes.length;
+
+  /// What a text field's contents become on the way to the column.
+  ///
+  /// The empty and whitespace-only cases collapse to **null**, because null is
+  /// the one spelling of "no bio" the constraint permits and the whole reason
+  /// `btrim(bio) <> ''` is in it — a form that round-tripped '' would produce a
+  /// row that is neither "has a bio" nor "has none".
+  ///
+  /// Trimming the surviving value is this form's decision and not the
+  /// constraint's: `btrim(bio) <> ''` only rejects a value that is *entirely*
+  /// spaces, and the column would happily store `'  Κουκάκι  '`. Storing it
+  /// trimmed is what makes the rendered line match what the user believes they
+  /// typed. Note Dart's `trim()` is also broader than one-argument `btrim`,
+  /// which strips ASCII spaces only — stricter than the constraint, which is
+  /// the safe direction and deliberate.
+  static String? normalize(String input) {
+    final trimmed = input.trim();
+    return trimmed.isEmpty ? null : trimmed;
+  }
+
+  /// Null when [value] would satisfy the CHECK, otherwise the reason, in Greek,
+  /// phrased for the person typing.
+  ///
+  /// Takes the **normalized** value — what will actually be sent — so that what
+  /// is validated and what is stored cannot be two different strings.
+  static String? validate(String? value) {
+    // `bio is null` — the first branch of the CHECK, and a perfectly good bio.
+    if (value == null) return null;
+
+    // `btrim(bio) <> ''`. Unreachable through [normalize], which is the point:
+    // it stays here so this function alone is a complete statement of the
+    // constraint, rather than one that is only correct if called in order.
+    if (value.trim().isEmpty) return 'Γράψε κάτι ή άφησέ το κενό.';
+
+    // `position(E'\n' in bio) = 0 and position(E'\r' in bio) = 0`.
+    //
+    // Rejected rather than silently stripped. The keyboard cannot produce a
+    // newline in a single-line field, so the only way one arrives is a paste —
+    // and quietly deleting part of what somebody pasted is a worse answer than
+    // telling them the field is one line, which is the thing the column
+    // actually enforces.
+    if (value.contains('\n') || value.contains('\r')) {
+      return 'Το bio είναι μία γραμμή.';
+    }
+
+    // `char_length(bio) <= 160`.
+    if (length(value) > maxCharacters) {
+      return 'Μέχρι $maxCharacters χαρακτήρες.';
+    }
+
+    return null;
+  }
+}

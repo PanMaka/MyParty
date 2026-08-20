@@ -16,6 +16,7 @@ import '../widgets/follow_button.dart';
 import '../widgets/report_sheet.dart';
 import 'account_deletion_screen.dart';
 import 'host_wizard_screen.dart';
+import 'profile_edit_screen.dart';
 import 'notification_settings_screen.dart';
 
 /// Whose profile the screen is showing, and — when it is the owner's — whether
@@ -231,6 +232,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// Opens the editor and re-reads the profile when it closes.
+  ///
+  /// Unconditional rather than gated on the popped value: "nothing changed" is
+  /// the cheap case and being wrong about it leaves a stale bio or a stale
+  /// avatar on screen, which is the one outcome a fresh fetch cannot produce.
+  Future<void> _openEditor() async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const ProfileEditScreen()));
+    if (mounted) await _load();
   }
 
   void _comingSoon() {
@@ -879,11 +892,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
             const SizedBox(width: 8),
-            // There is no profile-editing screen yet, so this says so rather
-            // than pretending — the same treatment "Μήνυμα" already gets, and
-            // the same reason the ΩΣ ΔΙΟΡΓΑΝΩΤΡΙΑ card's "Διαχείριση" pill was
-            // deleted instead of wired.
-            Expanded(child: _actionButton('Επεξεργασία προφίλ', onTap: _comingSoon)),
+            // Reloads on the way back rather than trusting what it pushed.
+            // The editor may have committed a bio, an avatar, or one of the
+            // two when the other failed — and the header renders all of it, so
+            // re-reading the row beats teaching two screens to agree about
+            // which halves of a partial save went through.
+            Expanded(child: _actionButton('Επεξεργασία προφίλ', onTap: _openEditor)),
           ],
         ),
         OtherProfile(:final userId) => Row(
