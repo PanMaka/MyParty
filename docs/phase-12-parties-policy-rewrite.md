@@ -24,18 +24,40 @@ Measured at 10k parties / 50k rsvps by `scripts/loadtest_map_query.sh`:
 | 500km | 208 ms p50 | — |
 
 ~99% of p95 is the row policy, and it gets **worse as you zoom in**, which is
-where the users are. The 500km tier has a cheap non-leakproof-free pre-filter
-(`party_tier = 'mega' or is_sponsored`) that runs first; the 5km branch of the
-`case` is a literal `true`, so all 10k rows go through `can_access_party`.
+where the users are. The 500km tier has a cheap *leakproof* pre-filter
+(`party_tier = 'mega' or is_sponsored`) that therefore runs first; the 5km
+branch of the `case` is a literal `true`, so all 10k rows go through
+`can_access_party`.
 
 What makes it blocking rather than merely slow is what comes next. From gotcha
-22, read off `pg_proc` on this database:
+22 — and **measured** by `scripts/explain_qual_pushdown.sh`, not inferred from
+`pg_proc`, which says only what the planner is permitted to do:
 
-| predicate | `proleakproof` | runs |
-|---|---|---|
-| `timestamptz_gt` / `_lt` / `_ge` | **true** | before the policy |
-| `st_dwithin` | false | after |
-| `textlike` / `texticlike` (`like`/`ilike`) | false | after |
+| predicate | leakproof | exec | buffers | printed `Filter:` order |
+|---|---|---|---|---|
+| *(policy only, baseline)* | — | 954ms | 62018 | policy |
+| `starts_at > <const>` | **yes** | **4.1ms** | **433** | **time, then policy** |
+| `title like '%zzzzzz%'` | no | 890ms | 61799 | policy, then like |
+| `st_dwithin(…, 1)` | no | 947ms | 61872 | policy, then dwithin |
+
+The `like` matches *fewer* rows than the time predicate and costs 216× more.
+`shared hit` is the honest metric here: `can_access_party` is `SECURITY
+DEFINER` and issues its own queries, ~6 buffers a call, so 62018 ≈ one call per
+row and 433 ≈ 31 calls. End to end on the map query body, adding a 6-hour
+window took **1483ms → 42ms**.
+
+**Two findings from that run that change how you read §5 of the audit.**
+
+- `enum_eq` is **not** leakproof; `texteq` is. `party_tier` is `text` and
+  `status` is an enum, which is the mechanical reason the wide-zoom tiers are
+  fast and the 5km tier is not — the tier filter sorts ahead of the policy and
+  `status = 'published'` sorts behind it. The audit inferred that asymmetry
+  from timings; this names the cause. Do not assume a cheap-looking equality
+  pre-filters — check the type.
+- The selective time predicate did **not** use the `parties (starts_at)` index
+  from `20260817073509`; it is still a seq scan, just with the cheap term
+  first. The 216× is qual ordering alone. Do not treat "it will use the index"
+  as part of the argument for the chips — it does not need to.
 
 So the **time filter chips can ship today** — they push a leakproof predicate
 that shrinks the input to the policy, exactly like the 500km tier filter does.
@@ -326,7 +348,12 @@ calls `can_user_access_party` directly and is likewise untouched.
    audit, so the numbers are comparable. **Target: the 5km tier stops being
    the slowest.** The audit's control (policies off) is 2ms; anything in the
    low tens of ms is a win, and the shape matters more than the number.
-2. `bash scripts/explain_proximity.sh` — the acceptance criterion is
+2. `bash scripts/explain_qual_pushdown.sh` — re-run it after the rewrite. The
+   baseline row (policy only, 954ms / 62018 buffers) is the number the hoist
+   is aimed at, and the `like` row is the one that has to move before search
+   is worth building: today it costs the same as the baseline because it runs
+   behind the policy on every row.
+3. `bash scripts/explain_proximity.sh` — the acceptance criterion is
    structural, not a timing: the 5km plan must show
 
    ```
@@ -337,13 +364,13 @@ calls `can_user_access_party` directly and is likewise untouched.
    If the plan still says `Seq Scan on parties` with `can_access_party(id)` in
    the filter, the hoist did not achieve its purpose however much the wall
    clock improved.
-3. **Re-price gotcha 20.** All eight read RPCs are VOLATILE and therefore have
+4. **Re-price gotcha 20.** All eight read RPCs are VOLATILE and therefore have
    never been inlined; `20260819095452` pinned `search_path` on them for free
    because there was no inlining to lose. That calculation was made *while the
    policy dominated the cost*. Once it does not, `STABLE` + inlining is worth
    measuring again — the audit priced the STABLE variant at 983ms vs 995ms,
    which is noise today and might not be after.
-4. Only then: `pg_trgm`, an index on `title`/`area`, and the search RPC. That
+5. Only then: `pg_trgm`, an index on `title`/`area`, and the search RPC. That
    is Phase 13, and it is now unblocked rather than sandbagged.
 
 ---

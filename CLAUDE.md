@@ -471,23 +471,42 @@ policy rewrite are in `docs/phase-10-hardening-audit.md`. Do not drop
     Gotcha 19 is the special case; this is the rule. A non-leakproof operator
     may not be evaluated ahead of an RLS qual, so it lands *behind*
     `can_access_party` and filters rows that have already paid for it. A
-    leakproof one runs first and shrinks the input. Read off `pg_proc` on this
-    database:
+    leakproof one runs first and shrinks the input.
 
-    | predicate | `proleakproof` | where it runs |
-    |---|---|---|
-    | `timestamptz_gt` / `_lt` / `_ge` | **true** | before the policy |
-    | `st_dwithin` | false | after — gotcha 19 |
-    | `textlike` / `texticlike` (`like`/`ilike`) | false | after |
+    **Measured, not read off the catalog** — `pg_proc.proleakproof` says only
+    what the planner is *allowed* to do. `scripts/explain_qual_pushdown.sh`
+    prints what it did, at 10k parties, one predicate at a time:
+
+    | predicate | leakproof | exec | buffers | printed `Filter:` order |
+    |---|---|---|---|---|
+    | *(policy only, baseline)* | — | 954ms | 62018 | policy |
+    | `starts_at > <const>` | **yes** | **4.1ms** | **433** | **time, then policy** |
+    | `title like '%zzzzzz%'` | no | 890ms | 61799 | policy, then like |
+    | `st_dwithin(…, 1)` | no | 947ms | 61872 | policy, then dwithin |
+
+    Three independent signals agree, and each alone would be weak: the printed
+    `Filter:` order is the execution order; the time; and `shared hit`, which
+    is the direct proxy for how many times `can_access_party` ran (~6 buffers
+    per call — 62018/6 ≈ the 10k rows). The `like` matches **fewer** rows than
+    the time predicate and costs 216× more. End to end on the map query body,
+    adding a 6-hour window took **1483ms → 42ms**.
+
+    **`enum_eq` is not leakproof and `texteq` is**, which is the mechanical
+    reason gotcha 19's tier asymmetry exists: `party_tier` is `text`, so the
+    wide-zoom tier filter sorts *ahead* of the policy, while
+    `status = 'published'` is an enum comparison and sorts behind it — visible
+    in Part 2's filter order, where `status` prints after `can_access_party`.
+    Do not assume a cheap-looking equality pre-filters; check the type.
 
     Two consequences, both load-bearing for the map rework:
 
     - **Time filtering is free, and better than free.** The Τώρα / Αργότερα /
       Το ΣΚ chips can push `starts_at`/`ends_at` predicates into
       `get_parties_near_user` and they will cut the row count *before*
-      `can_access_party` is called on each row — the same mechanism that makes
-      the 500km tier (208ms, cheap non-leaky `party_tier` filter first) six
-      times faster than the 5km tier (995ms, no cheap pre-filter at all).
+      `can_access_party` is called on each row — measured at 35× on the map
+      query body, and the same mechanism that makes the 500km tier (208ms,
+      leakproof `party_tier` filter first) six times faster than the 5km tier
+      (995ms, no pre-filter at all).
     - **Search must wait for the policy rewrite.** An `ilike` on
       `parties.title` or `parties.area` has exactly `st_dwithin`'s failure
       mode: it sits behind the barrier, seq-scans, and cannot reach an index —
