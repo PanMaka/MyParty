@@ -11,7 +11,9 @@ Session-by-session task scripts: `docs/MyParty-ClaudeCode-Prompts.md`.
 `stories`/`story_views`/`user_devices`/`sent_notifications`/
 `notification_jobs` tables with RLS;
 `get_parties_near_user` RPC
-(tier/zoom-filtered map query), called live from `MapScreen`;
+(tier/zoom-filtered map query, `p_limit` defaulting to 200 and clamped to
+[1, 500], `authenticated`-only since `20260821175831`), called live from
+`MapScreen` through `PartyRepository.fetchPartiesNearUser`;
 `create_party_with_invites`; `get_feed`, `get_post_comments`, `get_messages`,
 `get_party_chats` and `get_party_stories`/`get_story_rails` (all
 keyset-paginated or time-bounded, all invoker-rights so RLS does the
@@ -442,6 +444,76 @@ policy rewrite are in `docs/phase-10-hardening-audit.md`. Do not drop
     37-line plan. That is why `20260819095452` could pin `search_path` on
     all eight for free: it forecloses inlining, and there was none to lose.
     Worth re-pricing if gotcha 19's fix ever lands.
+
+21. **`get_parties_near_user` filters on `ends_at` and never on `starts_at`,
+    so a party with a null `ends_at` is on the map forever.** The predicate is
+    `p.status = 'published' and (p.ends_at is null or p.ends_at > now())`.
+    `ends_at` is nullable with no default and the host wizard does not require
+    it, so "a party that already happened" is not a state the map query can
+    currently recognise — a finished party with no end time keeps its pin, and
+    keeps it at full tier weight, indefinitely.
+    **Open decision, deliberately not fixed.** The obvious repair — `or
+    (p.ends_at is null and p.starts_at > now() - interval 'N hours')` — needs
+    a number nobody has chosen, and it is the wrong kind of guess: an
+    all-nighter and a Sunday afternoon barbecue disagree about N by a factor
+    of six, and picking wrong either drops live parties off the map or leaves
+    dead ones on it. The honest fixes are to make `ends_at` required at
+    creation, or to add an explicit lifecycle transition to `party_status`
+    (there is already a `cancelled` value and no `ended` one) — both are
+    product decisions with a migration behind them, not a where-clause tweak.
+    Until then: **anything that writes a past party must set `ends_at`**, which
+    is why every past party in `seed.sql` carries one and says so in a comment.
+    The failure is silent and cumulative — nothing errors, the map just slowly
+    fills with parties that are over.
+
+22. **Leakproofness decides which of your filters run before the policy, and
+    it is the single fact that prices every new predicate on `parties`.**
+    Gotcha 19 is the special case; this is the rule. A non-leakproof operator
+    may not be evaluated ahead of an RLS qual, so it lands *behind*
+    `can_access_party` and filters rows that have already paid for it. A
+    leakproof one runs first and shrinks the input.
+
+    **Measured, not read off the catalog** — `pg_proc.proleakproof` says only
+    what the planner is *allowed* to do. `scripts/explain_qual_pushdown.sh`
+    prints what it did, at 10k parties, one predicate at a time:
+
+    | predicate | leakproof | exec | buffers | printed `Filter:` order |
+    |---|---|---|---|---|
+    | *(policy only, baseline)* | — | 954ms | 62018 | policy |
+    | `starts_at > <const>` | **yes** | **4.1ms** | **433** | **time, then policy** |
+    | `title like '%zzzzzz%'` | no | 890ms | 61799 | policy, then like |
+    | `st_dwithin(…, 1)` | no | 947ms | 61872 | policy, then dwithin |
+
+    Three independent signals agree, and each alone would be weak: the printed
+    `Filter:` order is the execution order; the time; and `shared hit`, which
+    is the direct proxy for how many times `can_access_party` ran (~6 buffers
+    per call — 62018/6 ≈ the 10k rows). The `like` matches **fewer** rows than
+    the time predicate and costs 216× more. End to end on the map query body,
+    adding a 6-hour window took **1483ms → 42ms**.
+
+    **`enum_eq` is not leakproof and `texteq` is**, which is the mechanical
+    reason gotcha 19's tier asymmetry exists: `party_tier` is `text`, so the
+    wide-zoom tier filter sorts *ahead* of the policy, while
+    `status = 'published'` is an enum comparison and sorts behind it — visible
+    in Part 2's filter order, where `status` prints after `can_access_party`.
+    Do not assume a cheap-looking equality pre-filters; check the type.
+
+    Two consequences, both load-bearing for the map rework:
+
+    - **Time filtering is free, and better than free.** The Τώρα / Αργότερα /
+      Το ΣΚ chips can push `starts_at`/`ends_at` predicates into
+      `get_parties_near_user` and they will cut the row count *before*
+      `can_access_party` is called on each row — measured at 35× on the map
+      query body, and the same mechanism that makes the 500km tier (208ms,
+      leakproof `party_tier` filter first) six times faster than the 5km tier
+      (995ms, no pre-filter at all).
+    - **Search must wait for the policy rewrite.** An `ilike` on
+      `parties.title` or `parties.area` has exactly `st_dwithin`'s failure
+      mode: it sits behind the barrier, seq-scans, and cannot reach an index —
+      so adding `pg_trgm` or a `tsvector` column first would buy nothing, and
+      measuring the search against a 995ms floor would teach the wrong lesson
+      about it. **§5 of `docs/phase-10-hardening-audit.md` goes before search,
+      not after.** Sequencing decided 2026-08-21.
 
 ## Migration naming
 

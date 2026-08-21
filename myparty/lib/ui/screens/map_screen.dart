@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../data/party_repository.dart';
 import '../../models/map_party_pin.dart';
 import '../theme/app_theme.dart';
 import '../widgets/map_pin_sheet.dart';
@@ -13,8 +13,55 @@ import '../widgets/mp_map_pin.dart';
 
 enum _MapFilter { live, later, weekend }
 
+/// The real device fix, and the default for [MapScreen.locate].
+///
+/// Best-effort by construction: every branch that cannot answer returns null
+/// and the map falls back to its default centre. The try/catch is the same
+/// promise for the branches that throw instead — a permission revoked while
+/// the app was backgrounded, a handset with no location provider. An escaping
+/// throw here would leave the screen on its spinner permanently, because the
+/// caller clears `_isLoading` on the line after this one. Failing to locate
+/// the user is not failing to draw the map.
+Future<LatLng?> _deviceLocation() async {
+  try {
+    if (!await Geolocator.isLocationServiceEnabled()) return null;
+
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) return null;
+    }
+    if (permission == LocationPermission.deniedForever) return null;
+
+    final position = await Geolocator.getCurrentPosition();
+    return LatLng(position.latitude, position.longitude);
+  } catch (e) {
+    debugPrint('Location unavailable, falling back to the default centre: $e');
+    return null;
+  }
+}
+
+/// Where the map should centre itself, or null when there is no fix — the map
+/// has a default centre and is fully usable without one.
+typedef LocationFix = Future<LatLng?> Function();
+
 class MapScreen extends StatefulWidget {
-  const MapScreen({super.key});
+  const MapScreen({super.key, this.repository, this.locate});
+
+  /// Injectable so widget tests can subclass [PartyRepository] without a
+  /// Supabase client ever existing, the same way [ProfileScreen] takes one.
+  /// This screen used to call `Supabase.instance.client.rpc` inline, which is
+  /// precisely why it was the one screen with no test.
+  final PartyRepository? repository;
+
+  /// Injectable for a sharper reason than the repository is, and the seam is
+  /// not optional: geolocator's platform channel never completes inside
+  /// `testWidgets`' fake-async zone. It does not throw — it hangs — so the
+  /// try/catch in [_deviceLocation] cannot rescue a test, and any widget test
+  /// of this screen would sit on the loading spinner until it timed out.
+  /// Measured, not assumed: the same call resolves to a MissingPluginException
+  /// immediately under a plain `test()`.
+  final LocationFix? locate;
 
   @override
   State<MapScreen> createState() => _MapScreenState();
@@ -22,6 +69,7 @@ class MapScreen extends StatefulWidget {
 
 class _MapScreenState extends State<MapScreen> {
   final MapController _mapController = MapController();
+  late final PartyRepository _repository = widget.repository ?? PartyRepository();
   Timer? _debounce;
   LatLng? _currentPosition;
   List<MapPartyPin> _pins = [];
@@ -35,22 +83,8 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _initializeMap() async {
-    await _getUserLocation();
+    _currentPosition = await (widget.locate ?? _deviceLocation)();
     if (mounted) setState(() => _isLoading = false);
-  }
-
-  Future<void> _getUserLocation() async {
-    if (!await Geolocator.isLocationServiceEnabled()) return;
-
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) return;
-    }
-    if (permission == LocationPermission.deniedForever) return;
-
-    final position = await Geolocator.getCurrentPosition();
-    _currentPosition = LatLng(position.latitude, position.longitude);
   }
 
   Future<void> _fetchEventsInBounds() async {
@@ -60,23 +94,11 @@ class _MapScreenState extends State<MapScreen> {
     final radiusInMeters = distance.as(LengthUnit.Meter, center, bounds.northEast) * 2.0;
 
     try {
-      final response = await Supabase.instance.client.rpc(
-        'get_parties_near_user',
-        params: {
-          'map_center_lon': center.longitude,
-          'map_center_lat': center.latitude,
-          'radius_meters': radiusInMeters,
-        },
+      final pins = await _repository.fetchPartiesNearUser(
+        lon: center.longitude,
+        lat: center.latitude,
+        radiusMeters: radiusInMeters,
       );
-
-      final pins = <MapPartyPin>[];
-      for (var i = 0; i < (response as List).length; i++) {
-        final event = response[i] as Map<String, dynamic>;
-        if (event['lat'] != null && event['lon'] != null) {
-          pins.add(MapPartyPin.fromRpcRow(event, fallbackId: 'pin_$i'));
-        }
-      }
-
       if (mounted) setState(() => _pins = pins);
     } catch (e) {
       debugPrint('Error loading parties: $e');
@@ -84,6 +106,25 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _onPinTap(MapPartyPin pin) => showMapPinSheet(context, pin);
+
+  /// One pin's marker, sized from the same [now] the pin itself is drawn for.
+  ///
+  /// The size has to be computed twice — a `Marker` declares its own box and
+  /// the pill inside it declares its own extent — but it must not be *derived*
+  /// twice: a pin whose tier came from a later clock reading than its box
+  /// would be clipped by it. So [MpPinMetrics] answers once here and the same
+  /// instant goes down to [MpMapPin], which re-derives from it rather than
+  /// from a second `DateTime.now()`.
+  Marker _marker(MapPartyPin pin, DateTime now) {
+    final metrics = MpPinMetrics.forPin(pin, now);
+    return Marker(
+      point: LatLng(pin.lat, pin.lng),
+      width: metrics.width,
+      height: metrics.boxHeight,
+      alignment: Alignment.topCenter,
+      child: MpMapPin(pin: pin, now: now, onTap: () => _onPinTap(pin)),
+    );
+  }
 
   void _recenter() {
     if (_pins.isEmpty) return;
@@ -110,6 +151,12 @@ class _MapScreenState extends State<MapScreen> {
     }
 
     final startingPoint = _currentPosition ?? const LatLng(37.9748, 23.7232);
+    // The one clock reading every pin on this frame is drawn against. Read
+    // here rather than inside each pin so a party crossing its start time
+    // cannot be live in one pin's label and not-yet in its own marker box —
+    // and re-read on every rebuild rather than stored with the fetch, which
+    // is what lets a party go live across the 500ms pan debounce.
+    final now = DateTime.now();
 
     return Scaffold(
       backgroundColor: AppColors.bg,
@@ -134,14 +181,7 @@ class _MapScreenState extends State<MapScreen> {
               ),
               MarkerLayer(
                 markers: [
-                  for (final pin in _pins)
-                    Marker(
-                      point: LatLng(pin.lat, pin.lng),
-                      width: mpPinWidth(pin.attendeeCount),
-                      height: mpPinHeight + 6,
-                      alignment: Alignment.topCenter,
-                      child: MpMapPin(pin: pin, onTap: () => _onPinTap(pin)),
-                    ),
+                  for (final pin in _pins) _marker(pin, now),
                   if (_currentPosition != null)
                     Marker(
                       point: _currentPosition!,

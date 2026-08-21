@@ -1,0 +1,75 @@
+-- get_parties_near_user stops being callable by `anon`.
+--
+-- The function has carried no grant or revoke since it was written in
+-- 20260709095459. Postgres grants EXECUTE on every new function to PUBLIC, so
+-- `anon` has always been able to call it -- unlike get_feed, get_messages,
+-- get_party_chats, get_party_stories and get_story_rails, which were revoked
+-- for exactly this reason (gotcha #4).
+--
+--
+-- WHAT THIS FIXES, WHICH IS LESS THAN IT LOOKS
+--
+-- READ THIS BEFORE CITING THIS MIGRATION AS A PRIVACY CONTROL. It is not one.
+-- `anon` still reads every public party straight off the table:
+--
+--     set role anon;
+--     select count(*) from public.parties;   -- 22 rows, 0 of them private
+--
+-- `grant select on public.parties to anon` (20260812115436) is what makes that
+-- work, and the `parties` SELECT policy is satisfied for an unauthenticated
+-- caller by design: can_access_party's first term is `not p.is_private`, which
+-- does not consult auth.uid() at all. So an unauthenticated client that wants
+-- pins does not need this function -- `GET /rest/v1/parties?select=...` hands
+-- over the same rows, minus the tier filter, the distance sort and the
+-- host's map_visibility gate.
+--
+-- Closing the public map is therefore a DIFFERENT and much larger change: it
+-- means revisiting anon's table grants and the `not is_private` term in
+-- can_access_party, which is the predicate the entire schema's visibility
+-- model is built on. That is not this migration and should not be smuggled
+-- into one.
+--
+--
+-- WHAT IT ACTUALLY FIXES
+--
+-- The EXECUTE grant was never real. Measured against the live database:
+--
+--     set role anon;
+--     select count(*) from public.get_parties_near_user(23.7232, 37.9748, 5000);
+--     ERROR:  permission denied for table rsvps
+--     CONTEXT:  SQL function "get_parties_near_user" statement 1
+--
+-- The function's my_rsvp_status and is_invited subqueries mention `rsvps` and
+-- `invitations`, and `anon` holds SELECT on neither. Table privileges are
+-- checked whether or not a where-clause could ever be true (gotcha #4), so the
+-- call fails with 42501 before it can return a row -- and has since
+-- 20260813095529 added those two columns.
+--
+-- So this migration replaces a call that always errors with a call that is
+-- refused at the door. That is worth doing for one reason: a privilege that is
+-- granted but unusable is a lie in the catalog. The next person to read
+-- `\df+ get_parties_near_user` sees anon may call it, reasonably concludes the
+-- unauthenticated map is a supported surface, and either builds on it or
+-- "fixes" the 42501 by granting anon SELECT on `invitations` -- which is a
+-- private guest list. Removing the grant removes that trap.
+--
+-- If an unauthenticated map is ever wanted, the shape is a SECURITY DEFINER
+-- variant whose per-viewer columns (my_rsvp_status, is_invited) are null for
+-- an anonymous caller -- not a grant on the guest list.
+--
+--
+-- WHY THE service_role GRANT IS NOT OPTIONAL
+--
+-- gotcha #13: service_role's EXECUTE comes from the same default PUBLIC grant
+-- and nothing else, so `revoke ... from public` silently removes it too.
+-- Nothing calls this function from an edge function today, but the revoke
+-- would make that fail with 42501 on a function the developer can plainly see
+-- exists -- the exact failure 7c hit.
+--
+-- Note the signature: 20260821173147 added p_limit, so this is the four-
+-- argument function. The three-argument one no longer exists.
+-- ============================================================
+
+revoke execute on function public.get_parties_near_user(double precision, double precision, double precision, int) from public;
+
+grant execute on function public.get_parties_near_user(double precision, double precision, double precision, int) to authenticated, service_role;

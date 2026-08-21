@@ -242,7 +242,7 @@ class _EventsScreenState extends State<EventsScreen> {
                   children: [
                     Row(
                       children: [
-                        PrivacyBadge(type: rsvp.isPrivate ? MpPartyType.private : MpPartyType.public),
+                        PrivacyBadge(isPrivate: rsvp.isPrivate),
                         const SizedBox(width: 5),
                         Text(rsvp.rsvpStatus == 'going' ? 'ΠΑΩ' : 'ΜΕ ΕΝΔΙΑΦΕΡΕΙ',
                             style: AppTextStyles.mono(size: 9, color: AppColors.textAlpha(0.45))),

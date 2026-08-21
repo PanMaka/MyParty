@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c//**)",
+      "Read(//c/Users/gzoub/AppData/Local/Pub/Cache/hosted/pub.dev/flutter_map-8.3.1/lib/**)",
+      "Read(//c/Users/gzoub/AppData/Local/Pub/Cache/hosted/pub.dev/flutter_map-8.3.1/lib/src/map/camera/**)",
+      "Read(//c/Users/gzoub/AppData/Local/Pub/Cache/hosted/pub.dev/flutter_map-8.3.1/lib/src/map/controller/**)",
+      "Bash(flutter analyze *)",
+      "Bash(flutter devices *)",
+      "Bash(flutter run *)",
+      "Read(//c/Users/gzoub/MyParty/athens-nightlife-app-design/project/**)",
+      "Bash(cd \"C:/Users/gzoub/MyParty/athens-nightlife-app-design/project\" && grep -oE \"is[A-Z][A-Za-z]*\" MyPartyApp.dc.html | sort -u)"
+    ]
+  }
+}

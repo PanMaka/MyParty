@@ -75,7 +75,10 @@ class _FollowButtonState extends State<FollowButton> {
       setState(() => _following = wasFollowing);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Δεν έγινε. Δοκίμασε ξανά.'),
+          // English because the button above it is. The same sentence is still
+          // Greek in feed_screen, chat_screen and story_viewer_screen — it is
+          // copied per screen rather than shared, so this one moved alone.
+          content: Text('That did not work. Try again.'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -84,31 +87,80 @@ class _FollowButtonState extends State<FollowButton> {
 
   @override
   Widget build(BuildContext context) {
-    final label = _following ? 'Ακολουθείς' : 'Ακολούθησε';
+    return _FollowSkin(
+      following: _following,
+      compact: widget.compact,
+      onTap: _loading ? null : _toggle,
+    );
+  }
+}
 
-    if (widget.compact) {
+/// The follow button as a visitor sees it, wired to nothing.
+///
+/// Exists for the owner's PUBLIC preview, where the honest thing to draw in
+/// the action row is what a visitor actually gets — and the one thing it must
+/// not do is act. A real [FollowButton] there would query `isFollowing` about
+/// the viewer themself and, on a tap, attempt a self-follow the `follows`
+/// INSERT policy refuses; the preview would report a failure that is really the
+/// database being right.
+///
+/// It renders through the same [_FollowSkin] as the live button rather than
+/// copying its decoration, which is the whole reason it lives in this file: a
+/// preview that drifts from the thing it previews is worse than no preview.
+/// That includes the label: both read it off [_FollowSkin], so "what visitors
+/// see" cannot become a second copy of the string that someone edits one of.
+///
+/// Always the not-following state: a visitor who already follows you is one of
+/// several audiences, and the preview has to pick the one that is true of
+/// somebody arriving at your profile for the first time.
+class FollowButtonPreview extends StatelessWidget {
+  const FollowButtonPreview({super.key, this.compact = false});
+
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) => _FollowSkin(following: false, compact: compact);
+}
+
+/// Every pixel of both buttons, so neither can drift from the other.
+///
+/// A null [onTap] is how the live button already spends its first frames, while
+/// `isFollowing` is in flight — so the inert preview is not a new visual state,
+/// it is a state the button was always able to be in.
+class _FollowSkin extends StatelessWidget {
+  const _FollowSkin({required this.following, required this.compact, this.onTap});
+
+  final bool following;
+  final bool compact;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = following ? 'Following' : 'Follow';
+
+    if (compact) {
       return OutlinedButton(
-        onPressed: _loading ? null : _toggle,
+        onPressed: onTap,
         style: OutlinedButton.styleFrom(
           padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
-          backgroundColor: _following ? Colors.white.withValues(alpha: 0.08) : null,
-          side: _following ? BorderSide.none : const BorderSide(color: AppColors.purple),
+          backgroundColor: following ? Colors.white.withValues(alpha: 0.08) : null,
+          side: following ? BorderSide.none : const BorderSide(color: AppColors.purple),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(99)),
-          foregroundColor: _following ? AppColors.textAlpha(0.6) : AppColors.purpleLight,
+          foregroundColor: following ? AppColors.textAlpha(0.6) : AppColors.purpleLight,
         ),
         child: Text(label, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
       );
     }
 
     return GestureDetector(
-      onTap: _loading ? null : _toggle,
+      onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12),
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          gradient: _following ? null : AppColors.purpleGradient,
-          color: _following ? Colors.white.withValues(alpha: 0.07) : null,
-          border: _following ? Border.all(color: AppColors.hairline) : null,
+          gradient: following ? null : AppColors.purpleGradient,
+          color: following ? Colors.white.withValues(alpha: 0.07) : null,
+          border: following ? Border.all(color: AppColors.hairline) : null,
           borderRadius: BorderRadius.circular(13),
         ),
         child: Text(label, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
