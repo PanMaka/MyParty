@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../models/feed_post.dart';
 import '../../models/map_party_pin.dart';
-import '../../models/mp_party.dart';
 import '../theme/app_theme.dart';
 import 'diagonal_placeholder.dart';
 import 'privacy_badge.dart';
@@ -25,7 +24,6 @@ class MapPinSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final type = pin.isPrivate ? MpPartyType.private : MpPartyType.public;
     return SafeArea(
       top: false,
       child: Container(
@@ -59,7 +57,7 @@ class MapPinSheet extends StatelessWidget {
                       const SizedBox(height: 4),
                       Row(
                         children: [
-                          PrivacyBadge(type: type),
+                          PrivacyBadge(isPrivate: pin.isPrivate),
                           if (pin.live) ...[
                             const SizedBox(width: 6),
                             Text('ΤΩΡΑ', style: AppTextStyles.mono(size: 9, color: AppColors.pinkLight)),

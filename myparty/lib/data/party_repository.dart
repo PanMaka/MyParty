@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../models/hosted_parties.dart';
 import '../models/party_summary.dart';
 import '../models/rsvp_party.dart';
 
@@ -118,45 +119,74 @@ class PartyRepository {
         .toList();
   }
 
-  /// Past parties the current user actually went to — a `going` RSVP on a
-  /// party that has already started.
+  /// The profile's own party list: everything the CALLER hosts, already split
+  /// into upcoming and past and already in display order.
   ///
-  /// Current-user only, and that is a property of the data rather than a
-  /// choice: the `rsvps` SELECT policy is `user_id = auth.uid() OR I host the
-  /// party`, so asking this about anyone else returns their RSVPs on parties
-  /// you host and nothing more — a number that would look like their history
-  /// and be a fact about yours. Same reasoning that keeps
-  /// `ProfileStats.partiesAttended` owner-only.
+  /// One RPC rather than two `.eq()` calls, and it replaces the deleted
+  /// `fetchAttendedParties` — which read `rsvps` with an embedded
+  /// `parties!inner(...)` and then sorted in Dart, because PostgREST's `order`
+  /// on an embedded resource sorts *within* the embed rather than the
+  /// top-level rows. That workaround is gone rather than generalised.
   ///
-  /// Sorted in Dart, unusually for this file. PostgREST's `order` on an
-  /// embedded resource sorts *within* the embed, not the top-level rows, so
-  /// there is no way to ask the server for "my past parties, most recent
-  /// first" through a join. The bound is generous and the strip shows three;
-  /// when this needs real paging it becomes an RPC rather than a bigger limit.
-  Future<List<PartySummary>> fetchAttendedParties({int limit = 50}) async {
-    final userId = currentUserId;
-    if (userId == null) return [];
+  /// Two things the server does here that the client structurally cannot:
+  ///
+  ///  * **Opposite sort directions in one result.** Upcoming reads best
+  ///    soonest-first and past reads best most-recent-first, which is not one
+  ///    `order` clause.
+  ///  * **One clock.** `is_upcoming` comes from the same `now()` that produced
+  ///    the ordering. Splitting on `DateTime.now()` here would let a party
+  ///    starting inside the round trip be fetched as upcoming and rendered as
+  ///    past, and would put a device with a skewed clock permanently at odds
+  ///    with the server.
+  ///
+  /// Takes no user id, and [get_my_hosted_parties] has no parameter for one:
+  /// it is only ever answerable about `auth.uid()`. For somebody else's
+  /// profile the question is a different and narrower one — see
+  /// [fetchHostedParties] with `publicOnly`.
+  Future<HostedParties> fetchMyHostedParties() async {
+    if (currentUserId == null) return HostedParties.empty;
 
-    final nowIso = DateTime.now().toUtc().toIso8601String();
+    final rows = await _client.rpc('get_my_hosted_parties');
 
-    final rows = await _client
-        .from('rsvps')
-        .select(
-          'parties!inner(id, title, starts_at, is_private, going_count, interested_count, max_capacity, cover_path, area)',
-        )
-        .eq('user_id', userId)
-        .eq('status', 'going')
-        .eq('parties.status', 'published')
-        .lt('parties.starts_at', nowIso)
-        .limit(limit);
+    return HostedParties.fromRows(
+      (rows as List).cast<Map<String, dynamic>>(),
+    );
+  }
 
-    final parties = (rows as List)
-        .map((row) => (row as Map<String, dynamic>)['parties'])
-        .whereType<Map<String, dynamic>>()
-        .map(PartySummary.fromRow)
-        .toList();
+  /// Trades cover paths for short-lived signed URLs, keyed by **party id**.
+  ///
+  /// `party-covers` is a private bucket, so unlike an avatar this cannot be a
+  /// public URL. Unlike `story-media` it also needs no edge function: that
+  /// bucket ships zero policies and is reachable only through a service-role
+  /// signature, whereas `party-covers` carries a real SELECT policy tied to
+  /// party visibility (`20260812124217`). Storage authorizes this call with the
+  /// caller's own JWT against that policy, so a party the viewer may not see
+  /// cannot be signed — RLS decides, exactly as it does for the row itself.
+  ///
+  /// Keyed by party id rather than by path so the caller never has to hold a
+  /// storage key to look up its own image, and so a party with no cover is
+  /// simply absent from the map rather than mapping to null.
+  ///
+  /// One request for the whole list. Failures are dropped rather than thrown:
+  /// a cover that will not sign is a card that draws its placeholder, which is
+  /// the same thing the card does for a party that never had one.
+  Future<Map<String, String>> signedCoverUrls(
+    List<PartySummary> parties, {
+    int expiresIn = 3600,
+  }) async {
+    final withCovers = parties.where((p) => p.hasCover).toList();
+    if (withCovers.isEmpty) return {};
 
-    parties.sort((a, b) => b.startsAt.compareTo(a.startsAt));
-    return parties;
+    final byPath = {for (final p in withCovers) p.coverPath!: p.id};
+
+    final results = await _client.storage
+        .from('party-covers')
+        .createSignedUrlsResult(byPath.keys.toList(), expiresIn);
+
+    return {
+      for (final result in results)
+        if (result is SignedUrlSuccess && byPath.containsKey(result.path))
+          byPath[result.path]!: result.signedUrl,
+    };
   }
 }

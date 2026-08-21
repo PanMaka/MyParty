@@ -4,7 +4,6 @@ import 'package:image_picker/image_picker.dart';
 import '../../data/story_repository.dart';
 import '../../models/story.dart';
 import '../screens/story_viewer_screen.dart';
-import '../../models/mp_party.dart' show MpPartyType;
 import '../../utils/greek_date.dart';
 import '../theme/app_theme.dart';
 import 'diagonal_placeholder.dart';
@@ -249,7 +248,7 @@ class _StoryPickerSheetState extends State<StoryPickerSheet> {
                 ),
               ),
               PrivacyBadge(
-                type: target.isPrivate ? MpPartyType.private : MpPartyType.public,
+                isPrivate: target.isPrivate,
               ),
             ],
           ),

@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' show RealtimeSubscribeStatus;
 
 import '../../data/chat_repository.dart';
-import '../../models/mp_party.dart';
 import '../../models/party_message.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
@@ -381,7 +380,6 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _header(BuildContext context) {
     final tint = widget.isPrivate ? AppColors.pink : AppColors.purple;
-    final type = widget.isPrivate ? MpPartyType.private : MpPartyType.public;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
@@ -425,7 +423,7 @@ class _ChatScreenState extends State<ChatScreen> {
                           style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700)),
                     ),
                     const SizedBox(width: 6),
-                    PrivacyBadge(type: type),
+                    PrivacyBadge(isPrivate: widget.isPrivate),
                   ],
                 ),
                 if (widget.memberCount != null)

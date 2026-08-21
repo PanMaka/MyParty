@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:myparty/data/party_repository.dart';
 import 'package:myparty/data/profile_repository.dart';
 import 'package:myparty/data/social_repository.dart';
+import 'package:myparty/models/hosted_parties.dart';
 import 'package:myparty/models/party_summary.dart';
 import 'package:myparty/models/profile.dart';
 import 'package:myparty/models/profile_privacy.dart';
@@ -11,6 +12,7 @@ import 'package:myparty/models/profile_stats.dart';
 import 'package:myparty/ui/screens/profile_screen.dart';
 import 'package:myparty/ui/widgets/diagonal_placeholder.dart';
 import 'package:myparty/ui/widgets/follow_button.dart';
+import 'package:myparty/ui/widgets/profile_party_card.dart';
 
 /// Stands in for the real repository. Subclasses rather than implements so it
 /// stays in sync with the real constructor, and overrides every method that
@@ -128,16 +130,31 @@ class _FakeSocialRepository extends SocialRepository {
 /// constructor, which is why nothing had ever faked a party.
 class _FakePartyRepository extends PartyRepository {
   _FakePartyRepository({
-    this.hosting = const [],
+    this.mineUpcoming = const [],
+    this.minePast = const [],
     this.hostedPublicPast = const [],
-    this.attended = const [],
+    this.covers = const {},
     this.fail = false,
+    this.failCovers = false,
   });
 
-  final List<PartySummary> hosting;
+  /// The two groups `get_my_hosted_parties` would return, already split — the
+  /// fake stands in for the RPC, not for the SQL, so the split arrives
+  /// pre-made exactly as it does from the server.
+  final List<PartySummary> mineUpcoming;
+  final List<PartySummary> minePast;
+
   final List<PartySummary> hostedPublicPast;
-  final List<PartySummary> attended;
+
+  /// party id -> signed URL, as [signedCoverUrls] returns it.
+  final Map<String, String> covers;
+
   final bool fail;
+
+  /// Signing failing while the LIST succeeds. A separate flag because the two
+  /// have to be able to fail independently: a cover that will not sign must
+  /// cost a placeholder, not the list.
+  final bool failCovers;
 
   /// Every (window, publicOnly) pair the screen actually asked for. The public
   /// section's `publicOnly: true` is the whole difference between "parties they
@@ -154,13 +171,31 @@ class _FakePartyRepository extends PartyRepository {
   }) async {
     hostedQueries.add('${window.name}:publicOnly=$publicOnly');
     if (fail) throw Exception('offline');
-    return window == PartyWindow.upcoming ? hosting : hostedPublicPast;
+    // Only the PAST window is still reached: the owner's list moved to
+    // fetchMyHostedParties, so the one caller left is the other profile's
+    // public section. `hostedQueries` still records the window, so a
+    // regression that starts asking for upcoming here is visible.
+    return window == PartyWindow.upcoming ? const [] : hostedPublicPast;
+  }
+
+  /// Every list handed to [signedCoverUrls], so a test can assert the screen
+  /// asked for covers once rather than per card.
+  final List<List<String>> coverRequests = [];
+
+  @override
+  Future<HostedParties> fetchMyHostedParties() async {
+    if (fail) throw Exception('offline');
+    return HostedParties(upcoming: mineUpcoming, past: minePast);
   }
 
   @override
-  Future<List<PartySummary>> fetchAttendedParties({int limit = 50}) async {
-    if (fail) throw Exception('offline');
-    return attended;
+  Future<Map<String, String>> signedCoverUrls(
+    List<PartySummary> parties, {
+    int expiresIn = 3600,
+  }) async {
+    coverRequests.add(parties.map((p) => p.id).toList());
+    if (failCovers) throw Exception('storage down');
+    return covers;
   }
 }
 
@@ -171,6 +206,8 @@ PartySummary _party(
   int goingCount = 0,
   int? maxCapacity,
   bool isPrivate = false,
+  String? area,
+  String? coverPath,
 }) {
   return PartySummary(
     id: id,
@@ -180,6 +217,8 @@ PartySummary _party(
     goingCount: goingCount,
     interestedCount: 0,
     maxCapacity: maxCapacity,
+    area: area,
+    coverPath: coverPath,
   );
 }
 
@@ -401,40 +440,133 @@ void main() {
     });
   });
 
-  group('hosted parties', () {
-    testWidgets('the ΩΣ ΔΙΟΡΓΑΝΩΤΡΙΑ card renders real parties', (tester) async {
-      final parties = _FakePartyRepository(
-        hosting: [_party('p1', 'Ταράτσα Θησείου', goingCount: 18, maxCapacity: 24)],
+  group('the party list', () {
+    _FakePartyRepository twoGroups() => _FakePartyRepository(
+      mineUpcoming: [_party('p1', 'Ταράτσα Θησείου', area: 'Θησείο')],
+      minePast: [_party('p2', 'Kápsimo'), _party('p3', 'Εξάρχεια')],
+    );
+
+    testWidgets('is one list under one heading, grouped in two', (tester) async {
+      await _pumpProfile(tester, _FakeProfileRepository(), parties: twoGroups());
+      await _scrollTo(tester, find.text('ΔΙΟΡΓΑΝΩΝΩ'));
+
+      expect(find.text('ΔΙΟΡΓΑΝΩΝΩ'), findsOneWidget);
+      expect(find.text('ΠΕΡΑΣΜΕΝΑ'), findsOneWidget);
+
+      // The two headings this replaced.
+      expect(find.text('ΩΣ ΔΙΟΡΓΑΝΩΤΡΙΑ'), findsNothing);
+      expect(find.text('ΤΟ ΙΣΤΟΡΙΚΟ ΜΟΥ'), findsNothing);
+    });
+
+    testWidgets('counts what it renders, and nothing else', (tester) async {
+      await _pumpProfile(tester, _FakeProfileRepository(), parties: twoGroups());
+      await _scrollTo(tester, find.text('ΠΑΡΤΙ · 3'));
+
+      // 1 upcoming + 2 past. The number in the heading is derived from the two
+      // rendered lists rather than counted separately, so it cannot drift from
+      // the cards beneath it — including when the RPC's limit truncates.
+      expect(find.text('ΠΑΡΤΙ · 3'), findsOneWidget);
+      expect(find.byType(ProfilePartyCard), findsNWidgets(3));
+    });
+
+    testWidgets('never prints a count it has not finished checking', (tester) async {
+      // Pumped without settling: the future is still in flight.
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ProfileScreen(
+            repository: _FakeProfileRepository(),
+            social: _FakeSocialRepository(),
+            parties: twoGroups(),
+          ),
+        ),
       );
-      await _pumpProfile(tester, _FakeProfileRepository(), parties: parties);
+      await tester.pump();
+
+      // "ΠΑΡΤΙ · 0" over a spinner asserts that the user hosts nothing, which
+      // on a slow connection would be the first thing they read.
+      expect(find.text('ΠΑΡΤΙ · 0'), findsNothing);
+
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('labels each card with what the party is to you', (tester) async {
+      await _pumpProfile(tester, _FakeProfileRepository(), parties: twoGroups());
       await _scrollTo(tester, find.text('Ταράτσα Θησείου'));
 
-      expect(find.text('Ταράτσα Θησείου'), findsOneWidget);
-      expect(find.textContaining('18/24 θέσεις'), findsOneWidget);
-
-      // The prototype's party, and the button that had no screen behind it.
-      expect(find.text('Ταράτσα στο Κουκάκι'), findsNothing);
-      expect(find.text('Διαχείριση'), findsNothing);
+      expect(find.text('διοργανώνεις'), findsOneWidget);
+      expect(find.text('διοργάνωσες'), findsNWidgets(2));
     });
 
-    testWidgets('a party with no capacity shows a count, not a ratio', (tester) async {
+    testWidgets('draws the privacy badge and the area, and skips an absent area', (tester) async {
       final parties = _FakePartyRepository(
-        hosting: [_party('p1', 'Χωρίς όριο', goingCount: 7)],
+        mineUpcoming: [
+          _party('p1', 'Ιδιωτικό', isPrivate: true, area: 'Κουκάκι'),
+          _party('p2', 'Χωρίς περιοχή'),
+        ],
       );
       await _pumpProfile(tester, _FakeProfileRepository(), parties: parties);
-      await _scrollTo(tester, find.text('Χωρίς όριο'));
+      await _scrollTo(tester, find.text('Ιδιωτικό'));
 
-      // max_capacity is nullable and is the only real denominator a party has.
-      // Inventing one to divide by is what the hardcoded 0.75 bar did.
-      expect(find.textContaining('7 δηλώσεις συμμετοχής'), findsOneWidget);
-      expect(find.byType(FractionallySizedBox), findsNothing);
+      expect(find.text('ΙΔΙΩΤΙΚΟ'), findsOneWidget);
+      expect(find.text('ΔΗΜΟΣΙΟ'), findsOneWidget);
+      expect(find.textContaining('Κουκάκι'), findsOneWidget);
+
+      // area is nullable and there is no derivation available — reverse
+      // geocoding parties.location would hand a private party's coordinates to
+      // a geocoder. An absent area draws nothing, not a trailing separator.
+      expect(find.textContaining('· null'), findsNothing);
     });
 
-    testWidgets('hosting nothing renders an empty state, not a fake party', (tester) async {
-      await _pumpProfile(tester, _FakeProfileRepository(), parties: _FakePartyRepository());
+    testWidgets('asks for every cover in one request, keyed by party', (tester) async {
+      final parties = _FakePartyRepository(
+        mineUpcoming: [_party('p1', 'Με εξώφυλλο', coverPath: 'p1/cover.jpg')],
+        minePast: [_party('p2', 'Και άλλο', coverPath: 'p2/cover.jpg')],
+        covers: {'p1': 'https://stub.invalid/p1', 'p2': 'https://stub.invalid/p2'},
+      );
+      await _pumpProfile(tester, _FakeProfileRepository(), parties: parties);
+
+      // One call for the whole list, not one per card: party-covers is private,
+      // so each URL is a signature, and signing them individually would be a
+      // round trip per row.
+      expect(parties.coverRequests, [
+        ['p1', 'p2'],
+      ]);
+    });
+
+    testWidgets('a failed signing costs placeholders, not the list', (tester) async {
+      final parties = _FakePartyRepository(
+        mineUpcoming: [_party('p1', 'Με εξώφυλλο', coverPath: 'p1/cover.jpg')],
+        failCovers: true,
+      );
+      await _pumpProfile(tester, _FakeProfileRepository(), parties: parties);
+      await _scrollTo(tester, find.text('Με εξώφυλλο'));
+
+      // The card is still there. Losing the images costs decoration; losing
+      // the list costs the content.
+      expect(find.text('Με εξώφυλλο'), findsOneWidget);
+      expect(find.text('Δεν φόρτωσαν τα πάρτι σου'), findsNothing);
+    });
+
+    testWidgets('an empty group says so without emptying the other', (tester) async {
+      final parties = _FakePartyRepository(minePast: [_party('p2', 'Kápsimo')]);
+      await _pumpProfile(tester, _FakeProfileRepository(), parties: parties);
       await _scrollTo(tester, find.text('Δεν διοργανώνεις κάποιο πάρτι αυτή τη στιγμή.'));
 
       expect(find.text('Δεν διοργανώνεις κάποιο πάρτι αυτή τη στιγμή.'), findsOneWidget);
+      expect(find.text('Kápsimo'), findsOneWidget);
+      expect(find.text('ΠΑΡΤΙ · 1'), findsOneWidget);
+    });
+
+    testWidgets('hosting nothing at all is one absence, not two', (tester) async {
+      await _pumpProfile(tester, _FakeProfileRepository(), parties: _FakePartyRepository());
+      await _scrollTo(tester, find.text('Δεν έχεις διοργανώσει πάρτι ακόμα.'));
+
+      expect(find.text('Δεν έχεις διοργανώσει πάρτι ακόμα.'), findsOneWidget);
+
+      // Two group headings over two empty notices would make an account that
+      // has never hosted look like a screen that failed twice.
+      expect(find.text('ΔΙΟΡΓΑΝΩΝΩ'), findsNothing);
+      expect(find.text('ΠΕΡΑΣΜΕΝΑ'), findsNothing);
       expect(find.text('Ταράτσα στο Κουκάκι'), findsNothing);
     });
 
@@ -446,29 +578,28 @@ void main() {
       );
       await _scrollTo(tester, find.text('Δεν φόρτωσαν τα πάρτι σου'));
 
+      // One request behind the list, so one error — a per-group failure would
+      // be describing a fetch that does not happen.
       expect(find.text('Δεν φόρτωσαν τα πάρτι σου'), findsOneWidget);
+      expect(find.byType(ProfilePartyCard), findsNothing);
     });
-  });
 
-  group('history strip', () {
-    testWidgets('renders past parties you attended', (tester) async {
-      final parties = _FakePartyRepository(
-        attended: [_party('a1', 'Kápsimo'), _party('a2', 'Εξάρχεια')],
+    testWidgets('is never asked about another user', (tester) async {
+      final parties = _FakePartyRepository(mineUpcoming: [_party('p1', 'Δικό μου')]);
+      await _pumpProfile(
+        tester,
+        _FakeProfileRepository(),
+        parties: parties,
+        target: const OtherProfile('someone-else'),
       );
-      await _pumpProfile(tester, _FakeProfileRepository(), parties: parties);
-      await _scrollTo(tester, find.text('Kápsimo'));
 
-      expect(find.text('Kápsimo'), findsOneWidget);
-      expect(find.text('Εξάρχεια'), findsOneWidget);
-      // The third prototype tile had no party behind it at all.
-      expect(find.text('Anodos'), findsNothing);
-    });
-
-    testWidgets('no history renders an empty state', (tester) async {
-      await _pumpProfile(tester, _FakeProfileRepository(), parties: _FakePartyRepository());
-      await _scrollTo(tester, find.text('Δεν έχεις πάει ακόμα σε κάποιο πάρτι.'));
-
-      expect(find.text('Δεν έχεις πάει ακόμα σε κάποιο πάρτι.'), findsOneWidget);
+      // get_my_hosted_parties takes no user id, so it can only ever answer
+      // about auth.uid(). Rendering it under somebody else's name would put my
+      // parties behind their handle — which is why the other profile keeps its
+      // own narrower, hosted-and-public section instead.
+      expect(find.text('Δικό μου'), findsNothing);
+      expect(find.text('ΔΙΟΡΓΑΝΩΝΩ'), findsNothing);
+      expect(find.textContaining('ΠΑΡΤΙ · '), findsNothing);
     });
   });
 

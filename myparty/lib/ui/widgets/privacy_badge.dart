@@ -1,17 +1,24 @@
 import 'package:flutter/material.dart';
 
-import '../../models/mp_party.dart';
 import '../theme/app_theme.dart';
 
 /// ΔΗΜΟΣΙΟ / ΙΔΙΩΤΙΚΟ pill badge.
+///
+/// Takes the bool that `parties.is_private` actually is, rather than the
+/// `MpPartyType` enum it used to. Every one of the six call sites was already
+/// converting a real bool INTO that enum on the way in
+/// (`rsvp.isPrivate ? MpPartyType.private : MpPartyType.public`), so the enum
+/// was a round trip through the mock model for a value that never came from it
+/// — and it kept `models/mp_party.dart` imported by five screens that have no
+/// other reason to know the file exists.
 class PrivacyBadge extends StatelessWidget {
-  final MpPartyType type;
+  final bool isPrivate;
   final String? suffix;
   final double fontSize;
 
-  const PrivacyBadge({super.key, required this.type, this.suffix, this.fontSize = 8});
+  const PrivacyBadge({super.key, required this.isPrivate, this.suffix, this.fontSize = 8});
 
-  bool get _private => type == MpPartyType.private;
+  bool get _private => isPrivate;
 
   @override
   Widget build(BuildContext context) {
