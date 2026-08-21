@@ -84,7 +84,7 @@ class _FakeProfileRepository extends ProfileRepository {
   }
 }
 
-/// The ΑΚΟΛΟΥΘΕΙ rail now loads on the owner's public preview as well, so a
+/// The FOLLOWING rail now loads on the owner's public preview as well, so a
 /// [SocialRepository] method actually runs during these tests — it never did
 /// before, which is why only the profile repository used to be injected.
 class _FakeSocialRepository extends SocialRepository {
@@ -93,8 +93,8 @@ class _FakeSocialRepository extends SocialRepository {
   final List<Profile> following;
 
   /// Every follow-graph method the screen reached for, in order. The public
-  /// preview's follow button must add nothing to it — see the ΔΗΜΟΣΙΑ preview
-  /// test. `fetchFollowing` is deliberately not recorded: it is the ΑΚΟΛΟΥΘΕΙ
+  /// preview's follow button must add nothing to it — see the PUBLIC preview
+  /// test. `fetchFollowing` is deliberately not recorded: it is the FOLLOWING
   /// rail's own load, it runs on every profile, and counting it here would
   /// drown the one signal this list exists for.
   final List<String> calls = [];
@@ -417,7 +417,7 @@ void main() {
 
       // Tapping it reaches nothing at all. Asserted against the repository
       // rather than against the rendered label, because a button that flipped
-      // to "Ακολουθείς" locally and wrote nothing would look correct here and
+      // to "Following" locally and wrote nothing would look correct here and
       // still be the bug.
       expect(social.calls, isEmpty);
       expect(tester.takeException(), isNull);

@@ -814,16 +814,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
   ///
   /// Which pair renders is a question about the [ProfileTarget] and about
   /// nothing else, so a switch on the sealed type answers it: the compiler
-  /// proves the two cases exhaustive, there is no third state in which the
+  /// proves the three cases exhaustive, there is no fourth state in which the
   /// wrong pair could appear, and no bool is reintroduced to carry a
   /// distinction the type already carries. `userId` comes out of the pattern,
   /// which is what keeps [FollowButton.targetUserId] and `reports.target_id`
-  /// non-null without a `!`.
+  /// non-null without a `!` — and it is unavailable in the two [OwnProfile]
+  /// arms, which is what makes it impossible for either to reach the follow
+  /// graph or the report table on your own row.
   ///
-  /// It deliberately does not consult [OwnProfile.previewingPublicView].
-  /// Previewing your own public profile does not make you a stranger to
-  /// yourself, and "Ακολούθησε" over your own row would offer an action the
-  /// `follows` INSERT policy refuses anyway (`follower_id <> followee_id`).
+  /// Three arms rather than two because `previewingPublicView` is matched
+  /// inside the pattern. The preview draws the visitor's row; only
+  /// [OtherProfile] wires it.
   Widget _actionRow() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
@@ -899,7 +900,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   /// same gradient — because on an [OtherProfile] the two sit side by side and
   /// any drift between them shows immediately.
   ///
-  /// [onTap] is nullable so the ΔΗΜΟΣΙΑ preview can draw the button without
+  /// [onTap] is nullable so the PUBLIC preview can draw the button without
   /// wiring it. A null one is inert and looks identical — which is the point:
   /// the preview must not invent a disabled style visitors never see.
   Widget _actionButton(String label, {VoidCallback? onTap, bool primary = false}) {

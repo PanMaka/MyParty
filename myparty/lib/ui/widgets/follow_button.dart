@@ -75,7 +75,10 @@ class _FollowButtonState extends State<FollowButton> {
       setState(() => _following = wasFollowing);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Δεν έγινε. Δοκίμασε ξανά.'),
+          // English because the button above it is. The same sentence is still
+          // Greek in feed_screen, chat_screen and story_viewer_screen — it is
+          // copied per screen rather than shared, so this one moved alone.
+          content: Text('That did not work. Try again.'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -94,7 +97,7 @@ class _FollowButtonState extends State<FollowButton> {
 
 /// The follow button as a visitor sees it, wired to nothing.
 ///
-/// Exists for the owner's ΔΗΜΟΣΙΑ preview, where the honest thing to draw in
+/// Exists for the owner's PUBLIC preview, where the honest thing to draw in
 /// the action row is what a visitor actually gets — and the one thing it must
 /// not do is act. A real [FollowButton] there would query `isFollowing` about
 /// the viewer themself and, on a tap, attempt a self-follow the `follows`
@@ -104,10 +107,8 @@ class _FollowButtonState extends State<FollowButton> {
 /// It renders through the same [_FollowSkin] as the live button rather than
 /// copying its decoration, which is the whole reason it lives in this file: a
 /// preview that drifts from the thing it previews is worse than no preview.
-/// That includes the label — it stays whatever the live button says, even while
-/// the rest of the profile tab is English, because a preview claiming visitors
-/// see "Follow" when they see "Ακολούθησε" is exactly the lie it exists to
-/// prevent.
+/// That includes the label: both read it off [_FollowSkin], so "what visitors
+/// see" cannot become a second copy of the string that someone edits one of.
 ///
 /// Always the not-following state: a visitor who already follows you is one of
 /// several audiences, and the preview has to pick the one that is true of
@@ -135,7 +136,7 @@ class _FollowSkin extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = following ? 'Ακολουθείς' : 'Ακολούθησε';
+    final label = following ? 'Following' : 'Follow';
 
     if (compact) {
       return OutlinedButton(
