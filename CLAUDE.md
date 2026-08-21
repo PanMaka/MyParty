@@ -248,6 +248,19 @@ defeats the GiST index (gotcha 19). The measurement, the plans and the proposed
 policy rewrite are in `docs/phase-10-hardening-audit.md`. Do not drop
 `parties_location` because an advisor calls it unused.
 
+**Phase 12 applied that rewrite** (`20260821185216`): `is_blocked`,
+`is_private` and `host_id` are hoisted out of `can_user_access_party` into the
+`parties` SELECT policy, so a public party short-circuits with no function
+call. 5km p50 **995ms → 199ms**. The helper is deliberately untouched — eight
+policies across five tables call it — so party visibility now lives in **two**
+places, and `17_parties_policy.test.sql` is what makes that safe: 65
+assertions, including a both-directions equivalence proof over every persona
+and every fixture party, so drift is a red test rather than a silent
+divergence. Do not delete that file, and do not edit one copy without the
+other. **The rewrite did not reach the GiST index and could never have** —
+see gotcha 19 and `docs/phase-12-policy-rewrite-result.md`. Search (Phase 13)
+is therefore still blocked.
+
 **Cross-phase gotchas worth remembering:**
 
 1. The `profiles` SELECT policy is no longer `using (true)` — it is
@@ -426,13 +439,50 @@ policy rewrite are in `docs/phase-10-hardening-audit.md`. Do not drop
     Measured at 10k parties: **995ms p50 with RLS, 2ms with the policies
     off** — 99.7% of p95. It gets *worse zoomed in*, because the wide-zoom
     tiers have a cheap non-leaky `party_tier` filter that runs first and the
-    5km branch has none. So `parties_location` reads as an unused index in
-    the advisor and is not: the fix is to make the query able to reach it,
-    not to drop it. Numbers, plans and the proposed policy rewrite (hoist
-    `is_private`/`host_id` out of the helper into the policy, so a public
-    party short-circuits without a function call) are in
-    `docs/phase-10-hardening-audit.md` §5. **Not applied** — it is the
-    policy with the widest blast radius in the schema.
+    5km branch has none.
+
+    **Phase 12 applied the proposed hoist and it did NOT reach the index.**
+    `20260821185216` moved `is_blocked`/`is_private`/`host_id` out of the
+    helper into the policy: 5km p50 **995ms → 199ms**, a real 5×, and still
+    `Seq Scan on parties` with `st_dwithin` in the Filter. The diagnosis above
+    conflated two consequences of one cause. Policy *cost* and index
+    *reachability* are separate, and only the first is fixable by a rewrite:
+
+    - Promotion past a security barrier depends on the leakproofness of the
+      **user qual**, not the policy's. `st_dwithin`, `_st_expand` and
+      `geography_overlaps` (the `&&` operator) are all `proleakproof = f`, so
+      the spatial predicate can never sort ahead of an RLS qual — and an index
+      condition is by definition evaluated first.
+    - Measured four ways by `scripts/explain_policy_pushdown.sh`: the shipped
+      hoist seq-scans (203ms); `using (not is_private)` — one leakproof column
+      reference, the cheapest policy that still filters anything — **also**
+      leaves `st_dwithin` as a Filter (10.9ms); only `using (true)`, which the
+      planner folds away entirely, and RLS-off reach `parties_location`
+      (3.3ms / 2ms). `pg_stat_get_xact_numscans` confirms the index is touched
+      exactly twice across the four plans.
+
+    So `parties_location` still reads as an unused index in the advisor and
+    still must not be dropped — but the reason is now the **notification
+    engine**, which is SECURITY DEFINER and reaches it today, not a map query
+    that might one day. Getting the map there needs the spatial scan out of
+    RLS, or a leakproof indexable pre-filter — `float8gt`/`float8lt` on plain
+    lat/lon columns are leakproof where `geography_overlaps` is not, so a
+    bounding box on those CAN sort ahead of the policy — not another policy.
+    Full result, plans and options: `docs/phase-12-policy-rewrite-result.md`.
+
+    Two process traps from that phase, both worth more than the finding:
+    `docs/phase-12-parties-policy-rewrite.md` §7.3 pointed the structural
+    acceptance criterion at `scripts/explain_proximity.sh`, which EXPLAINs as
+    `postgres` and therefore bypasses RLS — it printed the required
+    `Index Cond` line **before** the migration too, and would have certified a
+    no-op as a success. Anything claiming to measure an RLS effect has to run
+    through `tests.authenticate_as`. And the same brief's predicted anon
+    failure mode (`NOT IN` collapsing to NULL) does not reproduce at all:
+    `NULL not in (<empty set>)` is TRUE, and the `blocks` SELECT policy is
+    `blocker_id = auth.uid()`, so anon reads no block rows whatever the
+    spelling. The inlined hoist is broken for a *different* viewer and a worse
+    reason — that same policy hides "the host blocked me", half of a symmetric
+    relation, so it leaks silently rather than erroring.
 
 20. **A `language sql` set-returning function is inlined only if it is not
     SECURITY DEFINER, not VOLATILE, and has no SET clause.** All eight read
