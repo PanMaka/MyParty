@@ -218,19 +218,42 @@ row count reaching the policy is the right one.
 Make `get_parties_near_user` `SECURITY DEFINER` and filter visibility explicitly
 in its body. Variant D is that plan: ~2 ms.
 
-It is a bigger change than it looks, and the reason is in the variant-A plan
-above: the map query joins `profiles`, and the `profiles` row policy is
-contributing `NOT is_blocked((select auth.uid()), id)` to that join today. Going
-definer switches off **both** tables' policies inside the function, so the RPC
-would have to reimplement the `parties` rule *and* the `profiles` block filter.
-That is a third and a fourth copy of visibility logic, not a third.
+**The objection is not "one more copy of the rule."** That framing undersells
+it badly: this project already decided once that a second copy is acceptable
+when a test pins it — that is §2 of the brief and it stands. If duplication
+were the whole problem, the answer would obviously be "write another
+equivalence test and take the 100×."
 
-The deeper cost is that the `parties` policy is currently a **backstop for
-every read path** — PostgREST table reads, the other seven policies that join
-through it, any future query nobody has written yet. A definer RPC is only as
-correct as its own `where` clause, and a bug in it has nothing underneath. Today
-a bug in the RPC is caught by the policy; that is defence in depth, and route 1
-spends it to save 7 ms.
+**Reason 1 — it is two rules, not one, and the second is invisible unless you
+read the plan.** The map query joins `profiles`, and the `profiles` row policy
+is contributing a term to that join today:
+
+```
+->  Index Scan using profiles_pkey on profiles pr
+      Filter: ((NOT is_blocked((InitPlan 96).col1, id)) AND ((map_visibility = 'public') OR ...))
+```
+
+The `map_visibility` half is the RPC's own; `NOT is_blocked(auth.uid(), id)` is
+**the policy's**. `SECURITY DEFINER` switches off row security for *every* table
+the function touches, so the RPC must reimplement the `parties` visibility rule
+**and** the `profiles` block filter. Anyone scoping this from the §2 diff will
+plan for one and ship one — and the one that gets forgotten is a block filter,
+which fails open, silently, in favour of the person who was blocked.
+
+**Reason 2 — the `parties` policy is a backstop with nothing under it once you
+leave.** It is not just this query's filter: it is the last line for every read
+path against that table — PostgREST reads, the seven other policies in §6 that
+reach `parties` underneath, and every query nobody has written yet. Today a bug
+in `get_parties_near_user`'s `where` clause is *caught* by the policy; the RPC
+can be wrong and the data still does not leak. A definer RPC is exactly as
+correct as its own `where` clause.
+
+So the trade is **~7 ms against the defence-in-depth on the widest-blast-radius
+table in the schema**, and at 9.3 ms versus 2 ms it is not close. Reopen it with
+a measurement showing 9 ms is insufficient — never with the 100× headline. The
+same argument, at length and placed where someone chasing that headline will hit
+it, is §9 of
+[`phase-12-parties-policy-rewrite.md`](phase-12-parties-policy-rewrite.md).
 
 If it is ever taken, the equivalence-assertion pattern in
 `17_parties_policy.test.sql` is the thing that makes it survivable, and it is
@@ -239,7 +262,9 @@ now a pattern to copy rather than an argument to have.
 ### Sequencing
 
 Route 2 first — it is additive, reversible, changes no visibility rule, and is
-measured. Re-measure route 1 only if 9 ms is not enough, at which point the
+measured. Scoped as
+[`phase-13-leakproof-spatial-prefilter.md`](phase-13-leakproof-spatial-prefilter.md),
+with the superset assertion as a shipping requirement rather than a follow-up. Re-measure route 1 only if 9 ms is not enough, at which point the
 question is worth asking with real numbers instead of a 100× headline.
 
 **Search (Phase 13) is still blocked, and for the unchanged reason.** An

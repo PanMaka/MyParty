@@ -38,6 +38,11 @@ the routes that do work:
 > folds away so that no barrier remains, and RLS-off reach the index (3.3 ms /
 > 2 ms). If policy cost were the obstacle, variant B would have reached it.
 >
+> **If you came here looking for the fast option**, the `SECURITY DEFINER` read
+> RPC measures ~100× better than what shipped and was still rejected. **§9 says
+> why, and the reason is not the one you will guess.** Read it before you act
+> on the number.
+>
 > **What this brief still gets right,** and what makes it worth keeping rather
 > than deleting: §3 (the 42P17 recursion and the rule that keeps it shut), §4
 > (the term-by-term equivalence), §5 (the pgTAP matrix), and §6 (blast radius).
@@ -130,10 +135,13 @@ the wrong lesson about the index.
 > describes is real, and it turned out to be the *whole* answer rather than a
 > side note. Applied spatially — a `float8` bounding box on generated `lat`/
 > `lon` columns, since `float8ge`/`float8le` are leakproof where
-> `geography_overlaps` is not — it takes the same query from **228 ms to
-> 8.8 ms** under the shipped policy, cutting 10k rows to 408 *before*
-> `is_blocked` is called even once (29088 → 1416 buffers). That is the route
-> §7 should have pointed at.
+> `geography_overlaps` is not — it takes the same query from **205 ms to
+> 9.3 ms** under the shipped policy, cutting 10,022 rows to 430 *before*
+> `is_blocked` is called even once (28,868 → 1,646 buffers), for an identical
+> 264 rows out. Reproducible as variant E of
+> `scripts/explain_policy_pushdown.sh`. That is the route §7 should have
+> pointed at, and it is Phase 13:
+> [`phase-13-leakproof-spatial-prefilter.md`](phase-13-leakproof-spatial-prefilter.md).
 >
 > The claim about search is unchanged and still correct, with one amendment:
 > the floor it would be measured against is now 199 ms rather than 995 ms, and
@@ -508,3 +516,62 @@ calls `can_user_access_party` directly and is likewise untouched.
 - **Anything about `anon`'s table grants.** The unauthenticated map is a
   separate question with a separate answer; `20260821175831` documents it.
 - **Search itself.** This brief exists to unblock it, not to contain it.
+
+---
+
+## 9. Why the `SECURITY DEFINER` read RPC was rejected
+
+**Added after execution, and deliberately placed where it cannot be missed:
+this is the option someone will act on later, because its headline number is
+the best one on the page.**
+
+The measured routes to a fast map query are in §5 of
+[`phase-12-policy-rewrite-result.md`](phase-12-policy-rewrite-result.md).
+Making `get_parties_near_user` `SECURITY DEFINER` and filtering visibility in
+its body measures at **~2 ms against today's 199 ms** — roughly 100×, the
+largest number anywhere in this work. It was still rejected in favour of a
+leakproof bounding box at 9.3 ms.
+
+**The reason is not "one more copy of the rule."** That framing is wrong and it
+undersells the objection badly, because this project has already decided once
+that a second copy is acceptable when a test pins it — that decision is §2 of
+this brief and it stands. If duplication were the whole objection, the answer
+would obviously be "write another equivalence test and take the 100×."
+
+The two actual reasons:
+
+**1. It is two rules, not one, and the second one is invisible until you read
+the plan.** The map query joins `profiles`, and the `profiles` row policy is
+contributing a term to that join today:
+
+```
+->  Index Scan using profiles_pkey on profiles pr
+      Filter: ((NOT is_blocked((InitPlan 96).col1, id)) AND ((map_visibility = 'public') OR ...))
+```
+
+That `NOT is_blocked(auth.uid(), id)` is **the `profiles` policy**, not the RPC
+body — the `map_visibility` half is the RPC's, the block filter is not. Going
+`SECURITY DEFINER` switches off row security for *every* table the function
+touches, so the RPC would have to reimplement the `parties` visibility rule
+**and** the `profiles` block filter. Anyone scoping this from the §2 diff alone
+will plan for one and ship one, and the missing one is a block filter — which
+fails open, silently, in favour of the person who was blocked.
+
+**2. The `parties` policy is a backstop, and a definer RPC has nothing under
+it.** The policy is not just the map query's filter. It is the last line for
+every read path against that table: PostgREST reads, the seven other policies
+in §6 that reach `parties` underneath, and every query nobody has written yet.
+Today a bug in `get_parties_near_user`'s `where` clause is *caught* by the
+policy — the RPC can be wrong and the data still does not leak. A definer RPC
+is exactly as correct as its own `where` clause, with nothing beneath it.
+
+So the trade is: **~7 ms of latency in exchange for the defence-in-depth on the
+widest-blast-radius table in the schema.** At 9.3 ms versus 2 ms that is not a
+close call. It would become one only if the bounding box turned out not to be
+enough, and that is a question to reopen with a measurement rather than with
+the 100× headline.
+
+If it is ever taken: the equivalence-assertion pattern in
+`17_parties_policy.test.sql` is what makes it survivable, and it would need to
+be applied twice — once for `parties`, once for the `profiles` terms — because
+per reason 1 the second rule is the one that gets forgotten.
