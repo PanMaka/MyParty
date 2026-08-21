@@ -24,6 +24,16 @@ class MapPinSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // One clock reading for the whole sheet. `pin.live` and `pin.attendeeCount`
+    // are conveniences that each call `DateTime.now()` themselves, so the
+    // three uses below were three separate readings of the clock — and a party
+    // crossing its start time between them would print an interested count
+    // under a "μέσα τώρα" label. Same reason [MpMapPin] takes its instant from
+    // its parent rather than reading one per field.
+    final now = DateTime.now();
+    final live = pin.liveAt(now);
+    final count = pin.attendeeCountAt(now);
+
     return SafeArea(
       top: false,
       child: Container(
@@ -58,7 +68,7 @@ class MapPinSheet extends StatelessWidget {
                       Row(
                         children: [
                           PrivacyBadge(isPrivate: pin.isPrivate),
-                          if (pin.live) ...[
+                          if (live) ...[
                             const SizedBox(width: 6),
                             Text('ΤΩΡΑ', style: AppTextStyles.mono(size: 9, color: AppColors.pinkLight)),
                           ],
@@ -86,7 +96,7 @@ class MapPinSheet extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
               decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(10)),
               child: Text(
-                pin.live ? '${pin.attendeeCount} μέσα τώρα' : '${pin.attendeeCount} ενδιαφέρονται',
+                live ? '$count μέσα τώρα' : '$count ενδιαφέρονται',
                 style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w500),
               ),
             ),

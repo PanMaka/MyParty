@@ -107,6 +107,25 @@ class _MapScreenState extends State<MapScreen> {
 
   void _onPinTap(MapPartyPin pin) => showMapPinSheet(context, pin);
 
+  /// One pin's marker, sized from the same [now] the pin itself is drawn for.
+  ///
+  /// The size has to be computed twice — a `Marker` declares its own box and
+  /// the pill inside it declares its own extent — but it must not be *derived*
+  /// twice: a pin whose tier came from a later clock reading than its box
+  /// would be clipped by it. So [MpPinMetrics] answers once here and the same
+  /// instant goes down to [MpMapPin], which re-derives from it rather than
+  /// from a second `DateTime.now()`.
+  Marker _marker(MapPartyPin pin, DateTime now) {
+    final metrics = MpPinMetrics.forPin(pin, now);
+    return Marker(
+      point: LatLng(pin.lat, pin.lng),
+      width: metrics.width,
+      height: metrics.boxHeight,
+      alignment: Alignment.topCenter,
+      child: MpMapPin(pin: pin, now: now, onTap: () => _onPinTap(pin)),
+    );
+  }
+
   void _recenter() {
     if (_pins.isEmpty) return;
     final points = _pins.map((p) => LatLng(p.lat, p.lng)).toList();
@@ -132,6 +151,12 @@ class _MapScreenState extends State<MapScreen> {
     }
 
     final startingPoint = _currentPosition ?? const LatLng(37.9748, 23.7232);
+    // The one clock reading every pin on this frame is drawn against. Read
+    // here rather than inside each pin so a party crossing its start time
+    // cannot be live in one pin's label and not-yet in its own marker box —
+    // and re-read on every rebuild rather than stored with the fetch, which
+    // is what lets a party go live across the 500ms pan debounce.
+    final now = DateTime.now();
 
     return Scaffold(
       backgroundColor: AppColors.bg,
@@ -156,14 +181,7 @@ class _MapScreenState extends State<MapScreen> {
               ),
               MarkerLayer(
                 markers: [
-                  for (final pin in _pins)
-                    Marker(
-                      point: LatLng(pin.lat, pin.lng),
-                      width: mpPinWidth(pin.attendeeCount),
-                      height: mpPinHeight + 6,
-                      alignment: Alignment.topCenter,
-                      child: MpMapPin(pin: pin, onTap: () => _onPinTap(pin)),
-                    ),
+                  for (final pin in _pins) _marker(pin, now),
                   if (_currentPosition != null)
                     Marker(
                       point: _currentPosition!,

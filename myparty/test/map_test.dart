@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -64,11 +65,16 @@ MapPartyPin _pin({
   );
 }
 
-/// Every pin builds an [MpMapPin], and that widget starts a repeating
-/// [AnimationController] in `initState` — for every pin, live or not. The test
-/// binding fails a test that ends with a ticker still running, so the tree has
-/// to come down before the test does. `pumpAndSettle` is unusable here for the
-/// same reason: an infinite animation never settles.
+/// Brings the tree down before the test ends.
+///
+/// A *live* pin holds a repeating [AnimationController], and the test binding
+/// fails a test that ends with a ticker still running. `pumpAndSettle` is
+/// unusable for the same reason: an infinite animation never settles. This
+/// also unmounts [MapScreen], which cancels its 500ms fetch debounce.
+///
+/// Non-live pins no longer need this — they hold no ticker at all, which is
+/// itself asserted below — but the teardown is cheap and unconditional beats
+/// remembering which case is which.
 Future<void> _teardown(WidgetTester tester) => tester.pumpWidget(const SizedBox());
 
 /// Mounts the screen with no location fix, which is what a real handset that
@@ -87,12 +93,33 @@ Future<void> _mount(
     home: MapScreen(repository: repository, locate: () async => fix),
   ));
   // initState -> locate -> setState(_isLoading = false) -> FlutterMap ->
-  // onMapReady -> the fetch. Pumped rather than settled: the pins' pulse
-  // animation repeats forever, so pumpAndSettle would never return.
+  // onMapReady -> the fetch. Pumped rather than settled: a live pin's pulse
+  // repeats forever, so pumpAndSettle would never return.
   await tester.pump();
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 100));
 }
+
+/// Mounts one pin on its own, for the clock it is drawn against.
+///
+/// [MpMapPin.now] being a required parameter rather than an internal
+/// `DateTime.now()` is what makes this possible: the tests below move a party
+/// across its own start and end times without sleeping, and assert what the
+/// pin does on each side.
+Future<void> _pumpPin(WidgetTester tester, MapPartyPin pin, DateTime now) {
+  return tester.pumpWidget(MaterialApp(
+    home: Scaffold(body: Center(child: MpMapPin(pin: pin, now: now, onTap: () {}))),
+  ));
+}
+
+/// The number of frame callbacks currently scheduled, which for this tree is
+/// exactly the number of running pulse tickers — nothing else on a bare pin
+/// animates. Measured, not assumed: a non-live pin reports 0 and a live one
+/// reports 1.
+int _runningTickers(WidgetTester tester) => tester.binding.transientCallbackCount;
+
+RenderParagraph _paragraph(WidgetTester tester, String text) =>
+    tester.renderObject<RenderParagraph>(find.text(text));
 
 void main() {
   group('MapPartyPin.fromRpcRow', () {
@@ -197,6 +224,195 @@ void main() {
     });
   });
 
+  group('MpPinMetrics', () {
+    test('both tier boundaries, from either side', () {
+      expect(MpPinMetrics.forCount(0).tier, MpPinTier.small);
+      expect(MpPinMetrics.forCount(mpPinMediumFrom - 1).tier, MpPinTier.small);
+      expect(MpPinMetrics.forCount(mpPinMediumFrom).tier, MpPinTier.medium);
+      expect(MpPinMetrics.forCount(mpPinLargeFrom - 1).tier, MpPinTier.medium);
+      expect(MpPinMetrics.forCount(mpPinLargeFrom).tier, MpPinTier.large);
+      expect(MpPinMetrics.forCount(10000).tier, MpPinTier.large);
+    });
+
+    test('width never goes backwards, least of all across a boundary', () {
+      // Each tier's width grows on a sqrt that saturates, so a tier ceiling
+      // and the next tier's floor are the one place the ladder could invert:
+      // a 25-person party drawing narrower than a 24-person one would read as
+      // a smaller party. Swept rather than spot-checked, because the failure
+      // is a single step in a range nobody looks at.
+      var previous = 0.0;
+      for (var count = 0; count <= 500; count++) {
+        final width = MpPinMetrics.forCount(count).width;
+        expect(width, greaterThanOrEqualTo(previous),
+            reason: 'width shrank going from ${count - 1} to $count');
+        previous = width;
+      }
+    });
+
+    test('a negative count is drawn as an empty party, not as an error', () {
+      expect(MpPinMetrics.forCount(-5).tier, MpPinTier.small);
+      expect(MpPinMetrics.forCount(-5).width, MpPinMetrics.forCount(0).width);
+    });
+
+    test('the small tier has the least room for a label', () {
+      // The invariant behind the truncation test below: whatever the tiers'
+      // dimensions become, the tightest label row is the one at the bottom, so
+      // that is where the ellipsis has to be proved.
+      final small = MpPinMetrics.forCount(0);
+      final medium = MpPinMetrics.forCount(mpPinMediumFrom);
+      final large = MpPinMetrics.forCount(mpPinLargeFrom);
+
+      expect(small.labelWidth, lessThan(medium.labelWidth));
+      expect(medium.labelWidth, lessThan(large.labelWidth));
+    });
+
+    test('the tier follows the tense, not a number frozen at fetch time', () {
+      // The same pin, the same fetch, two clocks. A party four people are
+      // interested in and two hundred turn up to is a small pin before it
+      // starts and a large one after — with no refetch, and with no
+      // server-computed `live` flag involved.
+      final start = DateTime.parse('2026-08-21T20:00:00Z');
+      final pin = _pin(
+        id: 'p',
+        title: 'p',
+        startsAt: start,
+        endsAt: start.add(const Duration(hours: 8)),
+        interestedCount: 4,
+        goingCount: 200,
+      );
+
+      expect(MpPinMetrics.forPin(pin, start.subtract(const Duration(hours: 1))).tier, MpPinTier.small);
+      expect(MpPinMetrics.forPin(pin, start.add(const Duration(hours: 1))).tier, MpPinTier.large);
+      // And back down once it is over, because the count reverts to interest.
+      expect(MpPinMetrics.forPin(pin, start.add(const Duration(hours: 9))).tier, MpPinTier.small);
+    });
+  });
+
+  group('MpMapPin pulse lifecycle', () {
+    final start = DateTime.parse('2026-08-21T20:00:00Z');
+    final end = start.add(const Duration(hours: 8));
+
+    testWidgets('a party that has not started holds no ticker at all', (tester) async {
+      // The reason this is worth a test rather than a code comment: the pulse
+      // is invisible unless the party is live, so a controller running for
+      // every pin costs a frame callback each and shows nothing. At the RPC's
+      // 200-pin cap that is 200 tickers rebuilding every frame to paint
+      // nothing, and no assertion in the suite would have noticed.
+      final pin = _pin(id: 'p', title: 'Αύριο', startsAt: start, endsAt: end, interestedCount: 8);
+
+      await _pumpPin(tester, pin, start.subtract(const Duration(hours: 1)));
+
+      expect(_runningTickers(tester), 0);
+      await _teardown(tester);
+    });
+
+    testWidgets('a live party holds exactly one', (tester) async {
+      final pin = _pin(id: 'p', title: 'Τώρα', startsAt: start, endsAt: end, goingCount: 40);
+
+      await _pumpPin(tester, pin, start.add(const Duration(hours: 1)));
+
+      expect(_runningTickers(tester), 1);
+      await _teardown(tester);
+    });
+
+    testWidgets('a party that starts while its pin is on screen picks one up', (tester) async {
+      final pin = _pin(id: 'p', title: 'Σε λίγο', startsAt: start, endsAt: end, goingCount: 40);
+
+      await _pumpPin(tester, pin, start.subtract(const Duration(minutes: 1)));
+      expect(_runningTickers(tester), 0);
+
+      // The same pin object, a later clock — which is exactly what a rebuild
+      // across the 500ms pan debounce hands the widget.
+      await _pumpPin(tester, pin, start.add(const Duration(minutes: 1)));
+      expect(_runningTickers(tester), 1);
+
+      await _teardown(tester);
+    });
+
+    testWidgets('a party that ends while its pin is on screen gives it back', (tester) async {
+      // The half that a `late final` controller could never do. A pin outlives
+      // its party — the map holds its pins until the next fetch — so the
+      // ticker has to be disposed on the way down as well as created on the
+      // way up.
+      final pin = _pin(id: 'p', title: 'Τέλος', startsAt: start, endsAt: end, goingCount: 40);
+
+      await _pumpPin(tester, pin, end.subtract(const Duration(minutes: 1)));
+      expect(_runningTickers(tester), 1);
+
+      await _pumpPin(tester, pin, end.add(const Duration(minutes: 1)));
+      expect(_runningTickers(tester), 0);
+
+      await _teardown(tester);
+    });
+
+    testWidgets('and can pick one up again after giving it back', (tester) async {
+      // Recreating a controller on the same State is why this uses
+      // TickerProviderStateMixin: the single-ticker mixin asserts on the
+      // second createTicker, and a pin crossing a boundary twice is ordinary.
+      final pin = _pin(id: 'p', title: 'Ξανά', startsAt: start, endsAt: end, goingCount: 40);
+
+      await _pumpPin(tester, pin, start.add(const Duration(hours: 1)));
+      await _pumpPin(tester, pin, end.add(const Duration(hours: 1)));
+      await _pumpPin(tester, pin, start.add(const Duration(hours: 2)));
+
+      expect(_runningTickers(tester), 1);
+      await _teardown(tester);
+    });
+  });
+
+  group('MpMapPin label row', () {
+    final start = DateTime.parse('2026-08-21T20:00:00Z');
+
+    testWidgets('the count truncates at the smallest tier rather than overflowing', (tester) async {
+      // Asserted at the SMALL tier deliberately. It has the least labelWidth
+      // of the three, so it is the tier that overflows first — and it is also
+      // the one nobody looks at, because a small party is the boring case.
+      // The row overflowed for real once already, at counts the payload fix
+      // made reachable for the first time; a shape whose width now varies per
+      // tier reopens that at every step of the ladder.
+      //
+      // `didExceedMaxLines` is the assertion, not the absence of a red box: a
+      // RenderFlex overflow fails the test by itself, but so would a layout
+      // that merely happened to fit, and that would stop testing anything the
+      // moment a font changed.
+      final pin = _pin(
+        id: 'p',
+        title: 'Ταράτσα στο Κουκάκι',
+        startsAt: start,
+        interestedCount: mpPinMediumFrom - 1,
+      );
+
+      await _pumpPin(tester, pin, start.subtract(const Duration(hours: 1)));
+
+      expect(MpPinMetrics.forPin(pin, start.subtract(const Duration(hours: 1))).tier, MpPinTier.small);
+
+      final meta = _paragraph(tester, '${mpPinMediumFrom - 1} ενδ.');
+      expect(meta.didExceedMaxLines, isTrue);
+      expect(meta.size.width, lessThanOrEqualTo(MpPinMetrics.forCount(mpPinMediumFrom - 1).labelWidth));
+
+      final title = _paragraph(tester, 'Ταράτσα στο Κουκάκι');
+      expect(title.didExceedMaxLines, isTrue);
+
+      await _teardown(tester);
+    });
+
+    testWidgets('a four-digit live count still fits its pin at every tier', (tester) async {
+      // The width formula saturates ~26px into a tier, so the label is not
+      // rescued by a bigger pin however big the party gets. Each of these
+      // would throw a RenderFlex overflow if the Flexible were dropped.
+      for (final count in [0, 7, mpPinMediumFrom, 99, mpPinLargeFrom, 4237]) {
+        final pin = _pin(id: 'p', title: 'Techno Noir Warehouse', startsAt: start, goingCount: count);
+
+        await _pumpPin(tester, pin, start.add(const Duration(hours: 1)));
+
+        expect(find.text('$count μέσα'), findsOneWidget, reason: 'count $count');
+        expect(tester.takeException(), isNull, reason: 'count $count overflowed its pin');
+      }
+
+      await _teardown(tester);
+    });
+  });
+
   group('MapScreen', () {
     testWidgets('draws a pin per row, with the counter that matches its tense', (tester) async {
       final now = DateTime.now();
@@ -235,35 +451,116 @@ void main() {
       await _teardown(tester);
     });
 
-    testWidgets('pin width scales with the count instead of being uniform', (tester) async {
+    testWidgets('a screen of pins that are not live runs no tickers', (tester) async {
+      // The screen-level form of the pulse-lifecycle tests: this is the number
+      // that used to equal the pin count, whatever the pins were doing.
+      final now = DateTime.now();
+      final repository = _FakePartyRepository([
+        for (var i = 0; i < 4; i++)
+          _pin(
+            id: 'upcoming_$i',
+            title: 'Αύριο $i',
+            startsAt: now.add(const Duration(days: 1)),
+            interestedCount: 8 * i,
+            latOffset: 0.0005 * i,
+          ),
+      ]);
+
+      await _mount(tester, repository);
+
+      expect(find.byType(MpMapPin), findsNWidgets(4));
+      expect(_runningTickers(tester), 0);
+
+      await _teardown(tester);
+    });
+
+    testWidgets('pin size steps by tier instead of being uniform', (tester) async {
       final now = DateTime.now();
       final repository = _FakePartyRepository([
         _pin(id: 'small', title: 'Μικρό', startsAt: now.add(const Duration(days: 1)), interestedCount: 1),
         _pin(
-          id: 'big',
+          id: 'medium',
+          title: 'Μεσαίο',
+          startsAt: now.add(const Duration(days: 1)),
+          interestedCount: 40,
+          latOffset: 0.001,
+        ),
+        _pin(
+          id: 'large',
           title: 'Μεγάλο',
           startsAt: now.add(const Duration(days: 1)),
           interestedCount: 400,
-          latOffset: 0.001,
+          latOffset: 0.002,
         ),
       ]);
 
       await _mount(tester, repository);
 
-      final small = tester.getSize(find.ancestor(
-        of: find.text('Μικρό'),
-        matching: find.byType(MpMapPin),
-      ));
-      final big = tester.getSize(find.ancestor(
-        of: find.text('Μεγάλο'),
-        matching: find.byType(MpMapPin),
-      ));
+      Size sizeOf(String title) => tester.getSize(find.ancestor(
+            of: find.text(title),
+            matching: find.byType(MpMapPin),
+          ));
 
-      // mpPinWidth is `112 + min(26, sqrt(pop) * 1.9)`, so this is the whole
-      // observable range. Every pin was 112 wide before the payload fix,
-      // because every count was 0.
-      expect(small.width, lessThan(big.width));
-      expect(big.width, 112 + 26);
+      final small = sizeOf('Μικρό');
+      final medium = sizeOf('Μεσαίο');
+      final large = sizeOf('Μεγάλο');
+
+      // Height is the tier and nothing else — it does not vary within one —
+      // so it is the cleaner assertion that three tiers really rendered.
+      // Every pin was 112x52 before, because every count was 0.
+      expect(small.height, 38 + MpPinMetrics.pulseHeadroom);
+      expect(medium.height, 46 + MpPinMetrics.pulseHeadroom);
+      expect(large.height, 56 + MpPinMetrics.pulseHeadroom);
+
+      // Width additionally grows inside a tier: 96 + min(14, sqrt(1)*2.9),
+      // 112 + min(20, sqrt(40)*2.0), 132 + min(26, sqrt(400)*1.9) — the last
+      // saturated, which is the whole observable range of the top tier.
+      expect(small.width, closeTo(98.9, 0.05));
+      expect(medium.width, closeTo(124.65, 0.05));
+      expect(large.width, 132 + 26);
+
+      await _teardown(tester);
+    });
+
+    testWidgets('the marker box is the size the pin actually draws at', (tester) async {
+      // Two derivations of one number: the Marker declares its box and the
+      // pill declares its extent. They used to come from two separate
+      // DateTime.now() calls, so a party crossing its start time between them
+      // would have been sized as upcoming in one and live in the other — and
+      // a marker narrower than its pill clips it. Same instant now, passed
+      // down.
+      final now = DateTime.now();
+      final repository = _FakePartyRepository([
+        _pin(
+          id: 'live',
+          title: 'Τώρα',
+          startsAt: now.subtract(const Duration(minutes: 1)),
+          goingCount: 300,
+          interestedCount: 2,
+        ),
+      ]);
+
+      await _mount(tester, repository);
+
+      // MarkerLayer wraps each child in a `Positioned(width:, height:)`, which
+      // is a *tight* constraint — so this box is not merely around the pin,
+      // it dictates the pin's size, and a box derived from the wrong tense
+      // would squash the pill rather than sit loosely around it.
+      final box = tester.widget<Positioned>(find
+          .ancestor(of: find.byType(MpMapPin), matching: find.byType(Positioned))
+          .first);
+      final expected = MpPinMetrics.forCount(300);
+
+      expect(box.width, expected.width);
+      expect(box.height, expected.boxHeight);
+      expect(tester.getSize(find.byType(MpMapPin)), Size(expected.width, expected.boxHeight));
+
+      // And it is the live tier, not the interested one: 300 going, 2
+      // interested. Had the screen sized the box off the wrong counter, the
+      // pin would be squeezed into a 38px-tall small-tier box here.
+      expect(expected.tier, MpPinTier.large);
+      expect(box.height, 56 + MpPinMetrics.pulseHeadroom);
+      expect(tester.takeException(), isNull);
 
       await _teardown(tester);
     });
