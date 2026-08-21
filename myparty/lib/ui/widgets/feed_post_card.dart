@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../data/feed_repository.dart';
 import '../../models/feed_post.dart';
-import '../../models/mp_party.dart';
 import '../../utils/greek_date.dart';
 import '../theme/app_theme.dart';
 import 'diagonal_placeholder.dart';
@@ -149,7 +148,7 @@ class FeedPostCard extends StatelessWidget {
                     ),
                     const SizedBox(width: 6),
                     PrivacyBadge(
-                      type: post.partyIsPrivate ? MpPartyType.private : MpPartyType.public,
+                      isPrivate: post.partyIsPrivate,
                     ),
                   ],
                 ),

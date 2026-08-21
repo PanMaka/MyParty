@@ -119,7 +119,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.text('Ακολουθείς'), findsOneWidget);
+    expect(find.text('Following'), findsOneWidget);
   });
 
   testWidgets('tapping follows and flips the label', (tester) async {
@@ -130,13 +130,13 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.text('Ακολούθησε'), findsOneWidget);
+    expect(find.text('Follow'), findsOneWidget);
 
     await tester.tap(find.byType(FollowButton));
     await tester.pumpAndSettle();
 
     expect(repo.followCalls, 1);
-    expect(find.text('Ακολουθείς'), findsOneWidget);
+    expect(find.text('Following'), findsOneWidget);
   });
 
   testWidgets('tapping again unfollows', (tester) async {
@@ -151,7 +151,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(repo.unfollowCalls, 1);
-    expect(find.text('Ακολούθησε'), findsOneWidget);
+    expect(find.text('Follow'), findsOneWidget);
   });
 
   testWidgets('rolls the optimistic flip back when the write is rejected', (tester) async {
@@ -168,8 +168,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(repo.followCalls, 1);
-    expect(find.text('Ακολούθησε'), findsOneWidget);
-    expect(find.text('Δεν έγινε. Δοκίμασε ξανά.'), findsOneWidget);
+    expect(find.text('Follow'), findsOneWidget);
+    expect(find.text('That did not work. Try again.'), findsOneWidget);
   });
 
   testWidgets('the feed renders real posts, not the old hardcoded card', (tester) async {

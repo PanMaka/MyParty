@@ -15,6 +15,29 @@ select plan(29);
 -- ============================================================
 -- follows: the graph itself
 -- ============================================================
+
+-- Captured BEFORE the first edge is created, and before any persona switch.
+--
+-- The host's follower_count used to be asserted as a literal 1, which was only
+-- ever correct because seed.sql seeded no follows at all. It now seeds a graph
+-- (the profile screen renders these counters, and 0/0 is unreadable), so the
+-- thing this file actually tests -- "the trigger moves the counter by exactly
+-- one" -- has to be expressed as a delta or it is testing the seed instead.
+--
+-- Read as postgres rather than as one of the personas: the profiles SELECT
+-- policy is block-filtered, and a baseline captured through a filter that the
+-- assertions later change is not a baseline (gotcha #17).
+create temp table phase3_baseline as
+select
+  (select follower_count from public.profiles
+   where id = '11111111-1111-1111-1111-111111111111') as host_followers;
+
+-- Owned by postgres, because that is who captured it -- and read later while
+-- the session role is `authenticated`, which holds no privilege on it. (Test
+-- 11's equivalent needs no grant only because it is created AS authenticated,
+-- which is exactly the filtered read this one is avoiding.)
+grant select on phase3_baseline to public;
+
 select tests.authenticate_as('44444444-4444-4444-4444-444444444444'); -- stranger
 
 insert into public.follows (follower_id, followee_id) values
@@ -35,7 +58,7 @@ select is(
 
 select is(
   (select follower_count from public.profiles where id = '11111111-1111-1111-1111-111111111111'),
-  1,
+  (select host_followers + 1 from phase3_baseline),
   'follower_count ticks up on the followee'
 );
 
@@ -106,10 +129,14 @@ select is_empty(
   'blocking deletes the follow edges in BOTH directions'
 );
 
+-- baseline + 1, not baseline + 2: the host arrived here with stranger's follow
+-- AND blocked_user's, and the block just purged one of them. The seeded
+-- followers are untouched, which is the other half of what this asserts --
+-- the purge is pair-scoped, not "drop everyone".
 select is(
   (select follower_count from public.profiles where id = '11111111-1111-1111-1111-111111111111'),
-  1,
-  'the purge cascades into the counter trigger (host keeps only stranger''s follow)'
+  (select host_followers + 1 from phase3_baseline),
+  'the purge cascades into the counter trigger (host keeps stranger''s follow and the seeded ones, loses blocked_user''s)'
 );
 
 select throws_ok(

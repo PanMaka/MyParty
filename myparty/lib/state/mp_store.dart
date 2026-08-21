@@ -27,12 +27,13 @@ class MpStore extends ChangeNotifier {
     'kapsimo': false,
     'nefeli': true,
   };
-  final Map<String, bool> _invited = {
-    'eleni': true,
-    'aris': true,
-    'zoi': false,
-    'lefteris': false,
-  };
+  // _invited / invited / toggleInvited / invitedCount lived here until Phase 11
+  // and were already unreachable when they were removed: the host wizard keeps
+  // its own `Set<String> _invited` of real profile uuids from
+  // SocialRepository.fetchFollowing, and its done screen's `invitedCount` is a
+  // constructor parameter on a private widget, not this getter. The keys here
+  // were mock handles ('eleni', 'aris') that no table could ever match.
+  //
   // _mapVisible / toggleMapVisible lived here until Phase 8. They are gone
   // rather than migrated: the real setting is profiles.map_visibility, which is
   // three tiers instead of two and is read by get_parties_near_user, so keeping
@@ -47,8 +48,6 @@ class MpStore extends ChangeNotifier {
   int hypeOf(String id) => _hype[id] ?? 0;
   bool interestedIn(String id) => _interested[id] ?? false;
   bool get copied => _copied;
-  bool invited(String friendId) => _invited[friendId] ?? false;
-  int get invitedCount => _invited.values.where((v) => v).length;
 
   void bump(String id, int amount) {
     _hype[id] = math.min(100, (_hype[id] ?? 0) + amount);
@@ -61,11 +60,6 @@ class MpStore extends ChangeNotifier {
     if (next && hypeBumpOnJoin > 0) {
       _hype[id] = math.min(100, (_hype[id] ?? 0) + hypeBumpOnJoin);
     }
-    notifyListeners();
-  }
-
-  void toggleInvited(String friendId) {
-    _invited[friendId] = !(_invited[friendId] ?? false);
     notifyListeners();
   }
 
