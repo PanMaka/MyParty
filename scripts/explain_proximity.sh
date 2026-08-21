@@ -2,6 +2,33 @@
 # Phase 7b deliverable: the query plans for both spatial queries, with proof
 # that the GiST indexes are actually being used.
 #
+# ############################################################################
+# # THIS IS NOT AN ACCEPTANCE CHECK FOR ANY RLS CHANGE. DO NOT USE IT AS ONE. #
+# ############################################################################
+#
+# Every EXPLAIN below runs as `postgres`, so row security is bypassed
+# entirely. That is CORRECT for what this script measures -- the proximity
+# notification engine is SECURITY DEFINER (enqueue_nearby_party_notifications,
+# prosecdef = t) and genuinely runs with no policy in its path, so measuring it
+# through RLS would measure a query the engine never issues. Do not "fix" this
+# by authenticating; that would be the same error in reverse.
+#
+# The trap is what follows from it. Query 2 prints
+#
+#   Index Scan using parties_location on parties p
+#     Index Cond: ((location && _st_expand(<point>, 5000)) AND (... 500))
+#
+# and prints it IDENTICALLY whatever the `parties` SELECT policy says --
+# including when that policy has just been rewritten, and including when the
+# rewrite achieved nothing. Phase 12's brief named this script as the
+# structural acceptance criterion for a policy rewrite (§7.3); following that
+# would have certified a no-op as a success, because the line it demanded was
+# already there before the migration.
+#
+# The rule: anything claiming to measure an RLS effect must run through
+# tests.authenticate_as. scripts/loadtest_map_query.sh and
+# scripts/explain_policy_pushdown.sh both do. This one deliberately does not.
+#
 # Why this is a script and not a pgTAP assertion.
 #
 # `supabase db reset` leaves 22 parties and zero devices. At that size a
