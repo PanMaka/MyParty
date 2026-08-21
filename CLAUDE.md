@@ -11,7 +11,9 @@ Session-by-session task scripts: `docs/MyParty-ClaudeCode-Prompts.md`.
 `stories`/`story_views`/`user_devices`/`sent_notifications`/
 `notification_jobs` tables with RLS;
 `get_parties_near_user` RPC
-(tier/zoom-filtered map query), called live from `MapScreen`;
+(tier/zoom-filtered map query, `p_limit` defaulting to 200 and clamped to
+[1, 500], `authenticated`-only since `20260821175831`), called live from
+`MapScreen` through `PartyRepository.fetchPartiesNearUser`;
 `create_party_with_invites`; `get_feed`, `get_post_comments`, `get_messages`,
 `get_party_chats` and `get_party_stories`/`get_story_rails` (all
 keyset-paginated or time-bounded, all invoker-rights so RLS does the
@@ -463,6 +465,36 @@ policy rewrite are in `docs/phase-10-hardening-audit.md`. Do not drop
     is why every past party in `seed.sql` carries one and says so in a comment.
     The failure is silent and cumulative — nothing errors, the map just slowly
     fills with parties that are over.
+
+22. **Leakproofness decides which of your filters run before the policy, and
+    it is the single fact that prices every new predicate on `parties`.**
+    Gotcha 19 is the special case; this is the rule. A non-leakproof operator
+    may not be evaluated ahead of an RLS qual, so it lands *behind*
+    `can_access_party` and filters rows that have already paid for it. A
+    leakproof one runs first and shrinks the input. Read off `pg_proc` on this
+    database:
+
+    | predicate | `proleakproof` | where it runs |
+    |---|---|---|
+    | `timestamptz_gt` / `_lt` / `_ge` | **true** | before the policy |
+    | `st_dwithin` | false | after — gotcha 19 |
+    | `textlike` / `texticlike` (`like`/`ilike`) | false | after |
+
+    Two consequences, both load-bearing for the map rework:
+
+    - **Time filtering is free, and better than free.** The Τώρα / Αργότερα /
+      Το ΣΚ chips can push `starts_at`/`ends_at` predicates into
+      `get_parties_near_user` and they will cut the row count *before*
+      `can_access_party` is called on each row — the same mechanism that makes
+      the 500km tier (208ms, cheap non-leaky `party_tier` filter first) six
+      times faster than the 5km tier (995ms, no cheap pre-filter at all).
+    - **Search must wait for the policy rewrite.** An `ilike` on
+      `parties.title` or `parties.area` has exactly `st_dwithin`'s failure
+      mode: it sits behind the barrier, seq-scans, and cannot reach an index —
+      so adding `pg_trgm` or a `tsvector` column first would buy nothing, and
+      measuring the search against a 995ms floor would teach the wrong lesson
+      about it. **§5 of `docs/phase-10-hardening-audit.md` goes before search,
+      not after.** Sequencing decided 2026-08-21.
 
 ## Migration naming
 
