@@ -157,30 +157,96 @@ both do.
 
 ---
 
-## 5. What would actually reach the index
+## 5. The three routes, measured
 
-Not proposals — the measured options, in rough order of blast radius.
+**Recommendation: route 2.** It is the only one that leaves the privacy story
+where it is, and it gets 96% of route 1's benefit.
 
-1. **Take the spatial scan out of RLS.** Make `get_parties_near_user`
-   `SECURITY DEFINER` and apply visibility explicitly in its body. Variant D
-   is that plan: ~2 ms, a 100× on today. It moves the visibility rule into a
-   third place, so it needs the same equivalence treatment
-   `17_parties_policy.test.sql` gives the second one — which is now a pattern
-   to copy rather than an argument to have.
-2. **A leakproof, indexable pre-filter.** Gotcha 22 measured a `starts_at`
-   window taking the map body 1483 ms → 42 ms purely by sorting ahead of the
-   policy, and the Τώρα / Αργότερα / Το ΣΚ chips push exactly such a predicate.
-   Plain `float8` lat/lon columns with a btree index would let a bounding box
-   do the same thing spatially, since `float8gt`/`float8lt` are leakproof where
-   `geography_overlaps` is not. Cheaper than option 1 and complementary to it.
-3. **Mark the PostGIS operators `LEAKPROOF`.** One `alter function`, superuser
-   only. It is a real security judgement, not a flag flip: leakproof asserts
-   the function cannot reveal argument values through error messages, and the
-   arguments here are rows the caller may not be allowed to see. Cheapest to
-   type, hardest to justify.
+### Route 3 — mark the PostGIS operators `LEAKPROOF`: **ruled out, not a judgement call**
+
+```
+postgres=> alter function public.st_dwithin(geography,geography,double precision,boolean) leakproof;
+ERROR:  must be owner of function public.st_dwithin
+```
+
+`ALTER FUNCTION … LEAKPROOF` is superuser-only, `st_dwithin` is owned by
+`supabase_admin`, and `postgres` is not a member of it — locally *or* hosted.
+This is the same shape as gotcha 9's `spatial_ref_sys` exception: not something
+a migration can do. Which is just as well, because it was also the one option
+with a real security cost — `LEAKPROOF` asserts a function cannot reveal its
+arguments through error messages, and its arguments here are rows the caller is
+not allowed to see.
+
+### Route 2 — a leakproof, indexable pre-filter: **9.3 ms, measured**
+
+Variant E of `scripts/explain_policy_pushdown.sh`, at 10k parties, **with the
+shipped policy completely untouched**:
+
+| | scan on `parties` | rows into the policy | buffers | exec |
+|---|---|---|---|---|
+| shipped policy, spatial predicate only | Seq Scan | 10,022 | 28,868 | 205.0 ms |
+| **+ leakproof bounding box** | **Index Scan on `parties_lat_lon_idx`** | **430** | **1,646** | **9.3 ms** |
+
+Same 264 rows out of both. `lat`/`lon` are `GENERATED ALWAYS … STORED` columns
+off `location`, so they cannot drift from it and need no trigger; the box bounds
+are scalar subqueries, so they are computed once as InitPlans and the per-row
+predicate stays a plain `float8` comparison against a constant — leakproof,
+therefore promoted ahead of the policy, therefore indexable. Buffers is the
+honest metric: 28,868 → 1,646 is `is_blocked` being called ~430 times instead of
+~10,000.
+
+This is the same mechanism as the time-filter chips, applied spatially, and the
+two compose.
+
+> **The sharp edge, and it drew blood.** The box must be a *provable superset*
+> of the circle. The first attempt used `5000 / 111320 = 0.0449°` of latitude
+> and returned **298** rows where the unfiltered query returned **299** —
+> `st_dwithin` on `geography` measures on the WGS84 spheroid, where a degree of
+> latitude at 38°N is ~110,996 m, so 5000 m is 0.04501° and the box silently
+> clipped a real party off the map. A correctness bug wearing a speedup
+> costume. Derive the bounds from PostGIS (`st_envelope` of a geodesic
+> `st_buffer`, padded) rather than typing degrees, and keep the equal-count
+> assertion — it is what caught this.
+
+Note what route 2 does **not** do: it reaches a new btree, not
+`parties_location`. The GiST index stays unreachable under RLS, so §7.3's
+literal criterion is unmet here too. The criterion was the wrong target; the
+row count reaching the policy is the right one.
+
+### Route 1 — take the scan out of RLS: ~2 ms, and the whole privacy story moves
+
+Make `get_parties_near_user` `SECURITY DEFINER` and filter visibility explicitly
+in its body. Variant D is that plan: ~2 ms.
+
+It is a bigger change than it looks, and the reason is in the variant-A plan
+above: the map query joins `profiles`, and the `profiles` row policy is
+contributing `NOT is_blocked((select auth.uid()), id)` to that join today. Going
+definer switches off **both** tables' policies inside the function, so the RPC
+would have to reimplement the `parties` rule *and* the `profiles` block filter.
+That is a third and a fourth copy of visibility logic, not a third.
+
+The deeper cost is that the `parties` policy is currently a **backstop for
+every read path** — PostgREST table reads, the other seven policies that join
+through it, any future query nobody has written yet. A definer RPC is only as
+correct as its own `where` clause, and a bug in it has nothing underneath. Today
+a bug in the RPC is caught by the policy; that is defence in depth, and route 1
+spends it to save 7 ms.
+
+If it is ever taken, the equivalence-assertion pattern in
+`17_parties_policy.test.sql` is the thing that makes it survivable, and it is
+now a pattern to copy rather than an argument to have.
+
+### Sequencing
+
+Route 2 first — it is additive, reversible, changes no visibility rule, and is
+measured. Re-measure route 1 only if 9 ms is not enough, at which point the
+question is worth asking with real numbers instead of a 100× headline.
 
 **Search (Phase 13) is still blocked, and for the unchanged reason.** An
 `ilike` on `title`/`area` has `st_dwithin`'s exact failure mode — non-leakproof,
 therefore behind the barrier, therefore unable to reach a `pg_trgm` index. The
 hoist lowered the floor it would be measured against from 995 ms to 199 ms but
-did not remove it. Option 1 or 2 above is the real unblock.
+removed nothing structural. Route 2 is the unblock, and note it does not unblock
+search *by itself*: a bounding box shrinks the input to a search predicate, but
+a text search with no spatial bound is still a seq scan. Search needs either its
+own leakproof pre-filter or route 1.

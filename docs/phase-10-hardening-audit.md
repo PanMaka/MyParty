@@ -210,6 +210,37 @@ queries to answer a question that has one answer.
 
 ## 5. Load test — and what breaks first
 
+> ### Correction, added after Phase 12 executed this section's proposal
+>
+> **The measurements below are sound. The causal claim built on them is not,
+> and the policy rewrite this section proposes does not do what it says.**
+>
+> This section concludes that the row policy is expensive, that its expense is
+> what defeats the GiST index, and that hoisting terms out of
+> `can_user_access_party` would therefore restore the index. The first is true;
+> the second does not follow; the third is false. Phase 12 shipped the hoist
+> (`20260821185216`): 5km p50 **995 ms → 199 ms**, and the plan is still
+> `Seq Scan on parties` with `st_dwithin` in the Filter.
+>
+> Policy cost and index reachability are two separate consequences of one
+> barrier. Whether a user qual may be evaluated ahead of an RLS qual — which is
+> what an `Index Cond` requires — depends on the leakproofness of **the user
+> qual**, not on the policy's cost and not on the policy's own leakproofness.
+> `st_dwithin`, `_st_expand` and `geography_overlaps` are all
+> `proleakproof = f`, so the spatial predicate can never sort ahead of *any*
+> policy on `parties`. Proven by `scripts/explain_policy_pushdown.sh`: even
+> `using (not is_private)` — one leakproof column reference — still leaves
+> `st_dwithin` as a Filter. Only a folded-away `using (true)` and RLS-off reach
+> the index.
+>
+> `parties_location` still must not be dropped, but the reason has changed: it
+> is reached today by the **notification engine**, which is `SECURITY DEFINER`,
+> not by a map query that might one day.
+>
+> Full result and the routes that do work:
+> [`phase-12-policy-rewrite-result.md`](phase-12-policy-rewrite-result.md).
+> The corrected brief: [`phase-12-parties-policy-rewrite.md`](phase-12-parties-policy-rewrite.md).
+
 10,022 parties · 50,112 rsvps · 5,006 profiles · 200 follows · 108 invitations.
 Measured as an authenticated viewer with RLS in force, 100 samples per cell,
 two interleaved rounds so drift lands on every variant equally.

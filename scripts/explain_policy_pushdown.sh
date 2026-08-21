@@ -195,6 +195,91 @@ explain (analyze, buffers, costs off, timing off)
   select * from public.map_query_stable(:lon, :lat, 5000);
 
 \echo ''
+\echo '=== E: the shipped policy + a LEAKPROOF float8 bounding box ==============='
+\echo '--- The route that actually works, and the one variant here that is a'
+\echo '--- proposal rather than a diagnostic. The policy is untouched -- still the'
+\echo '--- full hoist, still every visibility term -- but `lat`/`lon` are GENERATED'
+\echo '--- ALWAYS columns off `location` (so they cannot drift) and float8ge/le ARE'
+\echo '--- leakproof, so the box sorts AHEAD of the policy and shrinks its input.'
+\echo '--- Compare `Rows Removed by Filter` and buffers against the baseline: that'
+\echo '--- is is_blocked() call count, which is what actually costs.'
+reset role;
+alter policy "Parties are viewable based on privacy and invitations"
+  on public.parties using (
+    not public.is_blocked((select auth.uid()), host_id)
+    and (
+      not is_private
+      or host_id = (select auth.uid())
+      or public.can_access_party(id)
+    )
+  );
+alter table public.parties
+  add column lat double precision generated always as (st_y(location::geometry)) stored,
+  add column lon double precision generated always as (st_x(location::geometry)) stored;
+create index parties_lat_lon_idx on public.parties (lat, lon);
+analyze public.parties;
+
+-- The search box, derived and padded. st_buffer on geography is geodesic, so
+-- its envelope is the circle's true lon/lat extent; st_expand adds ~110m of
+-- slack to absorb the buffer polygon's approximation of a circle. Over-padding
+-- costs a few extra rows through the filter; under-padding drops parties.
+create view box as
+select st_expand(
+         st_envelope(st_buffer(st_point(:lon, :lat)::geography, 5000)::geometry),
+         0.001) as b;
+grant select on box to authenticated;
+
+select tests.authenticate_as((select id from push_viewer));
+
+\echo ''
+\echo '--- E1 baseline: shipped policy, spatial predicate only (for comparison)'
+explain (analyze, buffers, costs off, timing off)
+select count(*) from public.parties p
+where p.status = 'published'
+  and public.st_dwithin(p.location, st_point(:lon, :lat)::geography, 5000);
+
+\echo ''
+\echo '--- E2: identical, plus the leakproof bounding box.'
+\echo '---'
+\echo '--- THE SHARP EDGE OF THIS ROUTE. The box MUST be a provable superset of'
+\echo '--- the circle, and hand-computed degree constants are not. A first attempt'
+\echo '--- used 5000/111320 = 0.0449 deg of latitude and returned 298 rows where'
+\echo '--- the unfiltered query returns 299: st_dwithin on GEOGRAPHY measures on'
+\echo '--- the WGS84 spheroid, where a degree of latitude at 38N is ~110996m, not'
+\echo '--- 111320 -- so 5000m is 0.04501 deg and the box clipped a real party off'
+\echo '--- the map. Silently. That is a correctness bug wearing a speedup costume,'
+\echo '--- and the equal-count assertion below is what catches it.'
+\echo '---'
+\echo '--- So the bounds are DERIVED from PostGIS, not typed in: the envelope of a'
+\echo '--- geodesic buffer, padded. They are scalar subqueries, so they are'
+\echo '--- computed once as InitPlans -- the per-row predicate stays a plain'
+\echo '--- float8 comparison against a constant, which is what keeps it leakproof'
+\echo '--- and indexable.'
+explain (analyze, buffers, costs off, timing off)
+select count(*) from public.parties p
+where p.lat between (select st_ymin(b) from box) and (select st_ymax(b) from box)
+  and p.lon between (select st_xmin(b) from box) and (select st_xmax(b) from box)
+  and p.status = 'published'
+  and public.st_dwithin(p.location, st_point(:lon, :lat)::geography, 5000);
+
+\echo ''
+\echo '--- Both must return the SAME count. The box is a superset of the circle,'
+\echo '--- so st_dwithin still does the real filtering -- the box only feeds it'
+\echo '--- fewer rows. A box that changed the answer would be a bug, not a'
+\echo '--- speedup.'
+reset role;
+select tests.authenticate_as((select id from push_viewer));
+select
+  (select count(*) from public.parties p
+   where p.status = 'published'
+     and public.st_dwithin(p.location, st_point(:lon, :lat)::geography, 5000)) as without_box,
+  (select count(*) from public.parties p
+   where p.lat between (select st_ymin(b) from box) and (select st_ymax(b) from box)
+     and p.lon between (select st_xmin(b) from box) and (select st_xmax(b) from box)
+     and p.status = 'published'
+     and public.st_dwithin(p.location, st_point(:lon, :lat)::geography, 5000)) as with_box;
+
+\echo ''
 \echo '=== Index scans, counted independently of the plan text ==================='
 \echo '--- pg_stat_get_xact_numscans is transaction-local, so this counts only'
 \echo '--- the four EXPLAINs above. Expect a small number: one scan, from D.'
