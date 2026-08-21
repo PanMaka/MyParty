@@ -92,8 +92,27 @@ class _FakeSocialRepository extends SocialRepository {
 
   final List<Profile> following;
 
+  /// Every follow-graph method the screen reached for, in order. The public
+  /// preview's follow button must add nothing to it — see the ΔΗΜΟΣΙΑ preview
+  /// test. `fetchFollowing` is deliberately not recorded: it is the ΑΚΟΛΟΥΘΕΙ
+  /// rail's own load, it runs on every profile, and counting it here would
+  /// drown the one signal this list exists for.
+  final List<String> calls = [];
+
   @override
   Future<List<Profile>> fetchFollowing({String? userId}) async => following;
+
+  @override
+  Future<bool> isFollowing(String userId) async {
+    calls.add('isFollowing:$userId');
+    return false;
+  }
+
+  @override
+  Future<void> follow(String userId) async => calls.add('follow:$userId');
+
+  @override
+  Future<void> unfollow(String userId) async => calls.add('unfollow:$userId');
 }
 
 /// [PartyRepository] had to move to a lazily-resolved client before this was
@@ -345,24 +364,63 @@ void main() {
   });
 
   group('self vs other', () {
-    testWidgets('the owner never sees a follow button or a report menu', (tester) async {
+    testWidgets('the owner gets their own pair, and no relationship actions', (tester) async {
       await _pumpProfile(tester, _FakeProfileRepository());
 
-      // Not even in the public preview, which is the state the old
-      // `bool _selfView` + nullable id combination could not rule out.
+      expect(find.text('Host a party'), findsOneWidget);
+      expect(find.text('Edit profile'), findsOneWidget);
+
+      expect(find.byType(FollowButton), findsNothing);
+      expect(find.byType(FollowButtonPreview), findsNothing);
+      expect(find.byType(PopupMenuButton<String>), findsNothing);
+      expect(find.text('Message'), findsNothing);
+    });
+
+    testWidgets('the public preview draws the visitor row instead', (tester) async {
+      await _pumpProfile(tester, _FakeProfileRepository());
+
       await tester.tap(find.text('PUBLIC'));
       await tester.pumpAndSettle();
 
-      expect(find.byType(FollowButton), findsNothing);
-      expect(find.byType(PopupMenuButton<String>), findsNothing);
-      expect(find.text('Message'), findsNothing);
+      // The two things a visitor provably cannot do are gone, which is the
+      // whole point of a preview: it has to be wrong about nothing.
+      expect(find.text('Host a party'), findsNothing);
+      expect(find.text('Edit profile'), findsNothing);
 
-      // The owner's own pair renders instead, in the public preview too: the
-      // action row switches on the ProfileTarget's TYPE and deliberately
-      // ignores previewingPublicView, because previewing your public profile
-      // does not make you a stranger to yourself.
-      expect(find.text('Host a party'), findsOneWidget);
-      expect(find.text('Edit profile'), findsOneWidget);
+      expect(find.byType(FollowButtonPreview), findsOneWidget);
+      expect(find.text('Message'), findsOneWidget);
+    });
+
+    testWidgets('the previewed follow button is a drawing, not a follow', (tester) async {
+      final social = _FakeSocialRepository();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ProfileScreen(
+            repository: _FakeProfileRepository(),
+            social: social,
+            parties: _FakePartyRepository(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('PUBLIC'));
+      await tester.pumpAndSettle();
+
+      // Never the live widget: it would ask isFollowing about the viewer
+      // themself on mount, and offer a self-follow the `follows` INSERT policy
+      // refuses — a failure snackbar for the database being right.
+      expect(find.byType(FollowButton), findsNothing);
+
+      await tester.tap(find.byType(FollowButtonPreview));
+      await tester.pumpAndSettle();
+
+      // Tapping it reaches nothing at all. Asserted against the repository
+      // rather than against the rendered label, because a button that flipped
+      // to "Ακολουθείς" locally and wrote nothing would look correct here and
+      // still be the bug.
+      expect(social.calls, isEmpty);
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('another user gets the relationship actions', (tester) async {

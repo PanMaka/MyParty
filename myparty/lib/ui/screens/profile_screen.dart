@@ -49,10 +49,15 @@ sealed class ProfileTarget {
   /// gear, which [OwnProfile] gates on its own.
   bool get showsOwnerSections;
 
-  /// Whether the follow button and the report menu render.
+  /// Whether the follow button and the report menu render **and work**.
   ///
   /// True only on another user's profile. You cannot follow or report yourself,
   /// and no value of this type makes both this and [showsOwnerSections] true.
+  ///
+  /// The owner's public preview draws a follow button and stays false here.
+  /// That is not a contradiction: the preview renders an inert lookalike, and
+  /// this flag guards the wiring — a repository call and a write against a real
+  /// relationship — not the pixels.
   bool get showsRelationshipActions;
 }
 
@@ -61,9 +66,17 @@ sealed class ProfileTarget {
 final class OwnProfile extends ProfileTarget {
   const OwnProfile({this.previewingPublicView = false});
 
-  /// The ME / PUBLIC segment. Changes which sections render, and nothing else
-  /// — previewing your public profile does not make you a stranger to yourself,
-  /// so the relationship actions stay off.
+  /// The ME / PUBLIC segment.
+  ///
+  /// Changes which sections render, and — since the preview is supposed to
+  /// answer "what does a visitor see" — what the action row draws: a visitor
+  /// gets a follow button, never "Host a party" and "Edit profile", so the
+  /// preview draws a follow button too.
+  ///
+  /// It is a drawing, not a relationship. [showsRelationshipActions] stays
+  /// false here, because you cannot follow, message or report yourself and
+  /// nothing in the preview may reach the database on your own row. See
+  /// [FollowButtonPreview].
   final bool previewingPublicView;
 
   @override
@@ -815,6 +828,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
       child: switch (_target) {
+        // The preview draws the visitor's row, not the owner's. "Host a party"
+        // and "Edit profile" are the two things a visitor provably cannot do,
+        // so leaving them here made the one screen whose entire job is showing
+        // what somebody else sees the one screen that got it wrong.
+        //
+        // Inert, and see [FollowButtonPreview] for why it has to be: the live
+        // button would ask the database whether you follow yourself and then
+        // offer you an insert it refuses. The message button is inert for the
+        // same reason rather than a technical one — a preview where one control
+        // acts and the other does not is a worse explanation of itself than one
+        // where nothing does.
+        //
+        // The report menu stays off. It is the one visitor action that is not
+        // about the profile but about escalating it, and an inert ⋯ that opens
+        // an empty menu explains nothing; the row's SHAPE — follow, message —
+        // is what the preview is answering.
+        OwnProfile(previewingPublicView: true) => Row(
+          children: [
+            const Expanded(child: FollowButtonPreview()),
+            const SizedBox(width: 8),
+            Expanded(child: _actionButton('Message')),
+          ],
+        ),
         OwnProfile() => Row(
           children: [
             Expanded(
@@ -862,7 +898,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
   /// [FollowButton]'s non-compact shape — same vertical padding, same radius,
   /// same gradient — because on an [OtherProfile] the two sit side by side and
   /// any drift between them shows immediately.
-  Widget _actionButton(String label, {required VoidCallback onTap, bool primary = false}) {
+  ///
+  /// [onTap] is nullable so the ΔΗΜΟΣΙΑ preview can draw the button without
+  /// wiring it. A null one is inert and looks identical — which is the point:
+  /// the preview must not invent a disabled style visitors never see.
+  Widget _actionButton(String label, {VoidCallback? onTap, bool primary = false}) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
