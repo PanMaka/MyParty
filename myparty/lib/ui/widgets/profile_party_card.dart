@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../models/party_summary.dart';
-import '../../utils/greek_date.dart';
+import '../../utils/english_date.dart';
 import '../theme/app_theme.dart';
 import 'diagonal_placeholder.dart';
 import 'privacy_badge.dart';
@@ -29,8 +29,8 @@ class ProfilePartyCard extends StatelessWidget {
 
   final PartySummary party;
 
-  /// The one-word answer to "what is this party to me" — "διοργανώνεις" for
-  /// something ahead, "διοργάνωσες" for something behind.
+  /// The one-word answer to "what is this party to me" — "hosting" for
+  /// something ahead, "hosted" for something behind.
   ///
   /// Passed in rather than derived from [party], because the party row does
   /// not know who is looking at it and this widget must not guess. It is also
@@ -122,8 +122,8 @@ class ProfilePartyCard extends StatelessWidget {
   /// third "present but empty" case to handle.
   String _whenAndWhere() {
     final when = party.startsAt.isAfter(DateTime.now())
-        ? formatPartyStart(party.startsAt)
-        : formatPartyPast(party.startsAt);
+        ? formatPartyStartEn(party.startsAt)
+        : formatPartyPastEn(party.startsAt);
 
     return party.hasArea ? '$when · ${party.area}' : when;
   }

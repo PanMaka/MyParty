@@ -243,7 +243,7 @@ void main() {
       // There is no friendships table and none is to be added — the graph is
       // follows-only and asymmetric. "φίλοι" named a mutual, consented edge
       // over a number that is neither.
-      expect(find.text('ΑΚΟΛΟΥΘΟΙ'), findsOneWidget);
+      expect(find.text('FOLLOWERS'), findsOneWidget);
       expect(find.text('φίλοι'), findsNothing);
       expect(find.text('ακόλουθοι'), findsNothing);
     });
@@ -324,8 +324,8 @@ void main() {
     testWidgets('a failed load offers a retry rather than an empty header', (tester) async {
       await _pumpProfile(tester, _FakeProfileRepository(failLoad: true));
 
-      expect(find.text('Δεν φόρτωσε το προφίλ'), findsOneWidget);
-      expect(find.text('Δοκίμασε ξανά'), findsOneWidget);
+      expect(find.text('The profile did not load'), findsOneWidget);
+      expect(find.text('Try again'), findsOneWidget);
       expect(find.text('@nikos'), findsNothing);
     });
 
@@ -337,10 +337,10 @@ void main() {
       // filtered it or it is not there at all. Same argument now covers the
       // tiles, which is why they are gated on a loaded profile rather than
       // defaulting the counts to zero.
-      expect(find.text('Το προφίλ δεν είναι διαθέσιμο'), findsOneWidget);
+      expect(find.text('This profile is not available'), findsOneWidget);
       expect(find.text('0'), findsNothing);
-      expect(find.text('ΑΚΟΛΟΥΘΟΙ'), findsNothing);
-      expect(find.text('ΔΙΟΡΓΑΝΩΣΕ'), findsNothing);
+      expect(find.text('FOLLOWERS'), findsNothing);
+      expect(find.text('HOSTED'), findsNothing);
     });
   });
 
@@ -350,19 +350,19 @@ void main() {
 
       // Not even in the public preview, which is the state the old
       // `bool _selfView` + nullable id combination could not rule out.
-      await tester.tap(find.text('ΔΗΜΟΣΙΑ'));
+      await tester.tap(find.text('PUBLIC'));
       await tester.pumpAndSettle();
 
       expect(find.byType(FollowButton), findsNothing);
       expect(find.byType(PopupMenuButton<String>), findsNothing);
-      expect(find.text('Μήνυμα'), findsNothing);
+      expect(find.text('Message'), findsNothing);
 
       // The owner's own pair renders instead, in the public preview too: the
       // action row switches on the ProfileTarget's TYPE and deliberately
       // ignores previewingPublicView, because previewing your public profile
       // does not make you a stranger to yourself.
-      expect(find.text('Διοργάνωσε πάρτι'), findsOneWidget);
-      expect(find.text('Επεξεργασία προφίλ'), findsOneWidget);
+      expect(find.text('Host a party'), findsOneWidget);
+      expect(find.text('Edit profile'), findsOneWidget);
     });
 
     testWidgets('another user gets the relationship actions', (tester) async {
@@ -374,13 +374,13 @@ void main() {
 
       expect(find.byType(FollowButton), findsOneWidget);
       expect(find.byType(PopupMenuButton<String>), findsOneWidget);
-      expect(find.text('Μήνυμα'), findsOneWidget);
+      expect(find.text('Message'), findsOneWidget);
 
       // And never the owner's pair. There is no bool that could put these on
       // somebody else's profile — the switch is over the sealed type, so the
       // two cases are exhaustive and mutually exclusive by construction.
-      expect(find.text('Διοργάνωσε πάρτι'), findsNothing);
-      expect(find.text('Επεξεργασία προφίλ'), findsNothing);
+      expect(find.text('Host a party'), findsNothing);
+      expect(find.text('Edit profile'), findsNothing);
     });
 
     testWidgets('another user never gets the owner sections', (tester) async {
@@ -397,8 +397,8 @@ void main() {
       expect(find.byIcon(Icons.settings_outlined), findsNothing);
 
       // And there is no second view of someone else's profile to toggle to.
-      expect(find.text('ΕΓΩ'), findsNothing);
-      expect(find.text('ΔΗΜΟΣΙΑ'), findsNothing);
+      expect(find.text('ME'), findsNothing);
+      expect(find.text('PUBLIC'), findsNothing);
     });
   });
 
@@ -412,13 +412,13 @@ void main() {
       await tester.tap(find.byIcon(Icons.settings_outlined));
       await tester.pumpAndSettle();
 
-      expect(find.text('Ρυθμίσεις'), findsOneWidget);
+      expect(find.text('Settings'), findsOneWidget);
     });
 
     testWidgets('survives the public preview', (tester) async {
       await _pumpProfile(tester, _FakeProfileRepository());
 
-      await tester.tap(find.text('ΔΗΜΟΣΙΑ'));
+      await tester.tap(find.text('PUBLIC'));
       await tester.pumpAndSettle();
 
       // Previewing your public profile does not make you a stranger to
@@ -433,10 +433,10 @@ void main() {
       // Not "below the fold" — absent. `scrollUntilVisible` would run to the
       // end of the list and throw if any of these were merely off-screen, so
       // findsNothing here is a real claim about the tree.
-      expect(find.text('ΙΔΙΩΤΙΚΟΤΗΤΑ'), findsNothing);
-      expect(find.text('ΕΙΔΟΠΟΙΗΣΕΙΣ'), findsNothing);
-      expect(find.text('ΛΟΓΑΡΙΑΣΜΟΣ'), findsNothing);
-      expect(find.text('Αποσύνδεση'), findsNothing);
+      expect(find.text('PRIVACY'), findsNothing);
+      expect(find.text('NOTIFICATIONS'), findsNothing);
+      expect(find.text('ACCOUNT'), findsNothing);
+      expect(find.text('Sign out'), findsNothing);
     });
   });
 
@@ -448,10 +448,10 @@ void main() {
 
     testWidgets('is one list under one heading, grouped in two', (tester) async {
       await _pumpProfile(tester, _FakeProfileRepository(), parties: twoGroups());
-      await _scrollTo(tester, find.text('ΔΙΟΡΓΑΝΩΝΩ'));
+      await _scrollTo(tester, find.text('HOSTING'));
 
-      expect(find.text('ΔΙΟΡΓΑΝΩΝΩ'), findsOneWidget);
-      expect(find.text('ΠΕΡΑΣΜΕΝΑ'), findsOneWidget);
+      expect(find.text('HOSTING'), findsOneWidget);
+      expect(find.text('PAST'), findsOneWidget);
 
       // The two headings this replaced.
       expect(find.text('ΩΣ ΔΙΟΡΓΑΝΩΤΡΙΑ'), findsNothing);
@@ -460,12 +460,12 @@ void main() {
 
     testWidgets('counts what it renders, and nothing else', (tester) async {
       await _pumpProfile(tester, _FakeProfileRepository(), parties: twoGroups());
-      await _scrollTo(tester, find.text('ΠΑΡΤΙ · 3'));
+      await _scrollTo(tester, find.text('PARTIES · 3'));
 
       // 1 upcoming + 2 past. The number in the heading is derived from the two
       // rendered lists rather than counted separately, so it cannot drift from
       // the cards beneath it — including when the RPC's limit truncates.
-      expect(find.text('ΠΑΡΤΙ · 3'), findsOneWidget);
+      expect(find.text('PARTIES · 3'), findsOneWidget);
       expect(find.byType(ProfilePartyCard), findsNWidgets(3));
     });
 
@@ -484,7 +484,7 @@ void main() {
 
       // "ΠΑΡΤΙ · 0" over a spinner asserts that the user hosts nothing, which
       // on a slow connection would be the first thing they read.
-      expect(find.text('ΠΑΡΤΙ · 0'), findsNothing);
+      expect(find.text('PARTIES · 0'), findsNothing);
 
       await tester.pumpAndSettle();
     });
@@ -493,8 +493,8 @@ void main() {
       await _pumpProfile(tester, _FakeProfileRepository(), parties: twoGroups());
       await _scrollTo(tester, find.text('Ταράτσα Θησείου'));
 
-      expect(find.text('διοργανώνεις'), findsOneWidget);
-      expect(find.text('διοργάνωσες'), findsNWidgets(2));
+      expect(find.text('hosting'), findsOneWidget);
+      expect(find.text('hosted'), findsNWidgets(2));
     });
 
     testWidgets('draws the privacy badge and the area, and skips an absent area', (tester) async {
@@ -544,29 +544,29 @@ void main() {
       // The card is still there. Losing the images costs decoration; losing
       // the list costs the content.
       expect(find.text('Με εξώφυλλο'), findsOneWidget);
-      expect(find.text('Δεν φόρτωσαν τα πάρτι σου'), findsNothing);
+      expect(find.text('Your parties did not load'), findsNothing);
     });
 
     testWidgets('an empty group says so without emptying the other', (tester) async {
       final parties = _FakePartyRepository(minePast: [_party('p2', 'Kápsimo')]);
       await _pumpProfile(tester, _FakeProfileRepository(), parties: parties);
-      await _scrollTo(tester, find.text('Δεν διοργανώνεις κάποιο πάρτι αυτή τη στιγμή.'));
+      await _scrollTo(tester, find.text('You are not hosting anything right now.'));
 
-      expect(find.text('Δεν διοργανώνεις κάποιο πάρτι αυτή τη στιγμή.'), findsOneWidget);
+      expect(find.text('You are not hosting anything right now.'), findsOneWidget);
       expect(find.text('Kápsimo'), findsOneWidget);
-      expect(find.text('ΠΑΡΤΙ · 1'), findsOneWidget);
+      expect(find.text('PARTIES · 1'), findsOneWidget);
     });
 
     testWidgets('hosting nothing at all is one absence, not two', (tester) async {
       await _pumpProfile(tester, _FakeProfileRepository(), parties: _FakePartyRepository());
-      await _scrollTo(tester, find.text('Δεν έχεις διοργανώσει πάρτι ακόμα.'));
+      await _scrollTo(tester, find.text('You have not hosted a party yet.'));
 
-      expect(find.text('Δεν έχεις διοργανώσει πάρτι ακόμα.'), findsOneWidget);
+      expect(find.text('You have not hosted a party yet.'), findsOneWidget);
 
       // Two group headings over two empty notices would make an account that
       // has never hosted look like a screen that failed twice.
-      expect(find.text('ΔΙΟΡΓΑΝΩΝΩ'), findsNothing);
-      expect(find.text('ΠΕΡΑΣΜΕΝΑ'), findsNothing);
+      expect(find.text('HOSTING'), findsNothing);
+      expect(find.text('PAST'), findsNothing);
       expect(find.text('Ταράτσα στο Κουκάκι'), findsNothing);
     });
 
@@ -576,11 +576,11 @@ void main() {
         _FakeProfileRepository(),
         parties: _FakePartyRepository(fail: true),
       );
-      await _scrollTo(tester, find.text('Δεν φόρτωσαν τα πάρτι σου'));
+      await _scrollTo(tester, find.text('Your parties did not load'));
 
       // One request behind the list, so one error — a per-group failure would
       // be describing a fetch that does not happen.
-      expect(find.text('Δεν φόρτωσαν τα πάρτι σου'), findsOneWidget);
+      expect(find.text('Your parties did not load'), findsOneWidget);
       expect(find.byType(ProfilePartyCard), findsNothing);
     });
 
@@ -598,8 +598,8 @@ void main() {
       // parties behind their handle — which is why the other profile keeps its
       // own narrower, hosted-and-public section instead.
       expect(find.text('Δικό μου'), findsNothing);
-      expect(find.text('ΔΙΟΡΓΑΝΩΝΩ'), findsNothing);
-      expect(find.textContaining('ΠΑΡΤΙ · '), findsNothing);
+      expect(find.text('HOSTING'), findsNothing);
+      expect(find.textContaining('PARTIES · '), findsNothing);
     });
   });
 
@@ -619,9 +619,9 @@ void main() {
       await _scrollTo(tester, find.text('Rooftop Αυγούστου'));
 
       expect(find.text('Rooftop Αυγούστου'), findsOneWidget);
-      expect(find.textContaining('140 ήρθαν'), findsOneWidget);
+      expect(find.textContaining('140 went'), findsOneWidget);
       // The year is printed because the party is not from this year.
-      expect(find.textContaining('9 Αύγ 2025'), findsOneWidget);
+      expect(find.textContaining('9 Aug 2025'), findsOneWidget);
 
       expect(find.text('Rooftop Σεπτεμβρίου'), findsNothing);
       // "Κουκάκι" had no column behind it -- parties.location is a point.
@@ -651,9 +651,9 @@ void main() {
         target: const OtherProfile('someone-else'),
         parties: _FakePartyRepository(),
       );
-      await _scrollTo(tester, find.text('Κανένα δημόσιο πάρτι ακόμα.'));
+      await _scrollTo(tester, find.text('No public parties yet.'));
 
-      expect(find.text('Κανένα δημόσιο πάρτι ακόμα.'), findsOneWidget);
+      expect(find.text('No public parties yet.'), findsOneWidget);
     });
   });
 
@@ -663,9 +663,9 @@ void main() {
 
       // followerCount off the profiles row, partiesHosted off
       // get_profile_stats. Two tiles, two numbers.
-      expect(find.text('ΑΚΟΛΟΥΘΟΙ'), findsOneWidget);
+      expect(find.text('FOLLOWERS'), findsOneWidget);
       expect(find.text('42'), findsOneWidget);
-      expect(find.text('ΔΙΟΡΓΑΝΩΣΕ'), findsOneWidget);
+      expect(find.text('HOSTED'), findsOneWidget);
       expect(find.text('3'), findsOneWidget);
 
       // The design-prototype literals this phase replaced.
@@ -690,18 +690,18 @@ void main() {
 
     testWidgets('are the same two tiles for every viewer', (tester) async {
       await _pumpProfile(tester, _FakeProfileRepository());
-      expect(find.text('ΑΚΟΛΟΥΘΟΙ'), findsOneWidget);
-      expect(find.text('ΔΙΟΡΓΑΝΩΣΕ'), findsOneWidget);
+      expect(find.text('FOLLOWERS'), findsOneWidget);
+      expect(find.text('HOSTED'), findsOneWidget);
 
-      await tester.tap(find.text('ΔΗΜΟΣΙΑ'));
+      await tester.tap(find.text('PUBLIC'));
       await tester.pumpAndSettle();
 
       // Nothing in this row is viewer-dependent any more. The tile that was —
       // "πάρτι φέτος", structurally zero for anyone but the owner because
       // get_profile_stats runs with invoker rights over an owner-scoped rsvps
       // policy — is gone, so the row's shape no longer encodes who is looking.
-      expect(find.text('ΑΚΟΛΟΥΘΟΙ'), findsOneWidget);
-      expect(find.text('ΔΙΟΡΓΑΝΩΣΕ'), findsOneWidget);
+      expect(find.text('FOLLOWERS'), findsOneWidget);
+      expect(find.text('HOSTED'), findsOneWidget);
     });
   });
 }

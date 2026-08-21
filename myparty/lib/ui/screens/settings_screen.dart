@@ -19,9 +19,9 @@ import 'notification_settings_screen.dart';
 /// behind the gear in the profile header now.
 ///
 /// The sections keep the grouping they had, and the grouping is still not
-/// cosmetic: ΕΙΔΟΠΟΙΗΣΕΙΣ is separate from ΙΔΙΩΤΙΚΟΤΗΤΑ because two of its rows
+/// cosmetic: NOTIFICATIONS is separate from PRIVACY because two of its rows
 /// are consent — a legal state with a deletion consequence — rather than
-/// preferences, and ΛΟΓΑΡΙΑΣΜΟΣ is separate from both because everything above
+/// preferences, and ACCOUNT is separate from both because everything above
 /// it is reversible and it is not.
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key, this.repository});
@@ -81,7 +81,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Κάτι πήγε στραβά: $error'), behavior: SnackBarBehavior.floating),
+          SnackBar(content: Text('Something went wrong: $error'), behavior: SnackBarBehavior.floating),
         );
       }
       await _load();
@@ -91,13 +91,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   /// What a tier row says while it has no tier: still loading, or it did not
-  /// load. Never a tier — a privacy row must not guess, and "Όλοι" is the worst
-  /// possible guess to render under a heading someone opened to check.
-  String get _pending => _loadFailed ? 'Δεν φόρτωσε' : '…';
+  /// load. Never a tier — a privacy row must not guess, and "Everyone" is the
+  /// worst possible guess to render under a heading someone opened to check.
+  String get _pending => _loadFailed ? 'Did not load' : '…';
 
   void _comingSoon() {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Έρχεται σύντομα'), behavior: SnackBarBehavior.floating),
+      const SnackBar(content: Text('Coming soon'), behavior: SnackBarBehavior.floating),
     );
   }
 
@@ -109,23 +109,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
         backgroundColor: AppColors.bg,
         elevation: 0,
         title: const Text(
-          'Ρυθμίσεις',
+          'Settings',
           style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, letterSpacing: -0.3),
         ),
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
         children: [
-          _section('ΙΔΙΩΤΙΚΟΤΗΤΑ'),
+          _section('PRIVACY'),
           _card([
             // Still unwired, and deliberately so: there is no column behind it
-            // yet. It is also the reason the profile header has no "πάρτι
-            // φέτος" tile — until this setting exists, the rsvps policy IS the
+            // yet. It is also the reason the profile header has no "parties
+            // this year" tile — until this setting exists, the rsvps policy IS the
             // answer to "who sees where I go", and get_profile_stats does not
             // invent a different one.
             _settingsRow(
-              'Ποιος βλέπει σε ποια πάρτι πάω',
-              'Έρχεται σύντομα',
+              'Who sees which parties I go to',
+              'Coming soon',
               chevron: true,
               onTap: _comingSoon,
             ),
@@ -134,30 +134,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
             // ever read. Now three tiers on profiles.map_visibility, enforced
             // inside get_parties_near_user.
             _settingsRow(
-              'Ποιος βλέπει τα πάρτι μου στον χάρτη',
+              'Who sees my parties on the map',
               _privacy?.mapVisibility.label ?? _pending,
               chevron: true,
               onTap: _privacy == null ? null : _pickMapVisibility,
             ),
             _divider(),
             _settingsRow(
-              'Ποιος μπορεί να με καλέσει',
+              'Who can invite me',
               _privacy?.invitePolicy.label ?? _pending,
               chevron: true,
               onTap: _privacy == null ? null : _pickInvitePolicy,
             ),
           ]),
           _note(
-            'Τα ιδιωτικά πάρτι στα οποία πας δεν φαίνονται ποτέ σε άτομα που δεν '
-            'είναι καλεσμένα — ούτε στο προφίλ σου.',
+            'Private parties you go to are never visible to people who are not '
+            'invited — not even on your profile.',
           ),
 
           const SizedBox(height: 22),
-          _section('ΕΙΔΟΠΟΙΗΣΕΙΣ'),
+          _section('NOTIFICATIONS'),
           _card([
             _settingsRow(
-              'Ειδοποιήσεις & τοποθεσία',
-              'Πάρτι κοντά σου, ώρες ησυχίας, απόσταση',
+              'Notifications & location',
+              'Parties near you, quiet hours, distance',
               chevron: true,
               onTap: () => Navigator.of(
                 context,
@@ -170,11 +170,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // path wherever an account can be created, and requires it to
           // actually start the deletion rather than link to support. Kept
           // directly above sign-out, which is where a user looks for it.
-          _section('ΛΟΓΑΡΙΑΣΜΟΣ'),
+          _section('ACCOUNT'),
           _card([
             _settingsRow(
-              'Δεδομένα & διαγραφή',
-              'Εξαγωγή των δεδομένων σου, διαγραφή λογαριασμού',
+              'Data & deletion',
+              'Export your data, delete your account',
               chevron: true,
               onTap: () => Navigator.of(
                 context,
@@ -194,7 +194,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               child: Center(
                 child: Text(
-                  'Αποσύνδεση',
+                  'Sign out',
                   style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textAlpha(0.6)),
                 ),
               ),
@@ -259,7 +259,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// difference between a control someone sets correctly and one they guess at.
   Future<void> _pickMapVisibility() async {
     final chosen = await _pickTier<MapVisibility>(
-      title: 'Ποιος βλέπει τα πάρτι μου στον χάρτη',
+      title: 'Who sees my parties on the map',
       options: MapVisibility.values,
       current: _privacy!.mapVisibility,
       labelOf: (v) => v.label,
@@ -267,8 +267,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       // The one thing the tiers do NOT do, stated where the choice is made:
       // people already tied to a specific party keep seeing it at every tier.
       footnote:
-          'Όσοι έχουν πρόσκληση ή έχουν ήδη δηλώσει συμμετοχή '
-          'συνεχίζουν να βλέπουν το συγκεκριμένο πάρτι.',
+          'People holding an invitation, and people who have already RSVPd, '
+          'keep seeing that particular party.',
     );
     if (chosen == null || chosen == _privacy!.mapVisibility) return;
     await _mutate(() => _profiles.updatePrivacy(mapVisibility: chosen));
@@ -276,7 +276,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _pickInvitePolicy() async {
     final chosen = await _pickTier<InvitePolicy>(
-      title: 'Ποιος μπορεί να με καλέσει',
+      title: 'Who can invite me',
       options: InvitePolicy.values,
       current: _privacy!.invitePolicy,
       labelOf: (v) => v.label,

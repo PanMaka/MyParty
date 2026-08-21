@@ -8,7 +8,7 @@ import '../../models/hosted_parties.dart';
 import '../../models/party_summary.dart';
 import '../../models/profile.dart';
 import '../../models/profile_stats.dart';
-import '../../utils/greek_date.dart';
+import '../../utils/english_date.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
 import '../widgets/follow_button.dart';
@@ -61,7 +61,7 @@ sealed class ProfileTarget {
 final class OwnProfile extends ProfileTarget {
   const OwnProfile({this.previewingPublicView = false});
 
-  /// The ΕΓΩ / ΔΗΜΟΣΙΑ segment. Changes which sections render, and nothing else
+  /// The ME / PUBLIC segment. Changes which sections render, and nothing else
   /// — previewing your public profile does not make you a stranger to yourself,
   /// so the relationship actions stay off.
   final bool previewingPublicView;
@@ -106,7 +106,7 @@ class ProfileScreen extends StatefulWidget {
   /// Supabase client ever existing, the same way [SettingsScreen] takes one.
   final ProfileRepository? repository;
 
-  /// Injectable for the same reason. Needed now that the ΑΚΟΛΟΥΘΕΙ rail loads
+  /// Injectable for the same reason. Needed now that the FOLLOWING rail loads
   /// on the owner's public preview too: it used to be unreachable without a
   /// `userId`, so no test ever caused a [SocialRepository] method to run.
   final SocialRepository? social;
@@ -128,7 +128,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   late final ProfileRepository _profiles = widget.repository ?? ProfileRepository();
   late final PartyRepository _parties = widget.parties ?? PartyRepository();
 
-  /// Mutable only through the ΕΓΩ / ΔΗΜΟΣΙΑ segment, and only ever between the
+  /// Mutable only through the ME / PUBLIC segment, and only ever between the
   /// two [OwnProfile] values — an [OtherProfile] never becomes an [OwnProfile].
   late ProfileTarget _target = widget.target;
 
@@ -144,7 +144,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   /// no user id, so this cannot be pointed at [OtherProfile] even by mistake.
   late final Future<(HostedParties, Map<String, String>)> _myParties = _loadMyParties();
 
-  /// Public parties this profile has already hosted — the ΔΗΜΟΣΙΑ ΠΑΡΤΙ card.
+  /// Public parties this profile has already hosted — the PUBLIC PARTIES card.
   /// `publicOnly` because the heading says public; see [PartyRepository].
   late final Future<List<PartySummary>> _hostedPublicPast = _parties.fetchHostedParties(
     hostId: widget.target.userIdOrNull,
@@ -237,7 +237,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void _comingSoon() {
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(const SnackBar(content: Text('Έρχεται σύντομα'), behavior: SnackBarBehavior.floating));
+    ).showSnackBar(const SnackBar(content: Text('Coming soon'), behavior: SnackBarBehavior.floating));
   }
 
   @override
@@ -255,7 +255,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Text(
-                    'Προφίλ',
+                    'Profile',
                     style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -0.5),
                   ),
                   // Only the owner gets the toggle: it previews YOUR public
@@ -277,12 +277,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           child: Row(
                             children: [
                               _segment(
-                                'ΕΓΩ',
+                                'ME',
                                 !own.previewingPublicView,
                                 () => setState(() => _target = const OwnProfile()),
                               ),
                               _segment(
-                                'ΔΗΜΟΣΙΑ',
+                                'PUBLIC',
                                 own.previewingPublicView,
                                 () => setState(
                                   () => _target = const OwnProfile(previewingPublicView: true),
@@ -302,8 +302,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             // Two tiles, and the same two for every viewer.
             //
             // Gated on a loaded profile rather than defaulting to 0, for the
-            // reason _headerBody already gives below: "0 ΑΚΟΛΟΥΘΟΙ" sitting
-            // under "Το προφίλ δεν είναι διαθέσιμο" asserts that an account
+            // reason _headerBody already gives below: "0 FOLLOWERS" sitting
+            // under "This profile is not available" asserts that an account
             // exists and that nobody follows it, when what actually happened is
             // that the SELECT policy filtered the row or it is not there.
             //
@@ -332,9 +332,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     // reversed on purpose). Calling followers friends would
                     // imply a mutual, consented edge to a user looking at a
                     // number that is neither.
-                    Expanded(child: _statTile('${loaded.followerCount}', 'ΑΚΟΛΟΥΘΟΙ')),
+                    Expanded(child: _statTile('${loaded.followerCount}', 'FOLLOWERS')),
                     const SizedBox(width: 10),
-                    Expanded(child: _statTile('${_stats.partiesHosted}', 'ΔΙΟΡΓΑΝΩΣΕ', pink: true)),
+                    Expanded(child: _statTile('${_stats.partiesHosted}', 'HOSTED', pink: true)),
                   ],
                 ),
               ),
@@ -373,18 +373,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
             return _partyListShell(null, _sectionNotice('…'));
           }
           if (snapshot.hasError) {
-            return _partyListShell(null, _sectionNotice('Δεν φόρτωσαν τα πάρτι σου'));
+            return _partyListShell(null, _sectionNotice('Your parties did not load'));
           }
 
           final (parties, covers) = snapshot.data ?? (HostedParties.empty, const <String, String>{});
 
-          // Both groups empty is ONE absence, not two. Printing ΔΙΟΡΓΑΝΩΝΩ and
-          // ΠΕΡΑΣΜΕΝΑ over a pair of empty notices would make an account that
+          // Both groups empty is ONE absence, not two. Printing HOSTING and
+          // PAST over a pair of empty notices would make an account that
           // has simply never hosted look like a screen that failed twice.
           if (parties.isEmpty) {
             return _partyListShell(
               null,
-              _sectionNotice('Δεν έχεις διοργανώσει πάρτι ακόμα.'),
+              _sectionNotice('You have not hosted a party yet.'),
             );
           }
 
@@ -394,11 +394,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _partyGroup(
-                  'ΔΙΟΡΓΑΝΩΝΩ',
+                  'HOSTING',
                   parties.upcoming,
                   covers,
-                  relationship: 'διοργανώνεις',
-                  emptyMessage: 'Δεν διοργανώνεις κάποιο πάρτι αυτή τη στιγμή.',
+                  relationship: 'hosting',
+                  emptyMessage: 'You are not hosting anything right now.',
                 ),
                 // The line between the two categories. A real divider rather
                 // than extra whitespace, because the groups are read as one
@@ -409,11 +409,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   child: Container(height: 1, color: AppColors.hairline),
                 ),
                 _partyGroup(
-                  'ΠΕΡΑΣΜΕΝΑ',
+                  'PAST',
                   parties.past,
                   covers,
-                  relationship: 'διοργάνωσες',
-                  emptyMessage: 'Κανένα περασμένο πάρτι ακόμα.',
+                  relationship: 'hosted',
+                  emptyMessage: 'No past parties yet.',
                 ),
               ],
             ),
@@ -426,7 +426,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   /// The heading and whatever goes under it.
   ///
   /// [total] null means "not known yet" and prints the bare word. It is never
-  /// defaulted to 0: "ΠΑΡΤΙ · 0" over a spinner asserts that the user hosts
+  /// defaulted to 0: "PARTIES · 0" over a spinner asserts that the user hosts
   /// nothing, which is a claim this screen has not finished checking — and on
   /// a slow connection it would be the first thing they read.
   Widget _partyListShell(int? total, Widget body) {
@@ -434,7 +434,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          total == null ? 'ΠΑΡΤΙ' : 'ΠΑΡΤΙ · $total',
+          total == null ? 'PARTIES' : 'PARTIES · $total',
           style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.45)),
         ),
         const SizedBox(height: 9),
@@ -448,7 +448,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   /// [relationship] is passed down rather than derived in the card, because
   /// the `parties` row does not know who is looking at it. Both values are
   /// "you host this" in different tenses today — the list is hosted-only, so
-  /// there is deliberately no enum here carrying `πας`/`σε ενδιαφέρει` arms
+  /// there is deliberately no enum here carrying `going`/`interested` arms
   /// that nothing can currently produce.
   Widget _partyGroup(
     String label,
@@ -494,7 +494,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'ΔΗΜΟΣΙΑ ΠΑΡΤΙ ΠΟΥ ΔΙΟΡΓΑΝΩΣΕ',
+              'PUBLIC PARTIES THEY HOSTED',
               style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.45)),
             ),
             const SizedBox(height: 9),
@@ -505,11 +505,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   return _sectionNotice('…');
                 }
                 if (snapshot.hasError) {
-                  return _sectionNotice('Δεν φόρτωσαν τα πάρτι');
+                  return _sectionNotice('The parties did not load');
                 }
                 final parties = snapshot.data ?? const <PartySummary>[];
                 if (parties.isEmpty) {
-                  return _sectionNotice('Κανένα δημόσιο πάρτι ακόμα.');
+                  return _sectionNotice('No public parties yet.');
                 }
                 return Column(
                   children: [
@@ -548,7 +548,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               // and has no business guessing one.
               Expanded(
                 child: Text(
-                  'Τα ιδιωτικά πάρτι αυτού του προφίλ και τα stories τους δεν είναι ορατά σε σένα.',
+                  'The private parties on this profile, and their stories, are not visible to you.',
                   style: TextStyle(fontSize: 12, height: 1.45, color: AppColors.textAlpha(0.5)),
                 ),
               ),
@@ -573,7 +573,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'ΑΚΟΛΟΥΘΕΙ · ${people.length}',
+                    'FOLLOWING · ${people.length}',
                     style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.45)),
                   ),
                   const SizedBox(height: 9),
@@ -643,7 +643,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   /// an object that failed to load. The third is why the `errorBuilder` is not
   /// optional — an `Image.network` without one renders a broken-image glyph,
   /// which is a worse "no avatar" than no avatar. The gradient is keyed off the
-  /// uuid, so a user looks the same here as in the ΑΚΟΛΟΥΘΕΙ rail below, and it
+  /// uuid, so a user looks the same here as in the FOLLOWING rail below, and it
   /// visibly is not a photograph rather than being a stock face that reads as
   /// one.
   ///
@@ -714,7 +714,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           // `following_count` was a second inline pair here and is now rendered
           // nowhere: the header is two lines, and `follower_count` moved to the
-          // ΑΚΟΛΟΥΘΟΙ tile. [Profile] still carries it.
+          // FOLLOWERS tile. [Profile] still carries it.
         ],
       );
     }
@@ -731,14 +731,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Δεν φόρτωσε το προφίλ',
+            'The profile did not load',
             style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textAlpha(0.7)),
           ),
           const SizedBox(height: 4),
           GestureDetector(
             onTap: _retryLoad,
             child: const Text(
-              'Δοκίμασε ξανά',
+              'Try again',
               style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.pinkLight),
             ),
           ),
@@ -751,7 +751,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     // identically because they are indistinguishable from the client by design,
     // and a screen that could tell them apart would be a block oracle.
     return Text(
-      'Το προφίλ δεν είναι διαθέσιμο',
+      'This profile is not available',
       style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textAlpha(0.55)),
     );
   }
@@ -762,7 +762,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _settingsButton() {
     return Semantics(
       button: true,
-      label: 'Ρυθμίσεις',
+      label: 'Settings',
       child: GestureDetector(
         onTap: () => Navigator.of(
           context,
@@ -819,7 +819,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           children: [
             Expanded(
               child: _actionButton(
-                'Διοργάνωσε πάρτι',
+                'Host a party',
                 primary: true,
                 onTap: () => Navigator.of(
                   context,
@@ -832,14 +832,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
             // two when the other failed — and the header renders all of it, so
             // re-reading the row beats teaching two screens to agree about
             // which halves of a partial save went through.
-            Expanded(child: _actionButton('Επεξεργασία προφίλ', onTap: _openEditor)),
+            Expanded(child: _actionButton('Edit profile', onTap: _openEditor)),
           ],
         ),
         OtherProfile(:final userId) => Row(
           children: [
             Expanded(child: FollowButton(targetUserId: userId)),
             const SizedBox(width: 8),
-            Expanded(child: _actionButton('Μήνυμα', onTap: _comingSoon)),
+            Expanded(child: _actionButton('Message', onTap: _comingSoon)),
             PopupMenuButton<String>(
               icon: Icon(Icons.more_horiz, size: 20, color: AppColors.textAlpha(0.5)),
               color: AppColors.sheet,
@@ -848,7 +848,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               itemBuilder: (_) => const [
                 PopupMenuItem(
                   value: 'report',
-                  child: Text('Αναφορά', style: TextStyle(fontSize: 13)),
+                  child: Text('Report', style: TextStyle(fontSize: 13)),
                 ),
               ],
             ),
@@ -934,7 +934,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           const SizedBox(height: 2),
           Text(
-            '${formatPartyPast(party.startsAt)} · ${party.goingCount} ήρθαν',
+            '${formatPartyPastEn(party.startsAt)} · ${party.goingCount} went',
             style: const TextStyle(fontSize: 11.5, color: Color(0x8CF4F1F8)),
           ),
         ],

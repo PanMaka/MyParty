@@ -1,4 +1,4 @@
-/// The two `profiles` columns behind the ΙΔΙΩΤΙΚΟΤΗΤΑ card.
+/// The two `profiles` columns behind the PRIVACY card in settings.
 ///
 /// Nothing in this file enforces anything, and that is the point. The database
 /// is the authority — `invite_policy` is a conjunct of the `invitations` INSERT
@@ -28,9 +28,17 @@ library;
 /// already RSVP'd) overrides the tier server-side, so a host cannot un-invite
 /// someone by flipping a setting.
 enum MapVisibility {
-  public('public', 'Όλοι', 'Τα πάρτι σου φαίνονται σε όποιον κοιτάζει τον χάρτη'),
-  followers('followers', 'Όσοι με ακολουθούν', 'Μόνο όσοι σε ακολουθούν βλέπουν τα πάρτι σου στον χάρτη'),
-  private('private', 'Κανείς', 'Τα πάρτι σου δεν εμφανίζονται στον χάρτη — εκτός από όσους έχεις καλέσει');
+  public('public', 'Everyone', 'Your parties show up for anyone looking at the map'),
+  followers(
+    'followers',
+    'People who follow me',
+    'Only people who follow you see your parties on the map',
+  ),
+  private(
+    'private',
+    'Nobody',
+    'Your parties do not appear on the map — except to people you invited',
+  );
 
   const MapVisibility(this.wire, this.label, this.explanation);
 
@@ -55,8 +63,8 @@ enum MapVisibility {
 
 /// Who may add this user to a guest list.
 enum InvitePolicy {
-  anyone('anyone', 'Οποιοσδήποτε', 'Ο καθένας μπορεί να σε καλέσει σε πάρτι'),
-  following('following', 'Μόνο όσους ακολουθώ', 'Μόνο άτομα που ακολουθείς μπορούν να σε καλέσουν');
+  anyone('anyone', 'Anyone', 'Anybody can invite you to a party'),
+  following('following', 'Only people I follow', 'Only people you follow can invite you');
 
   const InvitePolicy(this.wire, this.label, this.explanation);
 
