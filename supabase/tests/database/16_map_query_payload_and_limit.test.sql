@@ -14,7 +14,7 @@
 -- below is a count of rows this file created.
 begin;
 set search_path to public, extensions;
-select plan(9);
+select plan(11);
 
 select tests.authenticate_as('44444444-4444-4444-4444-444444444444'); -- stranger
 
@@ -179,6 +179,36 @@ select is(
 );
 
 select tests.clear_authentication();
+
+
+-- ============================================================
+-- 4. Who may call it.
+--
+-- The same pair as get_profile_stats in 11, and for the same two gotchas. #4:
+-- the function mentions `rsvps` and `invitations` for my_rsvp_status and
+-- is_invited, and anon holds SELECT on neither, so an anonymous call raised
+-- "permission denied for table rsvps" rather than returning pins -- the
+-- EXECUTE grant it held was never usable. #13: the revoke that removes it also
+-- removes service_role's, because the default PUBLIC grant is where that came
+-- from.
+--
+-- What this does NOT assert, because it is not true: that the map is closed to
+-- anonymous clients. `anon` still reads every public party off
+-- `public.parties` directly -- see 20260821175831. This is an assertion about
+-- one door, not about the building.
+-- ============================================================
+select is(
+  has_function_privilege('anon', 'public.get_parties_near_user(double precision, double precision, double precision, int)', 'execute'),
+  false,
+  'anon cannot call the map RPC -- the grant it used to hold could only ever return 42501'
+);
+
+select is(
+  (select bool_and(has_function_privilege(r, 'public.get_parties_near_user(double precision, double precision, double precision, int)', 'execute'))
+   from unnest(array['authenticated', 'service_role']) r),
+  true,
+  'but authenticated and service_role can -- the explicit grant survived the revoke'
+);
 
 select * from finish();
 rollback;
