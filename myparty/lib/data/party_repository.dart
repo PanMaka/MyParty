@@ -1,6 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/hosted_parties.dart';
+import '../models/map_party_pin.dart';
 import '../models/party_summary.dart';
 import '../models/rsvp_party.dart';
 
@@ -188,5 +189,47 @@ class PartyRepository {
         if (result is SignedUrlSuccess && byPath.containsKey(result.path))
           byPath[result.path]!: result.signedUrl,
     };
+  }
+
+  /// The map query: published, unfinished parties around [lon]/[lat], already
+  /// tier-filtered by [radiusMeters] and already ordered sponsored-then-nearest
+  /// by the server.
+  ///
+  /// This lived inside `MapScreen` as a bare `Supabase.instance.client.rpc`
+  /// until now, which is the reason the map was the one screen with no widget
+  /// test: a widget holding its own client cannot be driven under
+  /// `flutter test`, where there is no initialized Supabase to hold.
+  ///
+  /// [limit] must stay in step with the RPC's own default (200) and its hard
+  /// ceiling (500) — the server clamps, so a larger number here silently
+  /// becomes 500 rather than erroring. Callers that want to tell "this is
+  /// everything" from "the viewport is saturated" compare the returned length
+  /// against the limit they asked for; the RPC has no total to give, and
+  /// counting one would cost a second pass over the same expensive scan.
+  ///
+  /// Rows missing a coordinate are dropped rather than defaulted. `lat`/`lon`
+  /// come from `st_y`/`st_x` on a non-null geography column so this should not
+  /// happen, but a pin at (0, 0) in the Gulf of Guinea is a worse outcome than
+  /// a pin that is absent.
+  Future<List<MapPartyPin>> fetchPartiesNearUser({
+    required double lon,
+    required double lat,
+    required double radiusMeters,
+    int limit = 200,
+  }) async {
+    final rows = await _client.rpc('get_parties_near_user', params: {
+      'map_center_lon': lon,
+      'map_center_lat': lat,
+      'radius_meters': radiusMeters,
+      'p_limit': limit,
+    });
+
+    final pins = <MapPartyPin>[];
+    for (var i = 0; i < (rows as List).length; i++) {
+      final row = rows[i] as Map<String, dynamic>;
+      if (row['lat'] == null || row['lon'] == null) continue;
+      pins.add(MapPartyPin.fromRpcRow(row, fallbackId: 'pin_$i'));
+    }
+    return pins;
   }
 }

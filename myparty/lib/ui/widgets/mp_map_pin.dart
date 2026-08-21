@@ -93,12 +93,25 @@ class _MpMapPinState extends State<MpMapPin> with SingleTickerProviderStateMixin
                       decoration: BoxDecoration(color: pin.live ? Colors.white : accent, shape: BoxShape.circle),
                     ),
                     const SizedBox(width: 4),
-                    Text(
-                      pin.live ? '${pin.attendeeCount} μέσα' : '${pin.attendeeCount} ενδ.',
-                      style: AppTextStyles.mono(
-                        size: 8.5,
-                        weight: FontWeight.w600,
-                        color: pin.isPrivate ? AppColors.pinkLight : AppColors.purpleLight,
+                    // Flexible, because the pill's width is fixed by
+                    // mpPinWidth and this label is not: it is derived from a
+                    // count, and the width formula tops out at +26px however
+                    // large that count gets. A four-digit party overflows the
+                    // row on a real handset, and any count at all overflows it
+                    // under `flutter test`, where the mono face is absent and
+                    // the fallback metrics are far wider. The pin drew a
+                    // hardcoded 0 until the payload fix, so neither had ever
+                    // been reachable.
+                    Flexible(
+                      child: Text(
+                        pin.live ? '${pin.attendeeCount} μέσα' : '${pin.attendeeCount} ενδ.',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.mono(
+                          size: 8.5,
+                          weight: FontWeight.w600,
+                          color: pin.isPrivate ? AppColors.pinkLight : AppColors.purpleLight,
+                        ),
                       ),
                     ),
                   ],
