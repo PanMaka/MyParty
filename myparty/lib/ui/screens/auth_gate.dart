@@ -49,7 +49,7 @@ class _ProfileGate extends StatefulWidget {
 }
 
 class _ProfileGateState extends State<_ProfileGate> {
-  late final Future<bool> _needsUsername = _checkOnboarding();
+  late Future<bool> _needsUsername = _checkOnboarding();
 
   Future<bool> _checkOnboarding() async {
     final row = await Supabase.instance.client
@@ -79,11 +79,74 @@ class _ProfileGateState extends State<_ProfileGate> {
     return FutureBuilder<bool>(
       future: _needsUsername,
       builder: (context, snapshot) {
-        if (!snapshot.hasData) {
+        if (snapshot.connectionState != ConnectionState.done) {
           return const _LoadingScaffold();
+        }
+        // A gate that renders a spinner on error strands the user with no
+        // navigation and no message — indistinguishable from a slow network,
+        // forever. Every failure mode here is one the user cannot act on
+        // blindly (backend unreachable, schema behind the client, no profiles
+        // row), so show the error and offer the only two useful exits.
+        if (snapshot.hasError) {
+          return _ProfileGateError(
+            error: snapshot.error!,
+            onRetry: () => setState(() {
+              _needsUsername = _checkOnboarding();
+            }),
+          );
         }
         return snapshot.data! ? const UsernameSetupScreen() : const HomeScreen();
       },
+    );
+  }
+}
+
+/// Terminal state for [_ProfileGate]. Deliberately shows the raw error: the
+/// only people who reach it are a developer pointed at the wrong backend or a
+/// user whose profile row is missing, and both need the actual message.
+class _ProfileGateError extends StatelessWidget {
+  const _ProfileGateError({required this.error, required this.onRetry});
+
+  final Object error;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.cloud_off, size: 48),
+                const SizedBox(height: 16),
+                Text(
+                  'Δεν μπορέσαμε να φορτώσουμε το προφίλ σου.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '$error',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 24),
+                FilledButton(
+                  onPressed: onRetry,
+                  child: const Text('Δοκίμασε ξανά'),
+                ),
+                TextButton(
+                  onPressed: () => Supabase.instance.client.auth.signOut(),
+                  child: const Text('Αποσύνδεση'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

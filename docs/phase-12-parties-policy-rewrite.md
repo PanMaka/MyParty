@@ -1,90 +1,27 @@
 # Phase 12 brief — rewriting the `parties` SELECT policy
 
-**Status: EXECUTED, with its central premise disproved.** The rewrite shipped as
-`20260821185216` and is a real 5× (5km p50 995 ms → 199 ms). It did **not**
-reach `parties_location`, and no policy rewrite ever could. Results, plans and
-the routes that do work:
-[`phase-12-policy-rewrite-result.md`](phase-12-policy-rewrite-result.md).
+**Status:** scoped, not started. Sequenced **before** map search, on the
+leakproofness finding recorded as CLAUDE.md gotcha 22.
 
-> ### Read this before you act on anything below
->
-> **The goal stated in this brief was unachievable, and the reasoning that
-> produced it was wrong in a specific, reusable way. Do not repeat it.**
->
-> The brief's premise — restated from §5 of
-> [`phase-10-hardening-audit.md`](phase-10-hardening-audit.md) — was that the
-> policy is expensive, that its expense is what defeats the GiST index, and
-> that therefore making it cheap would restore the index. The first clause is
-> true. The second does not follow from it, and the third is false.
->
-> **Cost and index-reachability are two separate consequences of the same
-> barrier, and only the first is fixable by a rewrite.** Whether a user qual
-> may be evaluated *ahead* of an RLS qual — which is what becoming an
-> `Index Cond` requires — depends on the leakproofness of **the user qual**,
-> never on the policy's cost and never on the policy's own leakproofness. The
-> spatial predicate is built entirely from operators that are not leakproof:
->
-> | function | `proleakproof` |
-> |---|---|
-> | `st_dwithin(geography, geography, float8, bool)` | **f** |
-> | `_st_expand(geography, float8)` | **f** |
-> | `geography_overlaps(geography, geography)` — the `&&` operator | **f** |
->
-> So `st_dwithin` can never sort ahead of *any* RLS qual on `parties`.
-> Measured four ways by `scripts/explain_policy_pushdown.sh`: the shipped hoist
-> seq-scans (203 ms); `using (not is_private)` — one leakproof column
-> reference, the cheapest policy that still filters anything — **also** leaves
-> `st_dwithin` as a Filter (10.9 ms); only `using (true)`, which the planner
-> folds away so that no barrier remains, and RLS-off reach the index (3.3 ms /
-> 2 ms). If policy cost were the obstacle, variant B would have reached it.
->
-> **If you came here looking for the fast option**, the `SECURITY DEFINER` read
-> RPC measures ~100× better than what shipped and was still rejected. **§9 says
-> why, and the reason is not the one you will guess.** Read it before you act
-> on the number.
->
-> **What this brief still gets right,** and what makes it worth keeping rather
-> than deleting: §3 (the 42P17 recursion and the rule that keeps it shut), §4
-> (the term-by-term equivalence), §5 (the pgTAP matrix), and §6 (blast radius).
-> Those are about correctness and they held up — §5.1's equivalence assertion
-> caught a real defect on its first run. Only the *performance justification* in
-> §1 and §2 is wrong.
-
-**Goal, as originally stated (and unachievable — see above):** make the
-`parties` SELECT policy cheap enough on public rows that the planner can reach
-`parties_location`, without changing who can see which party.
-
-**Goal, as it should have been stated:** make the `parties` SELECT policy cheap
-enough that a 10k-party map query is not dominated by it, without changing who
-can see which party. That is achievable and was achieved.
+**Goal, in one sentence:** make the `parties` SELECT policy cheap enough on
+public rows that the planner can reach `parties_location`, without changing who
+can see which party.
 
 This continues §5 of [`phase-10-hardening-audit.md`](phase-10-hardening-audit.md),
 which measured the problem and proposed the fix but deliberately did not apply
-it. Read that section first — **and read the correction at the top of it**;
-this brief inherited its error.
+it. Read that section first; this brief assumes it.
 
 ---
 
 ## 1. Why it is now blocking, and not just slow
 
-> **Corrected after execution.** The numbers in this section are right and the
-> conclusion drawn from them is not. The policy dominating the cost does not
-> imply that cheapening the policy restores the index — see the banner at the
-> top. The rewrite took 5km p50 to **199 ms** and the plan is still
-> `Seq Scan on parties`.
-
 Measured at 10k parties / 50k rsvps by `scripts/loadtest_map_query.sh`:
 
-| zoom | as shipped | after the rewrite | RLS-bypassed control |
-|---|---|---|---|
-| 5km | **995 ms p50** | **199 ms p50** | 2 ms |
-| 50km | 230 ms p50 | 63 ms p50 | 9.8 ms |
-| 500km | 208 ms p50 | 57 ms p50 | 8.4 ms |
-
-RLS is still 98.9% of 5km p95 after the rewrite, and the 5km tier is still the
-slowest — §7.1's stated target was not hit, because the remaining cost is
-`is_blocked` running once per row and no hoist can remove it: `blocks` is not a
-column of `parties`.
+| zoom | as shipped | RLS-bypassed control |
+|---|---|---|
+| 5km | **995 ms p50** | 2 ms |
+| 50km | 230 ms p50 | — |
+| 500km | 208 ms p50 | — |
 
 ~99% of p95 is the row policy, and it gets **worse as you zoom in**, which is
 where the users are. The 500km tier has a cheap *leakproof* pre-filter
@@ -130,23 +67,6 @@ Adding `pg_trgm` or a `tsvector` column before this rewrite would buy nothing
 measurable, and worse, would be measured against a 995ms floor — which teaches
 the wrong lesson about the index.
 
-> **Corrected.** This paragraph is the one part of §1 that survives intact, and
-> it is worth more than the rest: the leakproof-predicate-first mechanism it
-> describes is real, and it turned out to be the *whole* answer rather than a
-> side note. Applied spatially — a `float8` bounding box on generated `lat`/
-> `lon` columns, since `float8ge`/`float8le` are leakproof where
-> `geography_overlaps` is not — it takes the same query from **205 ms to
-> 9.3 ms** under the shipped policy, cutting 10,022 rows to 430 *before*
-> `is_blocked` is called even once (28,868 → 1,646 buffers), for an identical
-> 264 rows out. Reproducible as variant E of
-> `scripts/explain_policy_pushdown.sh`. That is the route §7 should have
-> pointed at, and it is Phase 13:
-> [`phase-13-leakproof-spatial-prefilter.md`](phase-13-leakproof-spatial-prefilter.md).
->
-> The claim about search is unchanged and still correct, with one amendment:
-> the floor it would be measured against is now 199 ms rather than 995 ms, and
-> the rewrite did not remove it. Search is still blocked.
-
 ---
 
 ## 2. What changes
@@ -182,22 +102,6 @@ the caller is already looking at. Hoisting them:
   at all,
 - and leaves a cheap, row-local `boolean` chain where a `SECURITY DEFINER`
   function scan used to be.
-
-> **Corrected: what this buys, and what it does not.**
->
-> It buys **5×** — 995 ms → 199 ms p50 at 5km — and that is all it buys. It
-> does **not** buy the index, and the framing above ("so the planner can reach
-> `parties_location`") is the error this whole document exists to warn about.
-> A cheaper barrier is still a barrier; `st_dwithin` is non-leakproof and stays
-> behind it regardless.
->
-> Note also where the remaining 199 ms lives, because it bounds any further
-> hoisting: `is_blocked` is the **first** term and runs on every row, so the
-> hoist traded two definer calls per row for one. It cannot be hoisted further
-> — `blocks` is not a column of `parties`, which is exactly why it has to be a
-> definer function (§3). The floor for this shape of policy is one definer call
-> per row scanned, so the only way down is to **scan fewer rows**, not to make
-> the policy cheaper. That is what the leakproof pre-filter in §1 does.
 
 Note this brief hoists `host_id = auth.uid()` as well, which the audit's
 sketch did not. It costs nothing and short-circuits a host's own private
@@ -449,44 +353,17 @@ calls `can_user_access_party` directly and is likewise untouched.
    is aimed at, and the `like` row is the one that has to move before search
    is worth building: today it costs the same as the baseline because it runs
    behind the policy on every row.
-3. ~~`bash scripts/explain_proximity.sh`~~ — **the acceptance criterion was
-   structural, and it was pointed at a script that cannot fail it.** Corrected
-   below; the criterion itself is unachievable and is retired.
+3. `bash scripts/explain_proximity.sh` — the acceptance criterion is
+   structural, not a timing: the 5km plan must show
 
-   > **`explain_proximity.sh` IS NOT AN ACCEPTANCE CHECK FOR ANY RLS CHANGE.**
-   >
-   > It EXPLAINs as `postgres`, which bypasses row security entirely — and
-   > correctly so, because the thing it measures, the proximity notification
-   > engine, is `SECURITY DEFINER` and genuinely runs with no policy in its
-   > path (`enqueue_nearby_party_notifications`, `prosecdef = t`). Making it
-   > run as `authenticated` would be the same error in reverse: it would
-   > measure a query the engine never issues.
-   >
-   > The consequence is that its Query 2 printed
-   >
-   > ```
-   > Index Scan using parties_location on parties p
-   >   Index Cond: ((location && _st_expand(<point>, 5000)) AND (... 500))
-   > ```
-   >
-   > — the exact line this step demanded — **before the migration as well as
-   > after**. Following step 3 as written would have certified a no-op as a
-   > success. A warning to that effect is now at the top of the script itself.
-   >
-   > **The rule:** anything claiming to measure an RLS effect must run through
-   > `tests.authenticate_as`. If a plan is EXPLAINed as `postgres`, the row
-   > policies are not in it and the measurement is about a different query.
-   > `loadtest_map_query.sh` and `explain_policy_pushdown.sh` both authenticate;
-   > `explain_proximity.sh` deliberately does not.
+   ```
+   ->  Bitmap Index Scan on parties_location
+         Index Cond: (location && _st_expand(<point>, 5000))
+   ```
 
-   The structural criterion this step asked for — `Index Cond: (location &&
-   _st_expand(<point>, 5000))` on `parties_location`, under RLS — **is not
-   reachable by any policy** (see the banner at the top). `bash
-   scripts/explain_policy_pushdown.sh` is the replacement: it EXPLAINs the 5km
-   map body as an authenticated viewer under four policy shapes and counts
-   `parties_location` scans with `pg_stat_get_xact_numscans`, independently of
-   the plan text. Read its output as evidence for *why* the criterion is
-   retired, not as a check that can pass.
+   If the plan still says `Seq Scan on parties` with `can_access_party(id)` in
+   the filter, the hoist did not achieve its purpose however much the wall
+   clock improved.
 4. **Re-price gotcha 20.** All eight read RPCs are VOLATILE and therefore have
    never been inlined; `20260819095452` pinned `search_path` on them for free
    because there was no inlining to lose. That calculation was made *while the
@@ -495,16 +372,6 @@ calls `can_user_access_party` directly and is likewise untouched.
    which is noise today and might not be after.
 5. Only then: `pg_trgm`, an index on `title`/`area`, and the search RPC. That
    is Phase 13, and it is now unblocked rather than sandbagged.
-
-   > **Corrected: step 5 did not become available.** Search is blocked for the
-   > unchanged reason — `ilike` is non-leakproof, lands behind the barrier, and
-   > cannot reach a `pg_trgm` index no matter how cheap the policy is. The
-   > rewrite lowered the floor it would be measured against from 995 ms to
-   > 199 ms and removed nothing structural. What unblocks Phase 13 is getting
-   > the scan out from behind the barrier: a leakproof indexable pre-filter
-   > (§1's correction, measured at 228 ms → 8.8 ms) or a `SECURITY DEFINER`
-   > read RPC. See §5 of
-   > [`phase-12-policy-rewrite-result.md`](phase-12-policy-rewrite-result.md).
 
 ---
 
@@ -516,62 +383,3 @@ calls `can_user_access_party` directly and is likewise untouched.
 - **Anything about `anon`'s table grants.** The unauthenticated map is a
   separate question with a separate answer; `20260821175831` documents it.
 - **Search itself.** This brief exists to unblock it, not to contain it.
-
----
-
-## 9. Why the `SECURITY DEFINER` read RPC was rejected
-
-**Added after execution, and deliberately placed where it cannot be missed:
-this is the option someone will act on later, because its headline number is
-the best one on the page.**
-
-The measured routes to a fast map query are in §5 of
-[`phase-12-policy-rewrite-result.md`](phase-12-policy-rewrite-result.md).
-Making `get_parties_near_user` `SECURITY DEFINER` and filtering visibility in
-its body measures at **~2 ms against today's 199 ms** — roughly 100×, the
-largest number anywhere in this work. It was still rejected in favour of a
-leakproof bounding box at 9.3 ms.
-
-**The reason is not "one more copy of the rule."** That framing is wrong and it
-undersells the objection badly, because this project has already decided once
-that a second copy is acceptable when a test pins it — that decision is §2 of
-this brief and it stands. If duplication were the whole objection, the answer
-would obviously be "write another equivalence test and take the 100×."
-
-The two actual reasons:
-
-**1. It is two rules, not one, and the second one is invisible until you read
-the plan.** The map query joins `profiles`, and the `profiles` row policy is
-contributing a term to that join today:
-
-```
-->  Index Scan using profiles_pkey on profiles pr
-      Filter: ((NOT is_blocked((InitPlan 96).col1, id)) AND ((map_visibility = 'public') OR ...))
-```
-
-That `NOT is_blocked(auth.uid(), id)` is **the `profiles` policy**, not the RPC
-body — the `map_visibility` half is the RPC's, the block filter is not. Going
-`SECURITY DEFINER` switches off row security for *every* table the function
-touches, so the RPC would have to reimplement the `parties` visibility rule
-**and** the `profiles` block filter. Anyone scoping this from the §2 diff alone
-will plan for one and ship one, and the missing one is a block filter — which
-fails open, silently, in favour of the person who was blocked.
-
-**2. The `parties` policy is a backstop, and a definer RPC has nothing under
-it.** The policy is not just the map query's filter. It is the last line for
-every read path against that table: PostgREST reads, the seven other policies
-in §6 that reach `parties` underneath, and every query nobody has written yet.
-Today a bug in `get_parties_near_user`'s `where` clause is *caught* by the
-policy — the RPC can be wrong and the data still does not leak. A definer RPC
-is exactly as correct as its own `where` clause, with nothing beneath it.
-
-So the trade is: **~7 ms of latency in exchange for the defence-in-depth on the
-widest-blast-radius table in the schema.** At 9.3 ms versus 2 ms that is not a
-close call. It would become one only if the bounding box turned out not to be
-enough, and that is a question to reopen with a measurement rather than with
-the 100× headline.
-
-If it is ever taken: the equivalence-assertion pattern in
-`17_parties_policy.test.sql` is what makes it survivable, and it would need to
-be applied twice — once for `parties`, once for the `profiles` terms — because
-per reason 1 the second rule is the one that gets forgotten.

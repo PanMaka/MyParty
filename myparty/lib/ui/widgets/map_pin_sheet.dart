@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../models/feed_post.dart';
 import '../../models/map_party_pin.dart';
-import '../../models/mp_party.dart';
 import '../theme/app_theme.dart';
 import 'diagonal_placeholder.dart';
 import 'privacy_badge.dart';
@@ -25,7 +24,16 @@ class MapPinSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final type = pin.isPrivate ? MpPartyType.private : MpPartyType.public;
+    // One clock reading for the whole sheet. `pin.live` and `pin.attendeeCount`
+    // are conveniences that each call `DateTime.now()` themselves, so the
+    // three uses below were three separate readings of the clock — and a party
+    // crossing its start time between them would print an interested count
+    // under a "μέσα τώρα" label. Same reason [MpMapPin] takes its instant from
+    // its parent rather than reading one per field.
+    final now = DateTime.now();
+    final live = pin.liveAt(now);
+    final count = pin.attendeeCountAt(now);
+
     return SafeArea(
       top: false,
       child: Container(
@@ -59,8 +67,8 @@ class MapPinSheet extends StatelessWidget {
                       const SizedBox(height: 4),
                       Row(
                         children: [
-                          PrivacyBadge(type: type),
-                          if (pin.live) ...[
+                          PrivacyBadge(isPrivate: pin.isPrivate),
+                          if (live) ...[
                             const SizedBox(width: 6),
                             Text('ΤΩΡΑ', style: AppTextStyles.mono(size: 9, color: AppColors.pinkLight)),
                           ],
@@ -88,7 +96,7 @@ class MapPinSheet extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
               decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(10)),
               child: Text(
-                pin.live ? '${pin.attendeeCount} μέσα τώρα' : '${pin.attendeeCount} ενδιαφέρονται',
+                live ? '$count μέσα τώρα' : '$count ενδιαφέρονται',
                 style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w500),
               ),
             ),

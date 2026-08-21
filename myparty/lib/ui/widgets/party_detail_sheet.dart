@@ -296,7 +296,7 @@ class PartyDetailSheet extends StatelessWidget {
             left: 12,
             child: Row(
               children: [
-                PrivacyBadge(type: party.type, suffix: party.isPrivate ? 'ΜΟΝΟ ΚΑΛΕΣΜΕΝΟΙ' : null, fontSize: 9),
+                PrivacyBadge(isPrivate: party.isPrivate, suffix: party.isPrivate ? 'ΜΟΝΟ ΚΑΛΕΣΜΕΝΟΙ' : null, fontSize: 9),
                 if (party.live) ...[
                   const SizedBox(width: 6),
                   Container(

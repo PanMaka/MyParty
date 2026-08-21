@@ -4,4 +4,11 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- The local Supabase stack serves plain HTTP on :54321, and Android 9+
+         blocks cleartext by default, so without this the emulator's requests
+         fail before they leave the device. Scoped to the debug manifest on
+         purpose: release builds keep the platform default and can reach
+         HTTPS only. -->
+    <application android:usesCleartextTraffic="true" />
 </manifest>
