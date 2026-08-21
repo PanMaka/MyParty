@@ -7,7 +7,6 @@ import 'package:myparty/data/social_repository.dart';
 import 'package:myparty/models/hosted_parties.dart';
 import 'package:myparty/models/party_summary.dart';
 import 'package:myparty/models/profile.dart';
-import 'package:myparty/models/profile_privacy.dart';
 import 'package:myparty/models/profile_stats.dart';
 import 'package:myparty/ui/screens/profile_screen.dart';
 import 'package:myparty/ui/widgets/diagonal_placeholder.dart';
@@ -18,20 +17,17 @@ import 'package:myparty/ui/widgets/profile_party_card.dart';
 /// stays in sync with the real constructor, and overrides every method that
 /// touches the network — `ProfileRepository` resolves its client lazily, so no
 /// Supabase client is ever constructed here.
+///
+/// Nothing here fakes `fetchPrivacy`, and that absence is an assertion. The
+/// tiers moved to `SettingsScreen`, so the profile screen must not fetch them
+/// any more — if it starts again, the real method runs, reaches for a Supabase
+/// client that does not exist under `flutter test`, and the suite says so.
 class _FakeProfileRepository extends ProfileRepository {
   _FakeProfileRepository({
-    ProfilePrivacy? privacy,
     ProfileStats? stats,
-    this.failWrites = false,
     this.profile = _defaultProfile,
     this.failLoad = false,
-  }) : _privacy = privacy ?? _defaultPrivacy,
-       _stats = stats ?? _defaultStats;
-
-  static const _defaultPrivacy = ProfilePrivacy(
-    mapVisibility: MapVisibility.public,
-    invitePolicy: InvitePolicy.anyone,
-  );
+  }) : _stats = stats ?? _defaultStats;
 
   static const _defaultStats = ProfileStats(partiesAttended: 7, partiesHosted: 3, storiesPosted: 12);
 
@@ -49,21 +45,11 @@ class _FakeProfileRepository extends ProfileRepository {
     avatarPath: 'me/avatar.jpg',
   );
 
-  final bool failWrites;
-
   /// Null models both "no such row" and "the SELECT policy filtered it".
   final Profile? profile;
   final bool failLoad;
 
-  ProfilePrivacy _privacy;
   final ProfileStats _stats;
-
-  /// Every wire value the screen actually sent, in order. Asserting on `.wire`
-  /// rather than on the enum is deliberate: the string is what the database
-  /// sees, and a mismatch with the `map_visibility`/`invite_policy` enum types
-  /// is a 22P02 at runtime that no amount of Dart type-checking would catch.
-  final List<String> mapVisibilityWrites = [];
-  final List<String> invitePolicyWrites = [];
 
   /// Every path the header asked Storage to resolve.
   ///
@@ -84,9 +70,6 @@ class _FakeProfileRepository extends ProfileRepository {
   }
 
   @override
-  Future<ProfilePrivacy?> fetchPrivacy() async => _privacy;
-
-  @override
   Future<ProfileStats> fetchStats({String? userId}) async => _stats;
 
   /// Stands in for `storage.from('avatars').getPublicUrl(path)`. The host is
@@ -98,18 +81,6 @@ class _FakeProfileRepository extends ProfileRepository {
     if (path == null) return null;
     avatarUrlRequests.add(path);
     return 'https://stub.invalid/avatars/$path';
-  }
-
-  @override
-  Future<void> updatePrivacy({MapVisibility? mapVisibility, InvitePolicy? invitePolicy}) async {
-    if (mapVisibility != null) mapVisibilityWrites.add(mapVisibility.wire);
-    if (invitePolicy != null) invitePolicyWrites.add(invitePolicy.wire);
-
-    // Rejected exactly as the server would reject it: nothing is stored. The
-    // screen must not end up displaying the value it tried to write.
-    if (failWrites) throw Exception('rejected');
-
-    _privacy = _privacy.copyWith(mapVisibility: mapVisibility, invitePolicy: invitePolicy);
   }
 }
 
@@ -242,18 +213,10 @@ Future<void> _pumpProfile(
   await tester.pumpAndSettle();
 }
 
-/// The ΙΔΙΩΤΙΚΟΤΗΤΑ card sits well below the fold, and the screen's `ListView`
-/// only builds the children it needs — so an off-screen row is genuinely absent
-/// from the tree, not merely invisible. Every privacy assertion has to scroll
+/// The party list runs well below the fold, and the screen's `ListView` only
+/// builds the children it needs — so an off-screen card is genuinely absent
+/// from the tree, not merely invisible. Every assertion about one has to scroll
 /// first or it would fail for the wrong reason.
-/// An option label inside the open sheet. Scoped rather than bare, because the
-/// CURRENT tier's label is on screen twice while the sheet is open — once as the
-/// row's subtitle underneath and once as the option itself — and a bare
-/// `find.text` is ambiguous for exactly the case that matters (re-picking the
-/// value you already have).
-Finder _sheetOption(String label) =>
-    find.descendant(of: find.byType(BottomSheet), matching: find.text(label));
-
 Future<void> _scrollTo(WidgetTester tester, Finder finder) async {
   await tester.scrollUntilVisible(finder, 200, scrollable: find.byType(Scrollable).first);
   await tester.pumpAndSettle();
@@ -427,16 +390,53 @@ void main() {
         target: const OtherProfile('someone-else'),
       );
 
-      // fetchPrivacy is self-only, so these rows on somebody else's profile
-      // would be showing the VIEWER's tiers under their name. Same for the
-      // sign-out button and the account-deletion row.
-      expect(find.text('Ποιος βλέπει τα πάρτι μου στον χάρτη'), findsNothing);
-      expect(find.text('Αποσύνδεση'), findsNothing);
-      expect(find.text('Δεδομένα & διαγραφή'), findsNothing);
+      // The settings live a screen away now, so what must be absent here is
+      // the door to them: the gear opens YOUR privacy tiers, YOUR consents and
+      // YOUR account deletion, and it is reached from a screen showing
+      // somebody else's name.
+      expect(find.byIcon(Icons.settings_outlined), findsNothing);
 
       // And there is no second view of someone else's profile to toggle to.
       expect(find.text('ΕΓΩ'), findsNothing);
       expect(find.text('ΔΗΜΟΣΙΑ'), findsNothing);
+    });
+  });
+
+  group('the settings gear', () {
+    testWidgets('opens the settings screen', (tester) async {
+      await _pumpProfile(tester, _FakeProfileRepository());
+
+      // No scrolling: the point of the move is that these controls are one tap
+      // from the top of the tab, rather than under however many parties you
+      // have hosted.
+      await tester.tap(find.byIcon(Icons.settings_outlined));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Ρυθμίσεις'), findsOneWidget);
+    });
+
+    testWidgets('survives the public preview', (tester) async {
+      await _pumpProfile(tester, _FakeProfileRepository());
+
+      await tester.tap(find.text('ΔΗΜΟΣΙΑ'));
+      await tester.pumpAndSettle();
+
+      // Previewing your public profile does not make you a stranger to
+      // yourself — the same reasoning that keeps the owner's action row on
+      // screen in this state.
+      expect(find.byIcon(Icons.settings_outlined), findsOneWidget);
+    });
+
+    testWidgets('the owner sections themselves are gone from the tab', (tester) async {
+      await _pumpProfile(tester, _FakeProfileRepository());
+
+      // Not "below the fold" — absent. `scrollUntilVisible` would run to the
+      // end of the list and throw if any of these were merely off-screen, so
+      // findsNothing here is a real claim about the tree.
+      expect(find.text('ΙΔΙΩΤΙΚΟΤΗΤΑ'), findsNothing);
+      expect(find.text('ΕΙΔΟΠΟΙΗΣΕΙΣ'), findsNothing);
+      expect(find.text('ΛΟΓΑΡΙΑΣΜΟΣ'), findsNothing);
+      expect(find.text('Αποσύνδεση'), findsNothing);
     });
   });
 
@@ -702,91 +702,6 @@ void main() {
       // policy — is gone, so the row's shape no longer encodes who is looking.
       expect(find.text('ΑΚΟΛΟΥΘΟΙ'), findsOneWidget);
       expect(find.text('ΔΙΟΡΓΑΝΩΣΕ'), findsOneWidget);
-    });
-  });
-
-  group('privacy rows', () {
-    testWidgets('show the loaded tiers rather than the old hardcoded copy', (tester) async {
-      await _pumpProfile(tester, _FakeProfileRepository());
-      await _scrollTo(tester, find.text('Ποιος βλέπει τα πάρτι μου στον χάρτη'));
-
-      expect(find.text('Ποιος βλέπει τα πάρτι μου στον χάρτη'), findsOneWidget);
-      expect(find.text('Όλοι'), findsOneWidget);
-      expect(find.text('Ποιος μπορεί να με καλέσει'), findsOneWidget);
-      expect(find.text('Οποιοσδήποτε'), findsOneWidget);
-
-      // Copy from the design prototype that described a friendship model the
-      // schema does not have.
-      expect(find.text('Φίλοι και φίλοι φίλων'), findsNothing);
-      expect(find.text('Οι φίλοι βλέπουν πού είσαι απόψε'), findsNothing);
-    });
-
-    testWidgets('choosing a map tier writes the enum wire value', (tester) async {
-      final repo = _FakeProfileRepository();
-      await _pumpProfile(tester, repo);
-      await _scrollTo(tester, find.text('Ποιος βλέπει τα πάρτι μου στον χάρτη'));
-
-      await tester.tap(find.text('Ποιος βλέπει τα πάρτι μου στον χάρτη'));
-      await tester.pumpAndSettle();
-
-      // The sheet explains what each tier does — a tier list with only labels
-      // would be guessable at best.
-      expect(_sheetOption('Όσοι με ακολουθούν'), findsOneWidget);
-      expect(find.textContaining('Όσοι έχουν πρόσκληση'), findsOneWidget);
-
-      await tester.tap(_sheetOption('Κανείς'));
-      await tester.pumpAndSettle();
-
-      expect(repo.mapVisibilityWrites, ['private']);
-      expect(repo.invitePolicyWrites, isEmpty);
-      expect(find.text('Κανείς'), findsOneWidget);
-    });
-
-    testWidgets('choosing the same tier again writes nothing', (tester) async {
-      final repo = _FakeProfileRepository();
-      await _pumpProfile(tester, repo);
-      await _scrollTo(tester, find.text('Ποιος μπορεί να με καλέσει'));
-
-      await tester.tap(find.text('Ποιος μπορεί να με καλέσει'));
-      await tester.pumpAndSettle();
-      await tester.tap(_sheetOption('Οποιοσδήποτε'));
-      await tester.pumpAndSettle();
-
-      expect(repo.invitePolicyWrites, isEmpty);
-    });
-
-    testWidgets('choosing an invite policy writes the enum wire value', (tester) async {
-      final repo = _FakeProfileRepository();
-      await _pumpProfile(tester, repo);
-      await _scrollTo(tester, find.text('Ποιος μπορεί να με καλέσει'));
-
-      await tester.tap(find.text('Ποιος μπορεί να με καλέσει'));
-      await tester.pumpAndSettle();
-      await tester.tap(_sheetOption('Μόνο όσους ακολουθώ'));
-      await tester.pumpAndSettle();
-
-      expect(repo.invitePolicyWrites, ['following']);
-      expect(repo.mapVisibilityWrites, isEmpty);
-      expect(find.text('Μόνο όσους ακολουθώ'), findsOneWidget);
-    });
-
-    testWidgets('a rejected write leaves the row showing the stored value', (tester) async {
-      final repo = _FakeProfileRepository(failWrites: true);
-      await _pumpProfile(tester, repo);
-      await _scrollTo(tester, find.text('Ποιος βλέπει τα πάρτι μου στον χάρτη'));
-
-      await tester.tap(find.text('Ποιος βλέπει τα πάρτι μου στον χάρτη'));
-      await tester.pumpAndSettle();
-      await tester.tap(_sheetOption('Κανείς'));
-      await tester.pumpAndSettle();
-
-      // It was attempted...
-      expect(repo.mapVisibilityWrites, ['private']);
-      // ...and the row reloaded to what the server actually holds. A privacy
-      // control that displays a setting the server never stored is worse than
-      // one that fails loudly — the user would believe they were hidden.
-      expect(find.text('Όλοι'), findsOneWidget);
-      expect(find.text('Κανείς'), findsNothing);
     });
   });
 }

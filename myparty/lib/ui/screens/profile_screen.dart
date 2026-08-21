@@ -7,19 +7,16 @@ import '../../models/feed_post.dart';
 import '../../models/hosted_parties.dart';
 import '../../models/party_summary.dart';
 import '../../models/profile.dart';
-import '../../models/profile_privacy.dart';
 import '../../models/profile_stats.dart';
-import '../../services/auth_service.dart';
 import '../../utils/greek_date.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
 import '../widgets/follow_button.dart';
 import '../widgets/profile_party_card.dart';
 import '../widgets/report_sheet.dart';
-import 'account_deletion_screen.dart';
 import 'host_wizard_screen.dart';
 import 'profile_edit_screen.dart';
-import 'notification_settings_screen.dart';
+import 'settings_screen.dart';
 
 /// Whose profile the screen is showing, and — when it is the owner's — whether
 /// they are previewing how it looks to everybody else.
@@ -27,12 +24,12 @@ import 'notification_settings_screen.dart';
 /// This replaces a `String? userId` paired with a `bool _selfView`, which
 /// spelled four states when only three exist. The missing constraint was
 /// `userId != null && _selfView == true`: someone else's profile rendering the
-/// OWNER sections, which is to say your privacy tiers (`fetchPrivacy` is
-/// self-only and would have loaded YOURS under THEIR name), your notification
-/// settings, your account-deletion row and your sign-out button. Nothing in the
-/// old type prevented it — the tab bar simply never passed a `userId`, so it
-/// never happened. The moment step 5 makes the tab bar pass one, "never
-/// happens" stops being true, so the state is made unrepresentable instead.
+/// OWNER sections — your hosted-party list, and the gear that opens your
+/// privacy tiers, your notification settings, your account-deletion row and
+/// your sign-out button. Nothing in the old type prevented it — the tab bar
+/// simply never passed a `userId`, so it never happened. The moment step 5
+/// makes the tab bar pass one, "never happens" stops being true, so the state
+/// is made unrepresentable instead.
 ///
 /// The two render questions are answered here, once, rather than at each of the
 /// six call sites that used to re-derive them from the bool.
@@ -46,8 +43,10 @@ sealed class ProfileTarget {
   /// uuid to pass — there is nothing here that could be wrong.
   String? get userIdOrNull;
 
-  /// Whether the owner-only sections render — privacy, notifications, account
-  /// deletion, sign out.
+  /// Whether the owner-only content renders — today that is the hosted-party
+  /// list, which comes from `get_my_hosted_parties` and has no user id to point
+  /// at anybody else. The settings themselves are a screen away now, behind the
+  /// gear, which [OwnProfile] gates on its own.
   bool get showsOwnerSections;
 
   /// Whether the follow button and the report menu render.
@@ -104,8 +103,7 @@ class ProfileScreen extends StatefulWidget {
   });
 
   /// Injectable so widget tests can subclass [ProfileRepository] without a
-  /// Supabase client ever existing, the same way [NotificationSettingsScreen]
-  /// takes a [DeviceRepository].
+  /// Supabase client ever existing, the same way [SettingsScreen] takes one.
   final ProfileRepository? repository;
 
   /// Injectable for the same reason. Needed now that the ΑΚΟΛΟΥΘΕΙ rail loads
@@ -157,16 +155,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
 
   Profile? _profile;
-  ProfilePrivacy? _privacy;
   ProfileStats _stats = ProfileStats.empty;
 
-  /// Header state. [_profile] non-null wins over both of these, so a privacy
-  /// write reloading in the background never blanks a header that already has
-  /// something true to show.
+  /// Header state. [_profile] non-null wins over both of these, so a reload in
+  /// the background never blanks a header that already has something true to
+  /// show.
   bool _loading = true;
   Object? _loadError;
-
-  bool _busy = false;
 
   @override
   void initState() {
@@ -179,16 +174,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       final profile = await _profiles.fetchProfile(userId: id);
       final stats = await _profiles.fetchStats(userId: id);
-      // Self-only by construction, and pointless on someone else's profile —
-      // it would load the VIEWER's tiers, which is the bug the old bool made
-      // possible. Skipped rather than merely hidden.
-      final privacy = _target is OwnProfile ? await _profiles.fetchPrivacy() : null;
 
       if (!mounted) return;
       setState(() {
         _profile = profile;
         _stats = stats;
-        _privacy = privacy;
         _loading = false;
         _loadError = null;
       });
@@ -232,30 +222,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     await _load();
   }
 
-  /// Wraps every privacy write, exactly as [NotificationSettingsScreen] does:
-  /// two taps cannot race each other into the database, and a rejected write
-  /// reloads rather than leaving a switch showing a state the server never
-  /// accepted. That last part matters more here than on a notification
-  /// preference — a privacy control that displays a setting the server did not
-  /// store is worse than one that fails loudly.
-  Future<void> _mutate(Future<void> Function() action) async {
-    if (_busy) return;
-    setState(() => _busy = true);
-    try {
-      await action();
-      await _load();
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Κάτι πήγε στραβά: $error'), behavior: SnackBarBehavior.floating),
-        );
-      }
-      await _load();
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
   /// Opens the editor and re-reads the profile when it closes.
   ///
   /// Unconditional rather than gated on the popped value: "nothing changed" is
@@ -294,27 +260,40 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   // Only the owner gets the toggle: it previews YOUR public
                   // profile, and there is no second view of somebody else's.
+                  // The gear beside it is owner chrome for the same reason —
+                  // and it stays put in the public preview, along with the
+                  // segment it sits next to, because previewing your profile
+                  // does not take your own settings away from you.
                   if (_target case final OwnProfile own)
-                    Container(
-                      padding: const EdgeInsets.all(3),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.06),
-                        borderRadius: BorderRadius.circular(99),
-                      ),
-                      child: Row(
-                        children: [
-                          _segment(
-                            'ΕΓΩ',
-                            !own.previewingPublicView,
-                            () => setState(() => _target = const OwnProfile()),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(3),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.06),
+                            borderRadius: BorderRadius.circular(99),
                           ),
-                          _segment(
-                            'ΔΗΜΟΣΙΑ',
-                            own.previewingPublicView,
-                            () => setState(() => _target = const OwnProfile(previewingPublicView: true)),
+                          child: Row(
+                            children: [
+                              _segment(
+                                'ΕΓΩ',
+                                !own.previewingPublicView,
+                                () => setState(() => _target = const OwnProfile()),
+                              ),
+                              _segment(
+                                'ΔΗΜΟΣΙΑ',
+                                own.previewingPublicView,
+                                () => setState(
+                                  () => _target = const OwnProfile(previewingPublicView: true),
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
+                        ),
+                        const SizedBox(width: 8),
+                        _settingsButton(),
+                      ],
                     ),
                 ],
               ),
@@ -360,154 +339,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
             _actionRow(),
-            if (_target.showsOwnerSections) ..._selfSections(context) else ..._publicSections(context),
+            // The owner's half of the screen is now one thing: their parties.
+            // Privacy, notifications, account deletion and sign out moved
+            // behind the gear in the header — see [SettingsScreen].
+            if (_target.showsOwnerSections) _myPartyList() else ..._publicSections(context),
           ],
         ),
       ),
     );
-  }
-
-  List<Widget> _selfSections(BuildContext context) {
-    return [
-      _myPartyList(),
-      Padding(
-        padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('ΙΔΙΩΤΙΚΟΤΗΤΑ', style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.45))),
-            const SizedBox(height: 9),
-            Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(15),
-                color: Colors.white.withValues(alpha: 0.035),
-                border: Border.all(color: AppColors.hairline),
-              ),
-              child: Column(
-                children: [
-                  // Still unwired, and deliberately so: there is no column
-                  // behind it yet. It is also the reason the "πάρτι φέτος" tile
-                  // is owner-only — until this setting exists, the rsvps policy
-                  // IS the answer to "who sees where I go", and get_profile_stats
-                  // does not invent a different one.
-                  _settingsRow(
-                    'Ποιος βλέπει σε ποια πάρτι πάω',
-                    'Έρχεται σύντομα',
-                    chevron: true,
-                    onTap: _comingSoon,
-                  ),
-                  Container(height: 1, color: AppColors.hairline),
-                  // Was a two-state switch on MpStore.mapVisible, which no
-                  // server ever read. Now three tiers on profiles.map_visibility,
-                  // enforced inside get_parties_near_user.
-                  _settingsRow(
-                    'Ποιος βλέπει τα πάρτι μου στον χάρτη',
-                    _privacy?.mapVisibility.label ?? '…',
-                    chevron: true,
-                    onTap: _privacy == null ? null : _pickMapVisibility,
-                  ),
-                  Container(height: 1, color: AppColors.hairline),
-                  _settingsRow(
-                    'Ποιος μπορεί να με καλέσει',
-                    _privacy?.invitePolicy.label ?? '…',
-                    chevron: true,
-                    onTap: _privacy == null ? null : _pickInvitePolicy,
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(4, 9, 4, 0),
-              child: Text(
-                'Τα ιδιωτικά πάρτι στα οποία πας δεν φαίνονται ποτέ σε άτομα που δεν είναι καλεσμένα — ούτε στο προφίλ σου.',
-                style: TextStyle(fontSize: 11, height: 1.5, color: AppColors.textAlpha(0.38)),
-              ),
-            ),
-          ],
-        ),
-      ),
-      // Phase 7c. The consent toggles and the nearby preferences have to be
-      // reachable from somewhere, and this is the screen that already owns
-      // ΙΔΙΩΤΙΚΟΤΗΤΑ. Kept as its own section rather than folded into the
-      // privacy card above because two of its rows are consent — a legal state
-      // with a deletion consequence — and the rows above them are settings.
-      Padding(
-        padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('ΕΙΔΟΠΟΙΗΣΕΙΣ', style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.45))),
-            const SizedBox(height: 9),
-            Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(15),
-                color: Colors.white.withValues(alpha: 0.035),
-                border: Border.all(color: AppColors.hairline),
-              ),
-              child: _settingsRow(
-                'Ειδοποιήσεις & τοποθεσία',
-                'Πάρτι κοντά σου, ώρες ησυχίας, απόσταση',
-                chevron: true,
-                onTap: () => Navigator.of(
-                  context,
-                ).push(MaterialPageRoute<void>(builder: (_) => const NotificationSettingsScreen())),
-              ),
-            ),
-          ],
-        ),
-      ),
-      // Phase 9. App Store Review Guideline 5.1.1(v) requires an in-app
-      // deletion path wherever an account can be created, and requires it to
-      // actually start the deletion rather than link to support. Placed
-      // directly above sign-out because that is where a user looks for it, and
-      // kept as its own section rather than a row in ΕΙΔΟΠΟΙΗΣΕΙΣ because
-      // everything under that heading is reversible and this is not.
-      Padding(
-        padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('ΛΟΓΑΡΙΑΣΜΟΣ', style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.45))),
-            const SizedBox(height: 9),
-            Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(15),
-                color: Colors.white.withValues(alpha: 0.035),
-                border: Border.all(color: AppColors.hairline),
-              ),
-              child: _settingsRow(
-                'Δεδομένα & διαγραφή',
-                'Εξαγωγή των δεδομένων σου, διαγραφή λογαριασμού',
-                chevron: true,
-                onTap: () => Navigator.of(
-                  context,
-                ).push(MaterialPageRoute<void>(builder: (_) => const AccountDeletionScreen())),
-              ),
-            ),
-          ],
-        ),
-      ),
-      Padding(
-        padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
-        child: GestureDetector(
-          onTap: () => AuthService().signOut(),
-          child: Container(
-            padding: const EdgeInsets.all(13),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(15),
-              color: Colors.white.withValues(alpha: 0.035),
-              border: Border.all(color: AppColors.hairline),
-            ),
-            child: Center(
-              child: Text(
-                'Αποσύνδεση',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textAlpha(0.6)),
-              ),
-            ),
-          ),
-        ),
-      ),
-    ];
   }
 
   /// The owner's party list: one heading, two groups, one request.
@@ -917,6 +756,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  /// The gear. Sized to the same 32px pill as the segment beside it, and given
+  /// a [Semantics] label because an icon-only control that leads to consent and
+  /// account deletion is the last place to leave a screen reader guessing.
+  Widget _settingsButton() {
+    return Semantics(
+      button: true,
+      label: 'Ρυθμίσεις',
+      child: GestureDetector(
+        onTap: () => Navigator.of(
+          context,
+        ).push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen())),
+        child: Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.06),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(Icons.settings_outlined, size: 17, color: AppColors.textAlpha(0.7)),
+        ),
+      ),
+    );
+  }
+
   Widget _segment(String label, bool active, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
@@ -1094,145 +957,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       child: Text(
         message,
         style: TextStyle(fontSize: 12, height: 1.4, color: AppColors.textAlpha(0.45)),
-      ),
-    );
-  }
-
-  Widget _settingsRow(String title, String sub, {bool chevron = false, VoidCallback? onTap}) {
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.all(13),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 2),
-                  Text(sub, style: TextStyle(fontSize: 11, color: AppColors.textAlpha(0.45))),
-                ],
-              ),
-            ),
-            if (chevron) Icon(Icons.chevron_right, size: 18, color: AppColors.textAlpha(0.35)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// A switch cannot express three tiers, and squeezing map_visibility into one
-  /// would have to drop a tier or overload it. A sheet also gives each option
-  /// room for the sentence that says what it actually does — which is the
-  /// difference between a control someone sets correctly and one they guess at.
-  Future<void> _pickMapVisibility() async {
-    final chosen = await _pickTier<MapVisibility>(
-      title: 'Ποιος βλέπει τα πάρτι μου στον χάρτη',
-      options: MapVisibility.values,
-      current: _privacy!.mapVisibility,
-      labelOf: (v) => v.label,
-      explanationOf: (v) => v.explanation,
-      // The one thing the tiers do NOT do, stated where the choice is made:
-      // people already tied to a specific party keep seeing it at every tier.
-      footnote:
-          'Όσοι έχουν πρόσκληση ή έχουν ήδη δηλώσει συμμετοχή '
-          'συνεχίζουν να βλέπουν το συγκεκριμένο πάρτι.',
-    );
-    if (chosen == null || chosen == _privacy!.mapVisibility) return;
-    await _mutate(() => _profiles.updatePrivacy(mapVisibility: chosen));
-  }
-
-  Future<void> _pickInvitePolicy() async {
-    final chosen = await _pickTier<InvitePolicy>(
-      title: 'Ποιος μπορεί να με καλέσει',
-      options: InvitePolicy.values,
-      current: _privacy!.invitePolicy,
-      labelOf: (v) => v.label,
-      explanationOf: (v) => v.explanation,
-    );
-    if (chosen == null || chosen == _privacy!.invitePolicy) return;
-    await _mutate(() => _profiles.updatePrivacy(invitePolicy: chosen));
-  }
-
-  Future<T?> _pickTier<T>({
-    required String title,
-    required List<T> options,
-    required T current,
-    required String Function(T) labelOf,
-    required String Function(T) explanationOf,
-    String? footnote,
-  }) {
-    return showModalBottomSheet<T>(
-      context: context,
-      backgroundColor: AppColors.sheet,
-      // Both are needed, and neither is cosmetic. A default modal sheet is
-      // capped at 9/16 of the screen, which three tiers plus their explanations
-      // and the footnote overflow on a short handset — and an overflowing sheet
-      // clips the last option rather than scrolling to it, so a tier would
-      // simply be unreachable. isScrollControlled lifts the cap;
-      // SingleChildScrollView covers the rest (large text scale, small screen).
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (sheetContext) => SafeArea(
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
-                child: Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
-              ),
-              for (final option in options)
-                InkWell(
-                  onTap: () => Navigator.of(sheetContext).pop(option),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                labelOf(option),
-                                style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
-                              ),
-                              const SizedBox(height: 3),
-                              Text(
-                                explanationOf(option),
-                                style: TextStyle(
-                                  fontSize: 11.5,
-                                  height: 1.4,
-                                  color: AppColors.textAlpha(0.5),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (option == current)
-                          const Padding(
-                            padding: EdgeInsets.only(left: 10, top: 2),
-                            child: Icon(Icons.check, size: 18, color: AppColors.pinkLight),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-              if (footnote != null)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-                  child: Text(
-                    footnote,
-                    style: TextStyle(fontSize: 11, height: 1.5, color: AppColors.textAlpha(0.38)),
-                  ),
-                ),
-              const SizedBox(height: 8),
-            ],
-          ),
-        ),
       ),
     );
   }
