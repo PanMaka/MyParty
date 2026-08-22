@@ -565,6 +565,10 @@ is therefore still blocked.
       about it. **§5 of `docs/phase-10-hardening-audit.md` goes before search,
       not after.** Sequencing decided 2026-08-21.
 
+**Known gaps live in `docs/backlog.md`**, including what is deliberately not a
+gap. Sweep it when a phase ends; an item that turns out to be a decision moves
+to its §3 rather than being deleted.
+
 ## Migration naming
 
 `YYYYMMDDHHMMSS_snake_case_description.sql` in `supabase/migrations/`.
