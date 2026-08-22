@@ -316,8 +316,6 @@ returns table (
   cover_path text,
   host_id uuid,
   host_username text,
-  lat double precision,
-  lon double precision,
   going_count integer,
   interested_count integer,
   is_past boolean
@@ -358,11 +356,6 @@ as $$
     p.cover_path,
     p.host_id,
     pr.username as host_username,
-    -- lat/lon so a search hit converts straight into a MapPartyPin and opens
-    -- the SAME sheet the map opens. From `location`, like the map RPC does --
-    -- never from bbox_lat/bbox_lon, which are index support only (Phase 13).
-    st_y(p.location::geometry) as lat,
-    st_x(p.location::geometry) as lon,
     p.going_count,
     p.interested_count,
     public.party_is_past(p.starts_at, p.ends_at) as is_past
