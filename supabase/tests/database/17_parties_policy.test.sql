@@ -631,14 +631,20 @@ select matches(
   'can_user_access_party still owns the invitations probe -- the rule did not move, it was copied'
 );
 
--- The eight call sites, counted rather than named: if a future change removes
--- the helper from a policy, this drops and somebody has to look at why.
+-- The call sites, counted rather than named: if a future change removes the
+-- helper from a policy this drops, and somebody has to look at why.
+--
+-- It went 8 -> 9 in Phase 14B, which is the assertion working rather than
+-- failing: party_search_tokens holds one row per word of a party title, so it
+-- needs exactly the party's visibility, and it gets it by CALLING the helper
+-- instead of restating the rule (rule #4). Raising this number is the right
+-- response to adding a call site and the wrong response to losing one.
 select is(
   (select count(*)::int from pg_policy
    where pg_get_expr(polqual, polrelid) ~* '\mcan_access_party\M|\mcan_user_access_party\M'
       or pg_get_expr(polwithcheck, polrelid) ~* '\mcan_access_party\M|\mcan_user_access_party\M'),
-  8,
-  'the party-visibility helper is still reached from exactly 8 policies'
+  9,
+  'the party-visibility helper is still reached from exactly 9 policies'
 );
 
 
