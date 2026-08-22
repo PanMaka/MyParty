@@ -232,4 +232,65 @@ class PartyRepository {
     }
     return pins;
   }
+
+  /// Text search over party titles and areas, with no spatial bound at all —
+  /// unlike [fetchPartiesNearUser], this deliberately ignores where the map is
+  /// looking. Typing a name should find the party wherever it is.
+  ///
+  /// Returns [MapPartyPin]s because the RPC emits `lat`/`lon` for exactly that
+  /// reason: a search hit converts into the same model the map uses, so tapping
+  /// one opens the same sheet, with the same report action and the same live
+  /// count. A separate search-result type would have been a second thing to
+  /// keep in step with the payload for no gain.
+  ///
+  /// **The upcoming/past split comes from the server and is not recomputed
+  /// here.** `is_past` is `public.party_is_past()`, which is the single
+  /// definition of "this party is over" (see
+  /// `docs/phase-14-text-search.md` §4). Deciding it again in Dart would make a
+  /// second one, and the two would disagree about a party with no stated end —
+  /// which is the whole problem gotcha 21 describes.
+  ///
+  /// Sends the query raw. Normalization — lowercasing, stripping accents,
+  /// transliterating Greek so `taratsa` finds `Ταράτσα` — happens server-side
+  /// in `search_normalize()`, because the stored tokens went through the same
+  /// function and a second copy of that mapping in Dart would diverge from it.
+  ///
+  /// Callers are expected to hold back short queries: see
+  /// [SearchScreen.minQueryLength]. A one- or two-character prefix matches a
+  /// large fraction of the corpus and is slow for a result nobody wants; the
+  /// RPC is deliberately uncapped rather than silently returning a subset, so
+  /// the restraint lives here rather than in the database.
+  Future<PartySearchResults> searchParties(String query, {int limit = 20}) async {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) return const PartySearchResults(upcoming: [], past: []);
+
+    final rows = await _client.rpc(
+      'search_parties',
+      params: {'p_query': trimmed, 'p_limit': limit},
+    );
+
+    final upcoming = <MapPartyPin>[];
+    final past = <MapPartyPin>[];
+    for (var i = 0; i < (rows as List).length; i++) {
+      final row = rows[i] as Map<String, dynamic>;
+      if (row['lat'] == null || row['lon'] == null) continue;
+      final pin = MapPartyPin.fromRpcRow(row, fallbackId: 'hit_$i');
+      ((row['is_past'] as bool?) ?? false ? past : upcoming).add(pin);
+    }
+    return PartySearchResults(upcoming: upcoming, past: past);
+  }
+}
+
+/// Party search results, already split the way they are rendered.
+///
+/// Two lists rather than one list plus a flag, because every caller wants the
+/// grouping and none of them should be the place that decides it.
+class PartySearchResults {
+  const PartySearchResults({required this.upcoming, required this.past});
+
+  final List<MapPartyPin> upcoming;
+  final List<MapPartyPin> past;
+
+  bool get isEmpty => upcoming.isEmpty && past.isEmpty;
+  int get length => upcoming.length + past.length;
 }

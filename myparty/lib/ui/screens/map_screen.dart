@@ -6,10 +6,12 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../data/party_repository.dart';
+import '../../data/social_repository.dart';
 import '../../models/map_party_pin.dart';
 import '../theme/app_theme.dart';
 import '../widgets/map_pin_sheet.dart';
 import '../widgets/mp_map_pin.dart';
+import 'search_screen.dart';
 
 enum _MapFilter { live, later, weekend }
 
@@ -46,13 +48,18 @@ Future<LatLng?> _deviceLocation() async {
 typedef LocationFix = Future<LatLng?> Function();
 
 class MapScreen extends StatefulWidget {
-  const MapScreen({super.key, this.repository, this.locate});
+  const MapScreen({super.key, this.repository, this.social, this.locate});
 
   /// Injectable so widget tests can subclass [PartyRepository] without a
   /// Supabase client ever existing, the same way [ProfileScreen] takes one.
   /// This screen used to call `Supabase.instance.client.rpc` inline, which is
   /// precisely why it was the one screen with no test.
   final PartyRepository? repository;
+
+  /// Only ever handed to [SearchScreen], which the map opens. The map itself
+  /// reads no social data; carrying the seam through keeps the search screen
+  /// testable from a map test without a Supabase client existing.
+  final SocialRepository? social;
 
   /// Injectable for a sharper reason than the repository is, and the seam is
   /// not optional: geolocator's platform channel never completes inside
@@ -106,6 +113,12 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _onPinTap(MapPartyPin pin) => showMapPinSheet(context, pin);
+
+  void _openSearch() {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => SearchScreen(social: widget.social, parties: widget.repository),
+    ));
+  }
 
   /// One pin's marker, sized from the same [now] the pin itself is drawn for.
   ///
@@ -219,19 +232,29 @@ class _MapScreenState extends State<MapScreen> {
           Row(
             children: [
               Expanded(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
-                  decoration: BoxDecoration(
-                    color: AppColors.chipFill,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: AppColors.hairline),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.search, size: 16, color: AppColors.textAlpha(0.5)),
-                      const SizedBox(width: 8),
-                      Text('Ψάξε πάρτι ή μέρος', style: TextStyle(fontSize: 13.5, color: AppColors.textAlpha(0.5))),
-                    ],
+                // Search is deliberately NOT bounded by the viewport: it opens
+                // its own screen and queries every party the viewer may see,
+                // wherever it is. Passing the map's centre and radius in here
+                // would make "search" mean "search what is on screen", which is
+                // a different feature.
+                child: GestureDetector(
+                  onTap: _openSearch,
+                  behavior: HitTestBehavior.opaque,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
+                    decoration: BoxDecoration(
+                      color: AppColors.chipFill,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AppColors.hairline),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.search, size: 16, color: AppColors.textAlpha(0.5)),
+                        const SizedBox(width: 8),
+                        Text('Ψάξε πάρτι ή άτομα',
+                            style: TextStyle(fontSize: 13.5, color: AppColors.textAlpha(0.5))),
+                      ],
+                    ),
                   ),
                 ),
               ),
