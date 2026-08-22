@@ -304,6 +304,47 @@ still contains the original handle.
 
 ---
 
+## 5b. The uncapped tail, and the agreed way it is handled
+
+**Decided 2026-08-22. `search_parties` stays UNCAPPED. Do not "fix" it with a
+`LIMIT` on the candidate set.**
+
+Measured at 10k parties, authenticated, through RLS:
+
+| query | matches | exec |
+|---|---|---|
+| `zeppelin` | 1 | 2.1 ms |
+| `taratsa` | ~3,333 | 295 ms |
+
+Cost is O(matches × policy), not O(table). That is the right shape — reaching
+the index is what makes it depend on matches at all — but a *broad* prefix is
+slow, because every candidate pays the `parties` and `profiles` policies before
+`ORDER BY` can pick the top 20, and no index can order a set RLS has not
+filtered yet.
+
+**The database fix was rejected.** Putting a `LIMIT` on the `hits` CTE bounds
+the worst case and turns *"the 20 soonest matching parties you can see"* into
+*"20 of the first N candidates, whichever those happen to be"*. For a viewer
+whose visible parties all sort late, that silently returns fewer results than
+exist. **Quiet result loss is the exact failure this entire phase was built to
+avoid** — it is the 298-vs-299 bounding box and the eaten `` backreference in
+a third costume — and it does not become acceptable by arriving through the
+performance door instead of the correctness one.
+
+**The agreed fix is in the client, because the expensive query is not a useful
+one.** `SearchScreen` sends nothing until **3 characters**, and debounces
+**300 ms**. A two-letter prefix like `τα` matches a third of the corpus and
+tells the user nothing; it is not a search worth running, so not running it
+costs nothing. Three characters collapses the candidate set to the selective
+end of the curve above.
+
+This is a UX constraint standing in for a database one, which means it can be
+bypassed by any other client. That is accepted: the failure mode of bypassing it
+is a *slow* query, not a wrong one. The reverse — a fast query that quietly
+drops results — is the one that had to be designed out, and it was.
+
+---
+
 ## 6. Out of scope
 
 - **Infix search.** `εχν` will not find `Τεχνο`. Accepted deliberately; nobody

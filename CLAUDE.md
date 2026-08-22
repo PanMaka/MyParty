@@ -153,7 +153,9 @@ Three things there are load-bearing and look wrong without the argument:
   does not render as "Διαγραμμένος χρήστης" — it drops the message out of the
   thread, permanently. Discovery is suppressed where the discovery question is
   asked (`accepts_invite_from`, `wants_nearby_notifications`, and a client-side
-  filter in `SocialRepository.searchProfiles` that is UX, not enforcement).
+  filter in `SocialRepository.searchProfiles`, which since Phase 14A is the
+  `search_profiles` RPC and enforces `deleted_at` server-side rather than
+  leaving it to the client).
 - **`blocks` must not cascade, in either direction.** `is_blocked` is
   symmetric, so deleting the edge un-hides content the *surviving* user
   deliberately hid: B blocks A, A deletes their account, and A's retained

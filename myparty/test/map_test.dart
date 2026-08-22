@@ -6,6 +6,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:myparty/data/party_repository.dart';
 import 'package:myparty/models/map_party_pin.dart';
 import 'package:myparty/ui/screens/map_screen.dart';
+import 'package:myparty/ui/screens/search_screen.dart';
 import 'package:myparty/ui/widgets/mp_map_pin.dart';
 
 /// Stands in for the real repository. Subclasses rather than implements so it
@@ -583,6 +584,25 @@ void main() {
       await _teardown(tester);
     });
 
+    testWidgets('the search bar is wired, and does not carry the viewport with it', (tester) async {
+      // It was a dead Container until Phase 14B. The assertion that matters is
+      // not that a screen opens but that search is NOT scoped to the map: the
+      // whole point is finding a party wherever it is, so no centre or radius
+      // travels across this boundary.
+      final repository = _FakePartyRepository(const []);
+
+      await _mount(tester, repository);
+      await tester.tap(find.text('Ψάξε πάρτι ή άτομα'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(find.byType(SearchScreen), findsOneWidget);
+      expect(find.text('Γράψε κι άλλο'), findsOneWidget,
+          reason: 'it opens on the type-more state, having queried nothing');
+
+      await _teardown(tester);
+    });
+
     testWidgets('renders the map rather than the spinner when there are no parties', (tester) async {
       // The regression this guards is not the empty list, it is the location
       // lookup: it throws under `flutter test`, and before the try/catch that
@@ -593,7 +613,7 @@ void main() {
 
       expect(find.byType(CircularProgressIndicator), findsNothing);
       expect(find.byType(MpMapPin), findsNothing);
-      expect(find.text('Ψάξε πάρτι ή μέρος'), findsOneWidget);
+      expect(find.text('Ψάξε πάρτι ή άτομα'), findsOneWidget);
 
       await _teardown(tester);
     });
