@@ -1,16 +1,63 @@
 # Phase 13 brief — a leakproof spatial pre-filter for the map query
 
-**Status:** scoped, not started. **Blocked on `phase/11-map-rework` merging to
-`main`**; cut the branch after that, not before — see §7.
+**Status: EXECUTED**, `20260821201309_leakproof_spatial_prefilter.sql`.
+587 pgTAP assertions green (556 pre-existing + 31 new). The acceptance criterion
+— rows-into-the-policy, *not* an index name — is met, and §7.1's target that
+5km stop being the slowest tier is met with it.
 
 **Goal, in one sentence:** cut the number of rows that reach the `parties` row
 policy, by adding a bounding-box predicate the planner is *allowed* to evaluate
 before it — without changing who can see which party, and without moving any
 visibility rule.
 
-Measured target: **205 ms → 9.3 ms** at 10k parties, 5km zoom, with the policy
-untouched. Reproducible today as variant E of
-`scripts/explain_policy_pushdown.sh`.
+## Result
+
+Boxed vs unboxed, same tree, 10k parties, p50 over 40 iterations:
+
+| zoom | unboxed | boxed | |
+|---|---|---|---|
+| **5km** | 241.4 ms | **16.0 ms** | **15× faster** |
+| 50km | 66.2 ms | 69.1 ms | 4.4% slower |
+| 500km | 59.1 ms | 63.5 ms | 7.3% slower |
+
+End to end against the Phase 10 baseline, `scripts/loadtest_map_query.sh`:
+5km p50 **995 ms → 199 ms (Phase 12) → 18.9 ms**, and 5km is no longer the
+slowest tier. The plan, read as an authenticated viewer, now shows
+
+```
+Index Cond: ((bbox_lat >= (InitPlan 37).col1) AND (bbox_lat <= (InitPlan 38).col1)
+         AND (bbox_lon >= (InitPlan 39).col1) AND (bbox_lon <= (InitPlan 40).col1))
+Rows Removed by Filter: 166
+```
+
+— the box as an `Index Cond` on InitPlan constants, evaluated *before* the
+policy, with a few hundred rows reaching it instead of 10,022.
+
+The wide-tier regression is real and was kept deliberately: where the box is not
+selective the planner declines the index but the predicate still costs a flat
+~3–4 ms. 225 ms saved at the zoom users sit at, against 3 ms on the two rarest
+tiers. Gating on radius was rejected — see the migration header.
+
+## Two things execution found
+
+- **The box derivation in this brief's §3 was itself wrong at 500 km.** The
+  prescribed `st_envelope(st_buffer(…))` with a flat 0.001° pad is a superset at
+  5 km and *not* at 500 km — `st_buffer` on geography projects to a planar SRID
+  and back, and at that radius the projection and polygon-approximation errors
+  exceed the pad. The invariant test caught it on its first run, at all three
+  latitudes. The shipped box is closed-form instead (angular radius from the
+  smallest WGS84 radius of curvature; longitude bound evaluated at the widest
+  latitude the box reaches), so every rounding goes outward.
+- **`scripts/loadtest_map_query.sh` was already broken on `main`.** Its four
+  `alter function public.get_parties_near_user(...)` statements name a 3-argument
+  signature, and `ALTER FUNCTION` needs an exact one — a defaulted parameter does
+  not make it optional. It stopped resolving when `20260821173147` added
+  `p_limit` in Phase 11 and nothing noticed until this phase re-ran it. Fixed
+  here, with a note.
+
+---
+
+Original scoping follows.
 
 This is route 2 of §5 of
 [`phase-12-policy-rewrite-result.md`](phase-12-policy-rewrite-result.md). Read
