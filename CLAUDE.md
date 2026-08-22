@@ -260,36 +260,8 @@ assertions, including a both-directions equivalence proof over every persona
 and every fixture party, so drift is a red test rather than a silent
 divergence. Do not delete that file, and do not edit one copy without the
 other. **The rewrite did not reach the GiST index and could never have** —
-see gotcha 19 and `docs/phase-12-policy-rewrite-result.md`.
-
-**Phase 13 got the map fast the only way that was left** (`20260821201309`):
-`parties` gains `bbox_lat`/`bbox_lon`, `GENERATED ALWAYS … STORED` off
-`location`, plus a btree — and `get_parties_near_user` bounds them with
-`public.map_search_box`. `float8ge`/`float8le` **are** leakproof, so unlike
-`st_dwithin` the box may be evaluated ahead of the policy: it becomes an
-`Index Cond` on InitPlan constants and a few hundred rows reach
-`can_access_party` instead of 10,022. 5km p50 **995ms → 199ms → 18.9ms**, and
-5km is no longer the slowest tier. It costs ~3–4ms at the wide tiers where the
-box is not selective, kept deliberately (see the migration header).
-
-**The box MUST stay a provable superset of the circle, and `st_dwithin` MUST
-stay in the query.** A box that is not a superset does not slow anything down —
-it deletes parties from the map, silently, for everyone. Two derivations have
-already failed that test: `5000/111320` degrees of latitude (short by 0.00011°
-at 38°N, because geography measures on the spheroid) and
-`st_envelope(st_buffer(…))` with a flat pad (a superset at 5km, not at 500km).
-`18_map_spatial_prefilter.test.sql` places parties at the four cardinal
-extremes at radius ±1m across three latitudes and all three tiers, asserts the
-invariant, **and asserts that the naive box violates it** so the assertion
-cannot go vacuous. Do not tighten the pad, do not substitute a
-degrees-per-metre constant, and do not delete `st_dwithin` because "the box
-already filtered" — the box is a square and its corners are ~40% further out
-than the radius.
-
-Search (Phase 14) is still blocked: `ilike` is non-leakproof and has
-`st_dwithin`'s exact failure mode, so it still lands behind the barrier. A
-bounding box shrinks the input to a *spatial* query; a text search with no
-spatial bound does not get one.
+see gotcha 19 and `docs/phase-12-policy-rewrite-result.md`. Search (Phase 13)
+is therefore still blocked.
 
 **Cross-phase gotchas worth remembering:**
 

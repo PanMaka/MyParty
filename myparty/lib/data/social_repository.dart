@@ -97,32 +97,46 @@ class SocialRepository {
         .eq('followee_id', targetUserId);
   }
 
-  /// Username search. Blocked users are absent because the `profiles` SELECT
-  /// policy filters them, not because of anything done here.
+  /// Username search, server-side through the `search_profiles` RPC.
   ///
-  /// The `deleted_at` filter, by contrast, IS done here, and that asymmetry is
-  /// deliberate rather than an oversight. It cannot go in the SELECT policy:
-  /// `get_feed`, `get_messages` and four other RPCs reach the author through
-  /// an inner join on `profiles` under invoker rights, so a profile made
-  /// invisible by policy does not render as "deleted user" — it drops the
-  /// message out of the thread entirely, permanently for a tombstone.
+  /// **This is PREFIX search, not substring.** It used to be
+  /// `.ilike('username', '%$query%')`, which matched mid-word; typing `ikos`
+  /// no longer finds `nikos_p`. That is a deliberate narrowing and it is a
+  /// regression in reach, not just a new feature with limits — see
+  /// `docs/phase-14-text-search.md`.
   ///
-  /// So this filter is UX, not enforcement, and it does not need to be more
-  /// than that. A soft-deleted account is still a real account its owner can
-  /// take back within 30 days, and an erased one has had its username replaced
-  /// with an opaque handle nobody will ever type — the tombstone is unfindable
-  /// by construction rather than by being filtered.
+  /// What it buys: `ilike` is not leakproof, so it can never be evaluated
+  /// ahead of the `profiles` row policy and can never reach an index. It
+  /// seq-scanned the whole table and called `is_blocked` on every row —
+  /// measured at 84ms per keystroke against 20k profiles, growing linearly
+  /// with the user base. The prefix range is leakproof, sorts ahead of the
+  /// policy, and reaches a `text_pattern_ops` index: 1.16ms.
+  ///
+  /// Why it has to be an RPC rather than a PostgREST filter, and why no
+  /// normalization happens here: the query has to be folded to the same search
+  /// key as the stored column (lowercase, accents stripped, Greek
+  /// transliterated so `taratsa` finds `Ταράτσα`), and PostgREST cannot emit
+  /// the `~>=~` operator the index needs — its `.gte()` is `>=`, which is a
+  /// different operator class and silently does not use the index. Doing
+  /// either half here would mean a second copy of the transliteration table in
+  /// Dart, and two copies of that will diverge.
+  ///
+  /// Blocked users are absent because the `profiles` SELECT policy filters
+  /// them; the RPC is `SECURITY INVOKER` precisely so that stays true.
+  ///
+  /// The `deleted_at` filter moved INTO the RPC and is now enforcement rather
+  /// than the UX-only filter it was when this method spelled it out itself. It
+  /// cannot go in the SELECT policy — `get_feed`, `get_messages` and four other
+  /// RPCs reach the author through an inner join on `profiles`, so a profile
+  /// made invisible by policy drops the message out of the thread entirely.
   Future<List<Profile>> searchProfiles(String query, {int limit = 30}) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return [];
 
-    final rows = await _client
-        .from('profiles')
-        .select('id, username, follower_count, following_count')
-        .ilike('username', '%$trimmed%')
-        .isFilter('deleted_at', null)
-        .neq('id', _uid ?? '00000000-0000-0000-0000-000000000000')
-        .limit(limit);
+    final rows = await _client.rpc(
+      'search_profiles',
+      params: {'p_query': trimmed, 'p_limit': limit},
+    );
 
     return (rows as List)
         .map((row) => Profile.fromRow(row as Map<String, dynamic>))
