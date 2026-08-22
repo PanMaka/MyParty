@@ -57,12 +57,13 @@
 #
 # Usage:
 #   supabase start
-#   bash scripts/explain_qual_pushdown.sh [N_PARTIES]
+#   bash scripts/explain_qual_pushdown.sh [N_PARTIES] [N_PROFILES]
 
 set -euo pipefail
 
 DB_CONTAINER="supabase_db_MyParty"
 N_PARTIES="${1:-10000}"
+N_PROFILES="${2:-20000}"
 
 # A seeded persona rather than a generated one: this script asks about qual
 # ordering, not about scale in the users table.
@@ -72,7 +73,7 @@ LON=23.7232
 LAT=37.9748
 
 docker exec -i "$DB_CONTAINER" psql -U postgres -d postgres -X -q \
-  -v n_parties="$N_PARTIES" -v viewer="'$VIEWER'" -v host="'$HOST'" \
+  -v n_parties="$N_PARTIES" -v n_profiles="$N_PROFILES" -v viewer="'$VIEWER'" -v host="'$HOST'" \
   -v lon="$LON" -v lat="$LAT" <<'SQL'
 \set ON_ERROR_STOP on
 
@@ -135,6 +136,67 @@ select count(*) from public.parties p
 where st_dwithin(p.location, st_point(:lon, :lat)::geography, 1);
 
 \echo ''
+\echo '### E. TEXT RANGE: text_ge + text_lt. THE OPTION-2 QUESTION.'
+\echo '### Written as an explicit range, not as LIKE ''x%'': without a'
+\echo '### text_pattern_ops index the planner leaves LIKE as textlike and'
+\echo '### never forms the range, so LIKE would measure the wrong operator.'
+explain (analyze, buffers, costs off, timing off)
+select count(*) from public.parties p
+where p.title >= 'zzzzzz' and p.title < 'zzzzz{';
+
+\echo ''
+\echo '### F. NOT LEAKPROOF (expected): ILIKE, the operator search would use.'
+explain (analyze, buffers, costs off, timing off)
+select count(*) from public.parties p where p.title ilike '%zzzzzz%';
+
+\echo ''
+\echo '### G. The real option-2 SHAPE: a text_pattern_ops btree + prefix LIKE.'
+\echo '### If E sorts ahead of the policy this should become an Index Cond;'
+\echo '### if E sorts behind it, the index is unreachable for the same reason'
+\echo '### parties_location is (gotcha 19) and option 2 does not exist.'
+reset role;
+create index parties_title_prefix_idx on public.parties (title text_pattern_ops);
+analyze public.parties;
+select tests.authenticate_as(:viewer);
+explain (analyze, buffers, costs off, timing off)
+select count(*) from public.parties p where p.title like 'zzzzzz%';
+
+\echo ''
+\echo '### I. THE DECISIVE ONE: the explicit range, WITH the index present.'
+\echo '### E proved the range is promoted past the policy; G proved LIKE is'
+\echo '### not rewritten into that range across the barrier. I asks the only'
+\echo '### remaining question -- whether the promoted range reaches the index.'
+explain (analyze, buffers, costs off, timing off)
+select count(*) from public.parties p
+where p.title >= 'zzzzzz' and p.title < 'zzzzz{';
+
+\echo ''
+\echo '### J. THE COMPLETE OPTION-2 SHAPE: the PATTERN operators (~>=~, ~<~)'
+\echo '### against the text_pattern_ops index. I used >= and <, which are the'
+\echo '### default text_ops family and so cannot use that index however'
+\echo '### leakproof they are -- the operator class has to match.'
+explain (analyze, buffers, costs off, timing off)
+select count(*) from public.parties p
+where p.title ~>=~ 'zzzzzz' and p.title ~<~ 'zzzzz{';
+
+\echo ''
+\echo '### H. CONTROL: texteq, known leakproof (gotcha 22). If this does NOT'
+\echo '### sort ahead of the policy the fixture is wrong, not the finding.'
+explain (analyze, buffers, costs off, timing off)
+select count(*) from public.parties p where p.title = 'zzzzzz';
+
+\echo ''
+\echo '### The catalog, for comparison. It says what the planner is ALLOWED'
+\echo '### to do; the plans above say what it did.'
+select p.proname, p.proleakproof as leakproof,
+       pg_get_function_identity_arguments(p.oid) as args
+from pg_proc p
+where p.proname in ('texteq','textlike','texticlike','text_lt','text_le',
+                    'text_ge','text_gt','text_pattern_lt','text_pattern_ge',
+                    'enum_eq','float8ge','st_dwithin')
+order by p.proleakproof desc, p.proname;
+
+\echo ''
 \echo '==================================================================='
 \echo 'PART 2 -- the map query body, with and without a time window.'
 \echo 'Inlined rather than called: the RPC prints one Function Scan line.'
@@ -157,6 +219,65 @@ where p.status = 'published' and (p.ends_at is null or p.ends_at > now())
   and p.starts_at >= now() and p.starts_at < now() + interval '6 hours'
   and st_dwithin(p.location, st_point(:lon, :lat)::geography, 5000)
   and (pr.map_visibility = 'public' or p.host_id = (select auth.uid()));
+
+\echo ''
+\echo '==================================================================='
+\echo 'PART 3 -- PEOPLE search, which is a different question entirely.'
+\echo 'The profiles SELECT policy is a single is_blocked() call against the'
+\echo 'row in hand -- no can_access_party, no parties re-fetch, no'
+\echo 'invitations probe. So the per-row price of being behind the barrier'
+\echo 'is much lower here, and an ILIKE that can never be promoted may still'
+\echo 'be affordable. That is what these three measure.'
+\echo '==================================================================='
+
+reset role;
+set local session_replication_role = replica;
+insert into auth.users (instance_id, id, aud, role, email, encrypted_password,
+                        email_confirmed_at, created_at, updated_at,
+                        confirmation_token, recovery_token,
+                        email_change_token_new, email_change)
+select '00000000-0000-0000-0000-000000000000', gen_random_uuid(),
+       'authenticated', 'authenticated',
+       'qp' || g || '@myparty.local', crypt('x', gen_salt('bf')),
+       now(), now(), now(), '', '', '', ''
+from generate_series(1, :n_profiles) g;
+
+insert into public.profiles (id, username, onboarding_completed_at)
+select u.id,
+       'qp_' || replace(u.id::text, '-', ''),
+       now()
+from auth.users u
+where u.email like 'qp%@myparty.local'
+on conflict (id) do update set username = excluded.username;
+
+set local session_replication_role = origin;
+analyze public.profiles;
+select tests.authenticate_as(:viewer);
+
+\echo ''
+\echo '### P1. POLICY ONLY (baseline) -- what one is_blocked() per row costs'
+explain (analyze, buffers, costs off, timing off)
+select count(*) from public.profiles pr;
+
+\echo ''
+\echo '### P2. ILIKE on username -- the search users would actually type.'
+\echo '### Expect it BEHIND the policy. The question is not whether it is'
+\echo '### promoted (it will not be) but whether the total is acceptable.'
+explain (analyze, buffers, costs off, timing off)
+select count(*) from public.profiles pr where pr.username ilike '%zzzzzz%';
+
+\echo ''
+\echo '### P3. Prefix range on username, for the same reason as E above.'
+explain (analyze, buffers, costs off, timing off)
+select count(*) from public.profiles pr
+where pr.username >= 'zzzzzz' and pr.username < 'zzzzz{';
+
+\echo ''
+\echo '### P4. The profiles SELECT policy, printed. If this ever grows past'
+\echo '### one is_blocked() call the numbers above stop being representative.'
+select pg_get_expr(polqual, polrelid) as profiles_select_policy
+from pg_policy
+where polrelid = 'public.profiles'::regclass and polcmd = 'r';
 
 rollback;
 SQL
