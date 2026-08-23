@@ -12,8 +12,11 @@ Session-by-session task scripts: `docs/MyParty-ClaudeCode-Prompts.md`.
 `notification_jobs` tables with RLS;
 `get_parties_near_user` RPC
 (tier/zoom-filtered map query, `p_limit` defaulting to 200 and clamped to
-[1, 500], `authenticated`-only since `20260821175831`), called live from
+[1, 500], `authenticated`-only since `20260821175831`, and time-windowed by
+`p_window` since `20260823091942`), called live from
 `MapScreen` through `PartyRepository.fetchPartiesNearUser`;
+`party_time_window` and `party_end_grace` (the map's Όλα/Τώρα/Αργότερα απόψε/
+Το ΣΚ chips, filtered server-side — see `docs/phase-15-map-time-filters.md`);
 `create_party_with_invites`; `get_feed`, `get_post_comments`, `get_messages`,
 `get_party_chats` and `get_party_stories`/`get_story_rails` (all
 keyset-paginated or time-bounded, all invoker-rights so RLS does the
@@ -518,6 +521,17 @@ is therefore still blocked.
     The failure is silent and cumulative — nothing errors, the map just slowly
     fills with parties that are over.
 
+    **Phase 15 adopted the grace in ONE window and left this open.** The Τώρα
+    chip drops a null-`ends_at` party once it is older than
+    `party_end_grace()` — the same six hours `party_is_past` groups by — and
+    nothing else changed: the base filter is untouched, Όλα is the default, so
+    **the default map still pins a finished party forever.** That is not
+    timidity, it is the asymmetry above: on the base filter, being wrong
+    *removes a live party*; inside a chip, being wrong costs a tap, because
+    Όλα is one tap away. `21_map_time_windows.test.sql` asserts the default
+    view still shows it, so closing this stays a decision somebody takes
+    rather than a side effect somebody causes.
+
 22. **Leakproofness decides which of your filters run before the policy, and
     it is the single fact that prices every new predicate on `parties`.**
     Gotcha 19 is the special case; this is the rule. A non-leakproof operator
@@ -552,13 +566,32 @@ is therefore still blocked.
 
     Two consequences, both load-bearing for the map rework:
 
-    - **Time filtering is free, and better than free.** The Τώρα / Αργότερα /
-      Το ΣΚ chips can push `starts_at`/`ends_at` predicates into
-      `get_parties_near_user` and they will cut the row count *before*
-      `can_access_party` is called on each row — measured at 35× on the map
-      query body, and the same mechanism that makes the 500km tier (208ms,
-      leakproof `party_tier` filter first) six times faster than the 5km tier
-      (995ms, no pre-filter at all).
+    - **Time filtering is free, and better than free. Phase 15 shipped it.**
+      The Τώρα / Αργότερα / Το ΣΚ chips push `starts_at` bounds into
+      `get_parties_near_user` and they cut the row count *before*
+      `can_access_party` is called — the same mechanism that makes the 500km
+      tier (leakproof `party_tier` filter first) faster than the 5km tier.
+      `scripts/explain_map_time_windows.sh` measures the shipped body: at 5km
+      with a tonight window, **210ms with neither pre-filter, 12.0ms with the
+      bbox alone, 2.1ms with both** — the spatial and time pre-filters compose
+      rather than one shadowing the other.
+
+      **Two shapes of the same predicate are ~20× apart, and the slow one is
+      what anyone writes first.** `coalesce(ends_at, starts_at + grace) >
+      now()` puts a Var under `timestamptz_pl_interval`, which is not
+      leakproof, so the whole term sinks behind the barrier;
+      `starts_at > now() - grace` leaves `timestamptz_gt(Var, Const)` and is
+      promoted. Same rows (170), 120.7ms vs 6.2ms. `party_is_past()` is doubly
+      unusable — not leakproof *and* it carries a SET clause, so it can never
+      be inlined (gotcha 20). Hence `party_end_grace()`: the **number** has one
+      definition while the two call sites use the two shapes leakproofness
+      forces on them. **When a new predicate has a constant and a column on
+      opposite sides, check which side the leaky operator ends up on.**
+
+      A bound coming from a `stable` plpgsql function still lands as an
+      InitPlan constant and is still promoted — measured, because the failure
+      mode (it silently becomes a correlated expression) has no symptom other
+      than the old timing.
     - **Search must wait for the policy rewrite.** An `ilike` on
       `parties.title` or `parties.area` has exactly `st_dwithin`'s failure
       mode: it sits behind the barrier, seq-scans, and cannot reach an index —
@@ -640,6 +673,13 @@ bash scripts/explain_profile_stats.sh [N_USERS] [N_PARTIES] [RSVPS_PER_USER]
 # the row policy costs ~99% of p95 and defeats the GiST index entirely.
 # Rolled back; the seeded fixtures are untouched.
 bash scripts/loadtest_map_query.sh [N_PARTIES] [N_RSVPS] [N_USERS] [ITERATIONS]
+
+# Phase 15: do the time chips actually pre-filter, and do they compose with the
+# spatial one? Prints (1) whether a bound from party_time_window() reaches the
+# plan as an InitPlan constant ahead of the policy, (2) the two spellings of the
+# grace period against a control that all three return the same rows, and (3)
+# the map body with neither / box only / window only / both. Rolled back.
+bash scripts/explain_map_time_windows.sh [N_PARTIES]
 
 cd myparty
 flutter pub get
