@@ -37,7 +37,7 @@
 --
 --
 -- 3. THE GRACE CANNOT BE SPELLED THE OBVIOUS WAY, AND CANNOT CALL
---    party_is_past(). This is gotcha 22, and it costs ~100x.
+--    party_is_past(). This is gotcha 22, and it costs ~20x.
 --
 -- Measured on the running stack, not inferred from the catalog alone:
 --
@@ -57,9 +57,19 @@
 --
 --     starts_at > now() - party_end_grace()                        -- PROMOTED
 --
--- The two are algebraically identical and ~100x apart. party_is_past() is
--- unusable here for the same reason plus a second one: it carries a SET clause,
--- so it can never be inlined (gotcha 20) and stays a real non-leakproof call.
+-- Measured by scripts/explain_map_time_windows.sh at 10k parties, all three
+-- variants returning the SAME 170 rows (the script's control -- without it this
+-- is a comparison between three different questions, and the first draft of it
+-- was):
+--
+--     constant side (shipped)      6.2 ms     1014 buffers   grace term FIRST
+--     row side (coalesce)        120.7 ms    20576 buffers   policy first
+--     party_is_past()            109.2 ms    20576 buffers   policy first
+--
+-- ~20x, and the buffer counts are the direct proxy for how many times the
+-- policy ran. party_is_past() is unusable here for the same reason plus a
+-- second one: it carries a SET clause, so it can never be inlined (gotcha 20)
+-- and stays a real non-leakproof call.
 --
 -- Hence party_end_grace(): the NUMBER keeps one definition while the two call
 -- sites use the two different shapes leakproofness forces on them. Note the
@@ -354,17 +364,25 @@ as $function$
     and p.bbox_lon >= (select st_xmin(public.map_search_box(map_center_lon, map_center_lat, radius_meters)))
     and p.bbox_lon <= (select st_xmax(public.map_search_box(map_center_lon, map_center_lat, radius_meters)))
 
-    -- THE TIME PRE-FILTER. The same mechanism, one dimension over:
-    -- timestamptz_ge and timestamptz_lt are leakproof, the bounds are scalar
-    -- subqueries and therefore InitPlan constants, so these two terms also sort
-    -- ahead of the policy. Measured at 10k parties: the parties scan drops from
-    -- 40338 shared hits to 1046 -- a ~39x collapse in can_access_party calls --
-    -- and 208ms to 6.4ms.
+    -- THE TIME PRE-FILTER. The same mechanism as the box, one dimension over:
+    -- timestamptz_ge and timestamptz_lt are leakproof, and the bounds are
+    -- scalar subqueries and therefore InitPlan constants, so these two terms
+    -- also sort ahead of the policy.
+    --
+    -- That a bound coming out of a plpgsql STABLE function still reaches the
+    -- plan as a constant is the one thing here that could not be assumed, and
+    -- scripts/explain_map_time_windows.sh part 1 is the measurement: the plan
+    -- prints `starts_at >= (InitPlan 1).col1` BEFORE is_blocked, and the scan
+    -- drops from 40518 shared hits to 2409. Whole map body at 5km, tonight
+    -- window: 210ms with neither pre-filter, 12.0ms with the box alone, 2.1ms
+    -- with both. The two compose -- the box gets an Index Cond, the window
+    -- filters what survives it, and neither shadows the other.
     --
     -- The bounds MUST stay scalar subqueries. As bare expressions they would
     -- still be correct and still leakproof, but the subquery is what guarantees
     -- one evaluation rather than one per row -- the same reason the four bbox
-    -- bounds above are spelled this way.
+    -- bounds above are spelled this way, and the failure has no symptom other
+    -- than the old timing.
     and p.starts_at >= (select lower(public.party_time_window(p_window, p_tz)))
     and p.starts_at <  (select upper(public.party_time_window(p_window, p_tz)))
 
@@ -385,10 +403,11 @@ as $function$
     -- term sorts ahead of the policy with the rest of the time filter.
     --
     -- DO NOT rewrite this as coalesce(p.ends_at, p.starts_at + grace) > now().
-    -- It is algebraically identical, it is what anyone would write first, and
-    -- it is ~100x slower: timestamptz_pl_interval is not leakproof and the Var
-    -- underneath it drags the term behind the RLS barrier. Same trap for
-    -- party_is_past(), which is additionally uninlinable. See header §3.
+    -- It is algebraically identical, it is what anyone would write first, and it
+    -- is ~20x slower measured (6.2ms vs 120.7ms at 10k parties, same 170 rows):
+    -- timestamptz_pl_interval is not leakproof and the Var underneath it drags
+    -- the term behind the RLS barrier. Same trap for party_is_past(), which is
+    -- additionally uninlinable. See header §3.
     and (
       coalesce(p_window, 'all') <> 'now'
       or p.ends_at is not null

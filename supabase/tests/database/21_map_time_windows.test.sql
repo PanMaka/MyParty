@@ -14,7 +14,7 @@
 --    the interval on the row side; the map query MUST put it on the constant
 --    side, because timestamptz_pl_interval is not leakproof and a Var
 --    underneath it drags the whole term behind the RLS barrier (gotcha 22,
---    ~100x). Section 1 asserts the two forms are algebraically identical on
+--    ~20x measured). Section 1 asserts the two forms are algebraically identical on
 --    both sides of the boundary, so "one definition" survives being spelled
 --    two ways.
 --
@@ -422,7 +422,7 @@ select throws_ok(
 -- 6. Structural tripwires
 --
 -- The mechanism these protect is invisible in a result set: every assertion
--- above passes just as happily against a query that is 100x slower, because
+-- above passes just as happily against a query that is 20x slower, because
 -- the leaky spelling returns exactly the same rows.
 -- ============================================================
 
@@ -445,7 +445,7 @@ select isnt_empty(
 
 -- THE LEAKY SPELLING. `starts_at + interval` puts a Var under
 -- timestamptz_pl_interval, which is not leakproof, which drags the term behind
--- the RLS barrier and costs ~100x for an identical result. It is what anyone
+-- the RLS barrier and costs ~20x for an identical result. It is what anyone
 -- would write first.
 --
 -- Matched against the body with `--` comments STRIPPED. The comment beside
@@ -458,7 +458,7 @@ select is_empty(
        and regexp_replace(p.prosrc, '--[^
 ]*', '', 'g') like '%starts_at +%' $$,
   'the grace is on the CONSTANT side (now() - grace), never on the row side '
-  '(starts_at + grace) -- identical rows, ~100x apart (gotcha 22)'
+  '(starts_at + grace) -- identical rows, ~20x apart (gotcha 22)'
 );
 
 select is_empty(
