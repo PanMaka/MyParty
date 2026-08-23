@@ -192,19 +192,27 @@ select tests.clear_authentication();
 -- removes service_role's, because the default PUBLIC grant is where that came
 -- from.
 --
+-- Phase 15 added p_window/p_tz, which meant DROP + CREATE rather than `create
+-- or replace` -- and a dropped function's ACL does not survive. These two
+-- assertions are what caught it: the recreated function came back holding the
+-- default EXECUTE TO PUBLIC, so anon had the grant again and `revoke ... from
+-- anon` would not have removed it (the privilege came from PUBLIC). The
+-- migration re-states the revoke from PUBLIC and the gotcha-13 grant back to
+-- service_role. Any future signature change has the same trap.
+--
 -- What this does NOT assert, because it is not true: that the map is closed to
 -- anonymous clients. `anon` still reads every public party off
 -- `public.parties` directly -- see 20260821175831. This is an assertion about
 -- one door, not about the building.
 -- ============================================================
 select is(
-  has_function_privilege('anon', 'public.get_parties_near_user(double precision, double precision, double precision, int)', 'execute'),
+  has_function_privilege('anon', 'public.get_parties_near_user(double precision, double precision, double precision, int, text, text)', 'execute'),
   false,
   'anon cannot call the map RPC -- the grant it used to hold could only ever return 42501'
 );
 
 select is(
-  (select bool_and(has_function_privilege(r, 'public.get_parties_near_user(double precision, double precision, double precision, int)', 'execute'))
+  (select bool_and(has_function_privilege(r, 'public.get_parties_near_user(double precision, double precision, double precision, int, text, text)', 'execute'))
    from unnest(array['authenticated', 'service_role']) r),
   true,
   'but authenticated and service_role can -- the explicit grant survived the revoke'

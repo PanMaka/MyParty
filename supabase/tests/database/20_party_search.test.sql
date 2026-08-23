@@ -21,7 +21,7 @@
 -- stranger 4444, blocked_user 5555, second_host 6666.
 begin;
 set search_path to public, extensions;
-select plan(51);
+select plan(52);
 
 
 -- ============================================================
@@ -110,15 +110,42 @@ select is(
   true,
   'and past outside it');
 
--- The documented sequencing state. If somebody makes the map filter on this,
--- they have taken a product decision and this assertion is where they find out
--- it was one.
+-- THE SEQUENCING STATE, UPDATED BY PHASE 15. This assertion used to read "the
+-- map does not use party_is_past", and it did its job: adding the time chips
+-- turned it red, which is where the product decision got taken rather than
+-- absorbed.
+--
+-- The decision was PARTIAL, and the shape of it is why this assertion is now
+-- two. The map's DEFAULT view (Όλα) still does not filter on the grace, so
+-- gotcha 21 is still open and a null-ends_at party from twenty days ago is
+-- still pinned -- 21_map_time_windows.test.sql asserts exactly that. Only the
+-- Τώρα chip applies it, where being wrong costs a tap rather than a party.
+--
+-- And the map still does not CALL party_is_past, for a mechanical reason
+-- rather than a product one: it carries a SET clause, so it can never be
+-- inlined (gotcha 20) and stays a non-leakproof call that sinks behind the RLS
+-- barrier. Both surfaces read the NUMBER from public.party_end_grace()
+-- instead, and 21_map_time_windows.test.sql asserts the two spellings flip at
+-- the same instant. That is what keeps "one definition" true across two
+-- syntactically different call sites.
+--
+-- Comments are stripped before matching: the map's body names party_is_past in
+-- a warning that explains why it must not be called there.
 select is_empty(
   $$ select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
      where n.nspname = 'public' and p.proname = 'get_parties_near_user'
-       and p.prosrc like '%party_is_past%' $$,
-  'the MAP does not use party_is_past -- search and the map therefore disagree '
-  'about a null-ends_at party, which is expected (gotcha 21) and not a bug'
+       and regexp_replace(p.prosrc, '--[^
+]*', '', 'g') like '%party_is_past%' $$,
+  'the MAP still does not CALL party_is_past -- it is uninlinable and would '
+  'sink the predicate behind the RLS barrier (gotcha 20 + 22)'
+);
+
+select isnt_empty(
+  $$ select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public' and p.proname = 'party_is_past'
+       and p.prosrc like '%party_end_grace%' $$,
+  'but search and the map now share the NUMBER through party_end_grace(), so '
+  'the Τώρα chip and the past/upcoming split cannot drift apart'
 );
 
 
