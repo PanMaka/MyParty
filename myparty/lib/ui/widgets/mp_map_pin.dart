@@ -4,11 +4,16 @@ import 'package:flutter/material.dart';
 
 import '../../models/map_party_pin.dart';
 import '../theme/app_theme.dart';
-import 'dashed_border.dart';
 import 'diagonal_placeholder.dart';
+import 'mp_drop_shape.dart';
 
-/// The three sizes a map pin comes in. Which one a party gets is decided by
-/// its attendee count *at the moment of the rebuild* — see [MpPinMetrics].
+/// The three sizes a map pin's LABEL comes in. Which one a party gets is
+/// decided by its attendee count *at the moment of the rebuild*.
+///
+/// Note this tiers the chip's typography only. The drop itself is sized
+/// continuously by [MpDropGeometry] — a tiered shape would step visibly as a
+/// party filled up, and the whole point of the drop is that its size is the
+/// attendance channel.
 enum MpPinTier { small, medium, large }
 
 /// The counts at which a pin steps up a tier. Public because the tests place
@@ -19,20 +24,20 @@ const int mpPinLargeFrom = 100;
 
 /// Every dimension a pin draws at, for one tier and one count.
 ///
-/// This is the *single* source of the pin's size. [MapScreen] needs it too —
-/// a `Marker` declares its own width and height, and a box that disagrees
-/// with the pill inside it clips the pill — so both sides read this class,
-/// from one clock reading per frame rather than two. Two independent
-/// `DateTime.now()` calls straddling a party's start time is not a
-/// hypothetical: it is what the previous version did, once in the marker and
-/// once inside the widget.
+/// A pin is now TWO pieces: a [MpDropGeometry] whose tip sits on the party's
+/// coordinate, and a label chip beside it. They are described together here
+/// because a `Marker` declares one width and one height up front and nothing
+/// clips the child to them — so the box, the drop inside it, the chip beside
+/// it and the anchor that positions the whole thing all have to be derived
+/// from one object or they drift apart. [MapScreen] reads the same instance
+/// this widget does, from one clock reading per frame.
 @immutable
 class MpPinMetrics {
   const MpPinMetrics._({
     required this.tier,
-    required this.width,
-    required this.height,
-    required this.thumb,
+    required this.drop,
+    required this.chipWidth,
+    required this.chipHeight,
     required this.radius,
     required this.padding,
     required this.gap,
@@ -44,10 +49,18 @@ class MpPinMetrics {
   });
 
   final MpPinTier tier;
-  final double width;
-  final double height;
-  final double thumb;
+
+  /// The drop. Sized by the count for a public party and FIXED for a private
+  /// one — see [MpDropGeometry.forPin], where the private branch is taken
+  /// before the count is read at all.
+  final MpDropGeometry drop;
+
+  final double chipWidth;
+  final double chipHeight;
+
+  /// The chip's corner radius. The drop has no corners.
   final double radius;
+
   final EdgeInsets padding;
   final double gap;
   final double titleSize;
@@ -56,93 +69,152 @@ class MpPinMetrics {
   final double borderWidth;
   final double glowBlur;
 
-  /// Vertical slack above the pill for its glow and drop shadow. The live
-  /// pulse ring overshoots far past this and is allowed to — it paints with
-  /// `Clip.none` — but the shadow has to stay inside the marker box.
-  static const double pulseHeadroom = 6;
-
-  double get boxHeight => height + pulseHeadroom;
-
-  /// The width left to the title and count column once the thumbnail, the gap
-  /// and the horizontal padding have taken their share.
+  /// Slack above the drop, for when the chip is taller than the circle it is
+  /// centred on.
   ///
-  /// The label row is laid out inside this and nothing else, which is why it
-  /// has to be allowed to ellipsize: [width] grows by at most a couple of
-  /// dozen pixels across the whole range of a count that has no upper bound.
-  /// This is smallest — and so the truncation risk is highest — at
-  /// [MpPinTier.small].
-  double get labelWidth => width - padding.horizontal - thumb - gap;
+  /// Nonzero for a small public drop: the chip is 38px tall against a 32px
+  /// circle, so it reaches 3px above the drop and the box has to grow to hold
+  /// it. Worth stating because the tip is measured from the box's BOTTOM —
+  /// `height` is `topPad + drop.height`, not `drop.height` — so dropping this
+  /// term moves the anchor by exactly the overhang on precisely the smallest,
+  /// most numerous pins.
+  double get topPad => math.max(0, chipHeight / 2 - drop.radius);
 
-  /// The metrics for a party with [count] people attached to it.
+  double get width => drop.width + gap + chipWidth;
+  double get height => topPad + drop.height;
+
+  /// Retained under its old name because [MapScreen] and the tests both speak
+  /// it. There is no separate box height any more — the drop's tip IS the
+  /// bottom of the box, which is what puts it on the coordinate.
+  double get boxHeight => height;
+
+  /// The width left to the title and count column inside the chip.
   ///
-  /// Width still grows *within* a tier, so two large parties are not the same
-  /// pin — but it grows on a `sqrt` and saturates, because the map has to stay
-  /// readable at the RPC's 200-pin cap and a linear scale would not.
-  factory MpPinMetrics.forCount(int count) {
-    final pop = math.max(0, count).toDouble();
+  /// The label has to be allowed to ellipsize: the count has no upper bound
+  /// and this width does not grow with it — the chip steps by tier and stops.
+  /// Smallest, and so most at risk, at [MpPinTier.small].
+  double get labelWidth => chipWidth - padding.horizontal;
 
-    if (pop >= mpPinLargeFrom) {
-      return MpPinMetrics._(
-        tier: MpPinTier.large,
-        width: 132 + math.min(26, math.sqrt(pop) * 1.9),
-        height: 56,
-        thumb: 44,
-        radius: 14,
-        padding: const EdgeInsets.fromLTRB(6, 6, 10, 6),
-        gap: 8,
-        titleSize: 12,
-        metaSize: 9.5,
-        dot: 6,
-        borderWidth: 1.75,
-        glowBlur: 18,
+  /// Where the party actually is, in the marker box's coordinates.
+  Offset get tip => Offset(drop.radius, height);
+
+  /// The `Marker.alignment` that lands [tip] on the coordinate.
+  ///
+  /// flutter_map positions a marker so the point falls at
+  /// `(0.5·w·(1−ax), 0.5·h·(1−ay))` inside the box; inverting that gives the
+  /// alignment for an arbitrary anchor. It is NOT `Alignment.topCenter` any
+  /// more, and could not be: the box is asymmetric now — drop on the left,
+  /// chip on the right — so the tip is nowhere near the horizontal centre, and
+  /// centring the box would put the coordinate under the label instead of
+  /// under the point. It also moves per pin, because the chip's width steps by
+  /// tier while the drop's grows continuously.
+  Alignment get anchor => Alignment(1 - 2 * tip.dx / width, 1 - 2 * tip.dy / height);
+
+  Rect get dropRect => Rect.fromLTWH(0, topPad, drop.width, drop.height);
+
+  Rect get chipRect => Rect.fromLTWH(
+        drop.width + gap,
+        topPad + drop.radius - chipHeight / 2,
+        chipWidth,
+        chipHeight,
       );
-    }
 
-    if (pop >= mpPinMediumFrom) {
-      return MpPinMetrics._(
-        tier: MpPinTier.medium,
-        width: 112 + math.min(20, math.sqrt(pop) * 2.0),
-        height: 46,
-        thumb: 34,
-        radius: 12,
-        padding: const EdgeInsets.fromLTRB(5, 5, 8, 5),
-        gap: 7,
-        titleSize: 10.5,
-        metaSize: 8.5,
-        dot: 5,
-        borderWidth: 1.5,
-        glowBlur: 14,
+  /// The circle at the top of the drop, which is what the thumbnail fills and
+  /// what the live pulse rings.
+  Rect get circleRect => Rect.fromCircle(
+        center: Offset(drop.radius, topPad + drop.radius),
+        radius: drop.radius,
       );
-    }
 
-    return MpPinMetrics._(
-      tier: MpPinTier.small,
-      width: 96 + math.min(14, math.sqrt(pop) * 2.9),
-      height: 38,
-      thumb: 26,
-      radius: 10,
-      padding: const EdgeInsets.fromLTRB(4, 4, 7, 4),
-      gap: 6,
-      titleSize: 9.5,
-      metaSize: 7.5,
-      dot: 4,
-      borderWidth: 1.25,
-      glowBlur: 11,
-    );
+  static MpPinTier _tierFor(int count) {
+    if (count >= mpPinLargeFrom) return MpPinTier.large;
+    if (count >= mpPinMediumFrom) return MpPinTier.medium;
+    return MpPinTier.small;
   }
+
+  static MpPinMetrics _chrome(MpPinTier tier, MpDropGeometry drop) {
+    switch (tier) {
+      case MpPinTier.large:
+        return MpPinMetrics._(
+          tier: tier,
+          drop: drop,
+          chipWidth: 108,
+          chipHeight: 46,
+          radius: 12,
+          padding: const EdgeInsets.fromLTRB(9, 6, 9, 6),
+          gap: 6,
+          titleSize: 12,
+          metaSize: 9.5,
+          dot: 6,
+          borderWidth: 1.75,
+          glowBlur: 18,
+        );
+      case MpPinTier.medium:
+        return MpPinMetrics._(
+          tier: tier,
+          drop: drop,
+          chipWidth: 92,
+          chipHeight: 42,
+          radius: 10,
+          padding: const EdgeInsets.fromLTRB(8, 5, 8, 5),
+          gap: 5,
+          titleSize: 10.5,
+          metaSize: 8.5,
+          dot: 5,
+          borderWidth: 1.5,
+          glowBlur: 14,
+        );
+      case MpPinTier.small:
+        return MpPinMetrics._(
+          tier: tier,
+          drop: drop,
+          chipWidth: 76,
+          chipHeight: 38,
+          radius: 8,
+          padding: const EdgeInsets.fromLTRB(7, 4, 7, 4),
+          gap: 4,
+          titleSize: 9.5,
+          metaSize: 7.5,
+          dot: 4,
+          borderWidth: 1.25,
+          glowBlur: 11,
+        );
+    }
+  }
+
+  /// A PUBLIC party's metrics for [count].
+  factory MpPinMetrics.forCount(int count) {
+    final pop = math.max(0, count);
+    return _chrome(_tierFor(pop), MpDropGeometry.forCount(pop));
+  }
+
+  /// A PRIVATE party's metrics. Fixed drop, fixed chip, no count anywhere in
+  /// the expression — see [MpDropGeometry.forPin].
+  ///
+  /// The chip is pinned to [MpPinTier.large] rather than tiered, so nothing
+  /// about a private pin's *geometry* varies with attendance. The chip still
+  /// prints the number as text, which is a deliberate product decision: only
+  /// someone who is invited, RSVP'd or hosting can see the pin at all, so the
+  /// count is legitimately theirs. Size carries no information; the label
+  /// carries all of it, in words.
+  factory MpPinMetrics.private() =>
+      _chrome(MpPinTier.large, MpDropGeometry.private());
 
   /// The metrics [pin] draws at when the clock reads [now].
   ///
-  /// Goes through [MapPartyPin.attendeeCountAt] rather than a stored number,
-  /// so the tier follows the tense: a party sized by its *interested* count
-  /// before it starts is re-tiered on its *going* count the moment it does,
-  /// with no new fetch and no server flag involved.
-  factory MpPinMetrics.forPin(MapPartyPin pin, DateTime now) =>
-      MpPinMetrics.forCount(pin.attendeeCountAt(now));
+  /// Private branches first and never reaches [MapPartyPin.attendeeCountAt].
+  /// For a public party this goes through that method rather than a stored
+  /// number, so the pin follows the tense: sized on *interested* before the
+  /// party starts, re-sized on *going* the moment it does, with no new fetch
+  /// and no server flag involved.
+  factory MpPinMetrics.forPin(MapPartyPin pin, DateTime now) {
+    if (pin.isPrivate) return MpPinMetrics.private();
+    return MpPinMetrics.forCount(pin.attendeeCountAt(now));
+  }
 }
 
-/// A glass-pill map marker for a party pin, sized by its live attendee count,
-/// with a pulse ring while the party is actually happening.
+/// A map marker for a party: a drop whose tip is on the coordinate and whose
+/// size is the attendance, plus a label chip beside it.
 class MpMapPin extends StatefulWidget {
   const MpMapPin({super.key, required this.pin, required this.now, required this.onTap});
 
@@ -219,133 +291,138 @@ class _MpMapPinState extends State<MpMapPin> with TickerProviderStateMixin {
     // same instant, so the ring and the label cannot disagree about tense.
     final live = pin.liveAt(widget.now);
     final count = pin.attendeeCountAt(widget.now);
-    final m = MpPinMetrics.forCount(count);
+    final m = MpPinMetrics.forPin(pin, widget.now);
     final accent = pin.isPrivate ? AppColors.pink : AppColors.purple;
-
-    final pill = Container(
-      padding: m.padding,
-      decoration: BoxDecoration(
-        color: const Color(0xFF0E0C14).withValues(alpha: 0.93),
-        borderRadius: BorderRadius.circular(m.radius),
-        border: pin.isPrivate
-            ? null
-            : Border.all(color: accent.withValues(alpha: 0.95), width: m.borderWidth),
-        boxShadow: [
-          BoxShadow(color: accent.withValues(alpha: 0.55), blurRadius: m.glowBlur),
-          const BoxShadow(color: Colors.black54, blurRadius: 16, offset: Offset(0, 6)),
-        ],
-      ),
-      child: Row(
-        children: [
-          SizedBox(
-            width: m.thumb,
-            height: m.thumb,
-            child: DiagonalStripePlaceholder(
-              borderRadius: BorderRadius.circular(m.radius - 4),
-              colors: pin.isPrivate
-                  ? const [Color(0xFF2C1F2A), Color(0xFF20161F)]
-                  : const [Color(0xFF2A2247), Color(0xFF1E1836)],
-            ),
-          ),
-          SizedBox(width: m.gap),
-          Expanded(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  pin.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: m.titleSize, fontWeight: FontWeight.w700, height: 1.2),
-                ),
-                const SizedBox(height: 2),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: m.dot,
-                      height: m.dot,
-                      decoration: BoxDecoration(
-                        color: live ? Colors.white : accent,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    SizedBox(width: m.gap - 2),
-                    // Flexible, because the pill's width is fixed by
-                    // MpPinMetrics and this label is not: it is derived from a
-                    // count, and the width formula tops out ~26px into every
-                    // tier however large that count gets. The exposure is
-                    // worst at the SMALL tier, which has the least
-                    // `labelWidth` of the three and is therefore where the
-                    // test asserts the truncation. A four-digit party
-                    // overflows this row on a real handset, and any count at
-                    // all overflows it under `flutter test`, where the mono
-                    // face is absent and the fallback metrics are far wider.
-                    Flexible(
-                      child: Text(
-                        live ? '$count μέσα' : '$count ενδ.',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppTextStyles.mono(
-                          size: m.metaSize,
-                          weight: FontWeight.w600,
-                          color: pin.isPrivate ? AppColors.pinkLight : AppColors.purpleLight,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-
     final pulse = _pulse;
+
+    // Inset so the drop's own stroke stays visible around it rather than being
+    // covered by the artwork it is supposed to enclose.
+    final thumb = m.circleRect.deflate(m.borderWidth + 1);
 
     return GestureDetector(
       onTap: widget.onTap,
       child: SizedBox(
         width: m.width,
-        height: m.boxHeight,
+        height: m.height,
         child: Stack(
-          alignment: Alignment.topCenter,
           clipBehavior: Clip.none,
           children: [
+            // The pulse rings the CIRCLE, not the whole drop: a ring following
+            // the teardrop outline would sweep its tip across the basemap and
+            // read as the pin sliding off its own coordinate.
             if (pulse != null)
-              AnimatedBuilder(
-                animation: pulse,
-                builder: (context, _) {
-                  final t = pulse.value;
-                  return Opacity(
-                    opacity: (1 - t) * 0.55,
-                    child: Transform.scale(
-                      scale: 1 + t * 1.4,
-                      child: Container(
-                        width: m.width,
-                        height: m.height,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(m.radius + 1),
-                          border: Border.all(color: accent, width: m.borderWidth),
+              Positioned.fromRect(
+                rect: m.circleRect,
+                child: AnimatedBuilder(
+                  animation: pulse,
+                  builder: (context, _) {
+                    final t = pulse.value;
+                    return Opacity(
+                      opacity: (1 - t) * 0.55,
+                      child: Transform.scale(
+                        scale: 1 + t * 1.4,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(color: accent, width: m.borderWidth),
+                          ),
                         ),
                       ),
-                    ),
-                  );
-                },
+                    );
+                  },
+                ),
               ),
-            SizedBox(
-              width: m.width,
-              height: m.height,
-              child: pin.isPrivate
-                  ? DashedRRectBorder(
-                      color: accent,
-                      radius: m.radius,
-                      strokeWidth: m.borderWidth,
-                      child: pill,
-                    )
-                  : pill,
+
+            // The drop: glow, fill, and the border that carries the
+            // public/private distinction — solid or dashed, exactly as the
+            // pill did, so the one thing a reader already knows how to decode
+            // survives the reshaping.
+            Positioned.fromRect(
+              rect: m.dropRect,
+              child: CustomPaint(
+                painter: MpDropPainter(
+                  geometry: m.drop,
+                  accent: accent,
+                  fill: const Color(0xFF0E0C14),
+                  borderWidth: m.borderWidth,
+                  glowBlur: m.glowBlur,
+                ),
+              ),
+            ),
+
+            Positioned.fromRect(
+              rect: thumb,
+              child: ClipOval(
+                child: DiagonalStripePlaceholder(
+                  borderRadius: BorderRadius.circular(thumb.width),
+                  colors: pin.isPrivate
+                      ? const [Color(0xFF2C1F2A), Color(0xFF20161F)]
+                      : const [Color(0xFF2A2247), Color(0xFF1E1836)],
+                ),
+              ),
+            ),
+
+            Positioned.fromRect(
+              rect: m.chipRect,
+              child: Container(
+                padding: m.padding,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0E0C14).withValues(alpha: 0.93),
+                  borderRadius: BorderRadius.circular(m.radius),
+                  border: Border.all(color: accent.withValues(alpha: 0.55), width: 1),
+                  boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 12, offset: Offset(0, 4))],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      pin.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: m.titleSize, fontWeight: FontWeight.w700, height: 1.2),
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: m.dot,
+                          height: m.dot,
+                          decoration: BoxDecoration(
+                            color: live ? Colors.white : accent,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        SizedBox(width: math.max(2, m.gap - 2)),
+                        // Flexible, because the chip's width is fixed by
+                        // MpPinMetrics and this label is not: it is derived
+                        // from a count that has no upper bound, while
+                        // `labelWidth` steps by tier and stops. The exposure is
+                        // worst at the SMALL tier, which has the least of it
+                        // and is therefore where the test asserts the
+                        // truncation. A four-digit party overflows this row on
+                        // a real handset, and any count at all overflows it
+                        // under `flutter test`, where the mono face is absent
+                        // and the fallback metrics are far wider.
+                        Flexible(
+                          child: Text(
+                            live ? '$count μέσα' : '$count ενδ.',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppTextStyles.mono(
+                              size: m.metaSize,
+                              weight: FontWeight.w600,
+                              color: pin.isPrivate ? AppColors.pinkLight : AppColors.purpleLight,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
             ),
           ],
         ),

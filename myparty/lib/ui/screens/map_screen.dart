@@ -138,9 +138,44 @@ class _MapScreenState extends State<MapScreen> {
       point: LatLng(pin.lat, pin.lng),
       width: metrics.width,
       height: metrics.boxHeight,
-      alignment: Alignment.topCenter,
+      // Not a constant any more. The box is asymmetric — drop on the left,
+      // label chip on the right — so the anchor has to name the drop's TIP
+      // rather than an edge of the box, and it moves per pin because the chip
+      // steps by tier while the drop grows continuously. MpPinMetrics computes
+      // it from the same geometry the widget paints, so the two cannot
+      // disagree about where the party is.
+      alignment: metrics.anchor,
       child: MpMapPin(pin: pin, now: now, onTap: () => _onPinTap(pin)),
     );
+  }
+
+  /// The pins in PAINT order: largest first, so the smallest end up on top.
+  ///
+  /// Drops collide at low zoom and something has to give. The two alternatives
+  /// were both worse:
+  ///
+  /// - **Collision offset** moves a drop off its coordinate, which is the one
+  ///   thing the teardrop exists to promise. A pin that lies about where the
+  ///   party is fails at the only job a map pin has.
+  /// - **Clustering** would count a *distance-truncated* set: the RPC returns
+  ///   at most 200 rows ordered by distance, so a cluster badge reading "37"
+  ///   would be confidently wrong whenever the cap bit. It also collapses the
+  ///   ~50m Syntagma-style clusters this map is built to show.
+  ///
+  /// Z-order costs one sort and lies about nothing. A large drop can never
+  /// fully hide a small one, overlapping bodies still show distinct tips, and
+  /// the smaller pin — the harder one to hit — wins the hit test.
+  ///
+  /// Sorted for PAINTING only. The server's `is_sponsored desc, distance asc`
+  /// ordering decides which 200 rows arrive, which is a different question and
+  /// is not disturbed by re-ordering them here.
+  List<MapPartyPin> _painted(DateTime now) {
+    final ordered = [..._pins];
+    ordered.sort((a, b) => MpPinMetrics.forPin(b, now)
+        .drop
+        .radius
+        .compareTo(MpPinMetrics.forPin(a, now).drop.radius));
+    return ordered;
   }
 
   void _recenter() {
@@ -198,7 +233,7 @@ class _MapScreenState extends State<MapScreen> {
               ),
               MarkerLayer(
                 markers: [
-                  for (final pin in _pins) _marker(pin, now),
+                  for (final pin in _painted(now)) _marker(pin, now),
                   if (_currentPosition != null)
                     Marker(
                       point: _currentPosition!,

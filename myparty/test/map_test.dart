@@ -8,6 +8,7 @@ import 'package:myparty/models/map_party_pin.dart';
 import 'package:myparty/models/map_time_window.dart';
 import 'package:myparty/ui/screens/map_screen.dart';
 import 'package:myparty/ui/screens/search_screen.dart';
+import 'package:myparty/ui/widgets/mp_drop_shape.dart';
 import 'package:myparty/ui/widgets/mp_map_pin.dart';
 
 /// Stands in for the real repository. Subclasses rather than implements so it
@@ -517,19 +518,39 @@ void main() {
       final medium = sizeOf('Μεσαίο');
       final large = sizeOf('Μεγάλο');
 
-      // Height is the tier and nothing else — it does not vary within one —
-      // so it is the cleaner assertion that three tiers really rendered.
-      // Every pin was 112x52 before, because every count was 0.
-      expect(small.height, 38 + MpPinMetrics.pulseHeadroom);
-      expect(medium.height, 46 + MpPinMetrics.pulseHeadroom);
-      expect(large.height, 56 + MpPinMetrics.pulseHeadroom);
+      // Height is now the DROP and nothing else — the chip is centred on the
+      // circle and never the tallest thing — so it varies continuously with
+      // the count instead of stepping. Every pin was 112x52 before, because
+      // every count was 0.
+      expect(small.height, lessThan(medium.height));
+      expect(medium.height, lessThan(large.height));
 
-      // Width additionally grows inside a tier: 96 + min(14, sqrt(1)*2.9),
-      // 112 + min(20, sqrt(40)*2.0), 132 + min(26, sqrt(400)*1.9) — the last
-      // saturated, which is the whole observable range of the top tier.
-      expect(small.width, closeTo(98.9, 0.05));
-      expect(medium.width, closeTo(124.65, 0.05));
-      expect(large.width, 132 + 26);
+      // The top is SATURATED, not merely large. 400 interested and 100
+      // interested draw the same drop, which is what keeps 200 pins on one
+      // screen readable.
+      expect(
+        large.height,
+        closeTo(MpDropGeometry.maxRadius * (1 + MpDropGeometry.tipRatio), 0.01),
+      );
+
+      // Width is the composition: drop diameter + gap + chip. Asserted as the
+      // sum of the parts rather than as three literals, because the failure
+      // that matters is the box disagreeing with what is painted inside it —
+      // nothing clips the marker child, so a box narrower than its contents
+      // does not error, it just overlaps the neighbouring pin.
+      for (final (size, count) in [(small, 1), (medium, 40), (large, 400)]) {
+        final m = MpPinMetrics.forCount(count);
+        expect(size.width, closeTo(m.drop.width + m.gap + m.chipWidth, 0.01));
+        // topPad, not just drop.height. A small drop's chip is taller than its
+        // circle and overhangs the top of the drop, so the box grows upward by
+        // the overhang — and since the tip is measured from the box's BOTTOM,
+        // forgetting the term moves the anchor by exactly that much on the
+        // smallest and most numerous pins.
+        expect(size.height, closeTo(m.topPad + m.drop.height, 0.01));
+      }
+      expect(MpPinMetrics.forCount(1).topPad, greaterThan(0),
+          reason: 'the small tier is the case that exercises topPad');
+      expect(MpPinMetrics.forCount(400).topPad, 0);
 
       await _teardown(tester);
     });
@@ -571,7 +592,21 @@ void main() {
       // interested. Had the screen sized the box off the wrong counter, the
       // pin would be squeezed into a 38px-tall small-tier box here.
       expect(expected.tier, MpPinTier.large);
-      expect(box.height, 56 + MpPinMetrics.pulseHeadroom);
+      expect(box.height, closeTo(expected.topPad + expected.drop.height, 0.01));
+
+      // THE ANCHOR. The box is asymmetric now, so `Alignment.topCenter` would
+      // put the coordinate under the label chip instead of under the drop's
+      // tip. Inverting flutter_map's placement, the point lands at
+      // (0.5·w·(1−ax), 0.5·h·(1−ay)) inside the box — which must be the tip.
+      final marker = tester.widget<MpMapPin>(find.byType(MpMapPin));
+      final anchored = Offset(
+        0.5 * box.width! * (1 - expected.anchor.x),
+        0.5 * box.height! * (1 - expected.anchor.y),
+      );
+      expect(anchored.dx, closeTo(expected.tip.dx, 0.01));
+      expect(anchored.dy, closeTo(expected.tip.dy, 0.01));
+      expect(marker.pin.id, 'live');
+
       expect(tester.takeException(), isNull);
 
       await _teardown(tester);
