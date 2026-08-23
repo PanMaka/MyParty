@@ -2,6 +2,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/hosted_parties.dart';
 import '../models/map_party_pin.dart';
+import '../models/map_time_window.dart';
 import '../models/party_summary.dart';
 import '../models/rsvp_party.dart';
 
@@ -211,17 +212,34 @@ class PartyRepository {
   /// come from `st_y`/`st_x` on a non-null geography column so this should not
   /// happen, but a pin at (0, 0) in the Gulf of Guinea is a worse outcome than
   /// a pin that is absent.
+  ///
+  /// [window] is the map's time chip and is applied **in the query**, never to
+  /// the returned list — see [MapTimeWindow]. It defaults to
+  /// [MapTimeWindow.all], which is an unbounded range on the server and
+  /// therefore byte-identical to the pre-chip behaviour.
+  ///
+  /// `p_tz` is deliberately NOT sent. The server defaults it to
+  /// `Europe/Athens`, and Dart has no IANA zone name to offer without a
+  /// plugin — `DateTime.now().timeZoneName` gives `"EEST"`, an abbreviation
+  /// that is ambiguous across zones and useless to Postgres. Sending a raw UTC
+  /// offset instead would be worse than the default: the boundaries this
+  /// parameter positions are 04:00 local, which is exactly where Greece's DST
+  /// transitions land, so an offset would be wrong on the two nights it
+  /// matters most. The parameter exists as the seam for when a real zone is
+  /// available.
   Future<List<MapPartyPin>> fetchPartiesNearUser({
     required double lon,
     required double lat,
     required double radiusMeters,
     int limit = 200,
+    MapTimeWindow window = MapTimeWindow.all,
   }) async {
     final rows = await _client.rpc('get_parties_near_user', params: {
       'map_center_lon': lon,
       'map_center_lat': lat,
       'radius_meters': radiusMeters,
       'p_limit': limit,
+      'p_window': window.wire,
     });
 
     final pins = <MapPartyPin>[];

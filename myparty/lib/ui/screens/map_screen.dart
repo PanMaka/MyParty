@@ -8,12 +8,11 @@ import 'package:latlong2/latlong.dart';
 import '../../data/party_repository.dart';
 import '../../data/social_repository.dart';
 import '../../models/map_party_pin.dart';
+import '../../models/map_time_window.dart';
 import '../theme/app_theme.dart';
 import '../widgets/map_pin_sheet.dart';
 import '../widgets/mp_map_pin.dart';
 import 'search_screen.dart';
-
-enum _MapFilter { live, later, weekend }
 
 /// The real device fix, and the default for [MapScreen.locate].
 ///
@@ -81,7 +80,11 @@ class _MapScreenState extends State<MapScreen> {
   LatLng? _currentPosition;
   List<MapPartyPin> _pins = [];
   bool _isLoading = true;
-  _MapFilter _filter = _MapFilter.live;
+  /// The active time chip. [MapTimeWindow.all] rather than "now": the map's
+  /// job on open is to show what exists, and a default that hides most of it
+  /// is a filter the user never chose. It is also what makes this change
+  /// incapable of removing a pin from anyone's map until they tap something.
+  MapTimeWindow _filter = MapTimeWindow.all;
 
   @override
   void initState() {
@@ -105,6 +108,7 @@ class _MapScreenState extends State<MapScreen> {
         lon: center.longitude,
         lat: center.latitude,
         radiusMeters: radiusInMeters,
+        window: _filter,
       );
       if (mounted) setState(() => _pins = pins);
     } catch (e) {
@@ -276,11 +280,13 @@ class _MapScreenState extends State<MapScreen> {
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [
-                _filterPill('Τώρα', _MapFilter.live),
+                _filterPill('Όλα', MapTimeWindow.all),
                 const SizedBox(width: 7),
-                _filterPill('Αργότερα απόψε', _MapFilter.later),
+                _filterPill('Τώρα', MapTimeWindow.now),
                 const SizedBox(width: 7),
-                _filterPill('Το ΣΚ', _MapFilter.weekend),
+                _filterPill('Αργότερα απόψε', MapTimeWindow.tonight),
+                const SizedBox(width: 7),
+                _filterPill('Το ΣΚ', MapTimeWindow.weekend),
               ],
             ),
           ),
@@ -289,10 +295,28 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-  Widget _filterPill(String label, _MapFilter value) {
+  /// Switches the active chip and refetches.
+  ///
+  /// The refetch is the whole feature: the window is a parameter to
+  /// `get_parties_near_user`, so a new chip is a new query and not a filter
+  /// over `_pins`. Narrowing the list in Dart would make "Τώρα" mean "whatever
+  /// happened to be in the last viewport fetch" — indistinguishable on a
+  /// six-pin test map and wrong everywhere else, because the previous fetch was
+  /// capped at 200 rows chosen by distance with no regard for time.
+  ///
+  /// Re-tapping the active chip is a no-op rather than a toggle back to Όλα:
+  /// Όλα is a chip of its own, so a toggle would give two ways to reach one
+  /// state and make the pill row's single-selection invariant untrue.
+  void _selectFilter(MapTimeWindow value) {
+    if (_filter == value) return;
+    setState(() => _filter = value);
+    _fetchEventsInBounds();
+  }
+
+  Widget _filterPill(String label, MapTimeWindow value) {
     final active = _filter == value;
     return GestureDetector(
-      onTap: () => setState(() => _filter = value),
+      onTap: () => _selectFilter(value),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
         decoration: BoxDecoration(
@@ -305,7 +329,7 @@ class _MapScreenState extends State<MapScreen> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (value == _MapFilter.live) ...[
+            if (value == MapTimeWindow.now) ...[
               Container(width: 6, height: 6, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle)),
               const SizedBox(width: 6),
             ],

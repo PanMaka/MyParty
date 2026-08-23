@@ -5,6 +5,7 @@ import 'package:latlong2/latlong.dart';
 
 import 'package:myparty/data/party_repository.dart';
 import 'package:myparty/models/map_party_pin.dart';
+import 'package:myparty/models/map_time_window.dart';
 import 'package:myparty/ui/screens/map_screen.dart';
 import 'package:myparty/ui/screens/search_screen.dart';
 import 'package:myparty/ui/widgets/mp_map_pin.dart';
@@ -26,14 +27,24 @@ class _FakePartyRepository extends PartyRepository {
   /// the viewport it is actually showing rather than just that pins appeared.
   final List<Map<String, double>> calls = [];
 
+  /// The window each of those calls carried, one entry per [calls] entry.
+  ///
+  /// Kept in a second list rather than added to [calls] because that one is
+  /// typed to doubles, and because the assertions it exists for are about the
+  /// *sequence* of windows the screen asked for — a chip tap must produce a new
+  /// REQUEST, not a narrowing of the rows the last one returned.
+  final List<MapTimeWindow> windows = [];
+
   @override
   Future<List<MapPartyPin>> fetchPartiesNearUser({
     required double lon,
     required double lat,
     required double radiusMeters,
     int limit = 200,
+    MapTimeWindow window = MapTimeWindow.all,
   }) async {
     calls.add({'lon': lon, 'lat': lat, 'radiusMeters': radiusMeters, 'limit': limit.toDouble()});
+    windows.add(window);
     return pins;
   }
 }
@@ -614,6 +625,93 @@ void main() {
       expect(find.byType(CircularProgressIndicator), findsNothing);
       expect(find.byType(MpMapPin), findsNothing);
       expect(find.text('Ψάξε πάρτι ή άτομα'), findsOneWidget);
+
+      await _teardown(tester);
+    });
+  });
+
+  group('the time chips', () {
+    testWidgets('all four render, and Όλα is the default', (tester) async {
+      final repository = _FakePartyRepository(const []);
+
+      await _mount(tester, repository);
+
+      expect(find.text('Όλα'), findsOneWidget);
+      expect(find.text('Τώρα'), findsOneWidget);
+      expect(find.text('Αργότερα απόψε'), findsOneWidget);
+      expect(find.text('Το ΣΚ'), findsOneWidget);
+
+      // The default matters more than it looks. Before this phase the enum
+      // defaulted to `live` and nothing read it, so the pill row opened with
+      // "Τώρα" highlighted over an unfiltered map -- a lie that was harmless
+      // only because the filter did not work. Now that it does, a default of
+      // anything but Όλα would hide most of the map on open.
+      expect(repository.windows, [MapTimeWindow.all]);
+
+      await _teardown(tester);
+    });
+
+    testWidgets('tapping a chip issues a NEW request with that window',
+        (tester) async {
+      final repository = _FakePartyRepository(const []);
+
+      await _mount(tester, repository);
+      expect(repository.calls, hasLength(1));
+
+      await tester.tap(find.text('Τώρα'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      // A SECOND call, not a second look at the first one's rows. This is the
+      // assertion the whole phase exists for: filtering `_pins` client-side
+      // would leave this at one call and still look right on a map with no
+      // pins on it.
+      expect(repository.calls, hasLength(2));
+      expect(repository.windows, [MapTimeWindow.all, MapTimeWindow.now]);
+
+      await _teardown(tester);
+    });
+
+    testWidgets('each chip sends its own wire value', (tester) async {
+      final repository = _FakePartyRepository(const []);
+
+      await _mount(tester, repository);
+
+      for (final label in const ['Αργότερα απόψε', 'Το ΣΚ', 'Όλα']) {
+        await tester.tap(find.text(label));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+
+      expect(repository.windows, [
+        MapTimeWindow.all,
+        MapTimeWindow.tonight,
+        MapTimeWindow.weekend,
+        MapTimeWindow.all,
+      ]);
+
+      await _teardown(tester);
+    });
+
+    testWidgets('re-tapping the active chip does not refetch', (tester) async {
+      final repository = _FakePartyRepository(const []);
+
+      await _mount(tester, repository);
+
+      await tester.tap(find.text('Τώρα'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(repository.calls, hasLength(2));
+
+      await tester.tap(find.text('Τώρα'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      // Not merely an optimisation: the map query is the most expensive one in
+      // the schema, and a pill row where every tap is a round trip makes an
+      // idle thumb a load generator.
+      expect(repository.calls, hasLength(2));
+      expect(repository.windows.last, MapTimeWindow.now);
 
       await _teardown(tester);
     });
