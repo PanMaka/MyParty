@@ -268,47 +268,30 @@ class _MapScreenState extends State<MapScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Expanded(
-                // Search is deliberately NOT bounded by the viewport: it opens
-                // its own screen and queries every party the viewer may see,
-                // wherever it is. Passing the map's centre and radius in here
-                // would make "search" mean "search what is on screen", which is
-                // a different feature.
-                child: GestureDetector(
-                  onTap: _openSearch,
-                  behavior: HitTestBehavior.opaque,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
-                    decoration: BoxDecoration(
-                      color: AppColors.chipFill,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: AppColors.hairline),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.search, size: 16, color: AppColors.textAlpha(0.5)),
-                        const SizedBox(width: 8),
-                        Text('Ψάξε πάρτι ή άτομα',
-                            style: TextStyle(fontSize: 13.5, color: AppColors.textAlpha(0.5))),
-                      ],
-                    ),
-                  ),
-                ),
+          // Search is deliberately NOT bounded by the viewport: it opens its
+          // own screen and queries every party the viewer may see, wherever it
+          // is. Passing the map's centre and radius in here would make "search"
+          // mean "search what is on screen", which is a different feature.
+          GestureDetector(
+            onTap: _openSearch,
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
+              decoration: BoxDecoration(
+                color: AppColors.chipFill,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.hairline),
               ),
-              const SizedBox(width: 8),
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: AppColors.chipFill,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppColors.hairline),
-                ),
-                child: const Icon(Icons.chat_bubble_outline, size: 18, color: AppColors.text),
+              child: Row(
+                children: [
+                  Icon(Icons.search, size: 16, color: AppColors.textAlpha(0.5)),
+                  const SizedBox(width: 8),
+                  Text('Ψάξε πάρτι ή άτομα',
+                      style: TextStyle(fontSize: 13.5, color: AppColors.textAlpha(0.5))),
+                ],
               ),
-            ],
+            ),
           ),
           const SizedBox(height: 10),
           SingleChildScrollView(
