@@ -455,8 +455,8 @@ void main() {
 
       expect(find.text('24'), findsOneWidget);
       expect(find.text('Ταράτσα στο Κουκάκι'), findsNothing);
-      expect(find.text('24 ενδ.'), findsNothing);
-      expect(find.textContaining('ενδ.'), findsNothing);
+      expect(find.text('24 interested'), findsNothing);
+      expect(find.textContaining('interested'), findsNothing);
 
       await _teardown(tester);
     });
@@ -475,7 +475,7 @@ void main() {
 
       expect(find.text('12'), findsOneWidget);
       expect(find.text('99'), findsNothing);
-      expect(find.textContaining('μέσα'), findsNothing);
+      expect(find.textContaining('here now'), findsNothing);
 
       await _teardown(tester);
     });
@@ -740,12 +740,12 @@ void main() {
       final repository = _FakePartyRepository(const []);
 
       await _mount(tester, repository);
-      await tester.tap(find.text('Ψάξε πάρτι ή άτομα'));
+      await tester.tap(find.text('Search parties or people'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
 
       expect(find.byType(SearchScreen), findsOneWidget);
-      expect(find.text('Γράψε κι άλλο'), findsOneWidget,
+      expect(find.text('Keep typing'), findsOneWidget,
           reason: 'it opens on the type-more state, having queried nothing');
 
       await _teardown(tester);
@@ -761,22 +761,22 @@ void main() {
 
       expect(find.byType(CircularProgressIndicator), findsNothing);
       expect(find.byType(MpMapPin), findsNothing);
-      expect(find.text('Ψάξε πάρτι ή άτομα'), findsOneWidget);
+      expect(find.text('Search parties or people'), findsOneWidget);
 
       await _teardown(tester);
     });
   });
 
   group('the time chips', () {
-    testWidgets('all four render, and Όλα is the default', (tester) async {
+    testWidgets('all four render, and All is the default', (tester) async {
       final repository = _FakePartyRepository(const []);
 
       await _mount(tester, repository);
 
-      expect(find.text('Όλα'), findsOneWidget);
-      expect(find.text('Τώρα'), findsOneWidget);
-      expect(find.text('Αργότερα απόψε'), findsOneWidget);
-      expect(find.text('Το ΣΚ'), findsOneWidget);
+      expect(find.text('All'), findsOneWidget);
+      expect(find.text('Live'), findsOneWidget);
+      expect(find.text('Later tonight'), findsOneWidget);
+      expect(find.text('Weekend'), findsOneWidget);
 
       // The default matters more than it looks. Before this phase the enum
       // defaulted to `live` and nothing read it, so the pill row opened with
@@ -795,7 +795,7 @@ void main() {
       await _mount(tester, repository);
       expect(repository.calls, hasLength(1));
 
-      await tester.tap(find.text('Τώρα'));
+      await tester.tap(find.text('Live'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
 
@@ -814,7 +814,7 @@ void main() {
 
       await _mount(tester, repository);
 
-      for (final label in const ['Αργότερα απόψε', 'Το ΣΚ', 'Όλα']) {
+      for (final label in const ['Later tonight', 'Weekend', 'All']) {
         await tester.tap(find.text(label));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 100));
@@ -835,12 +835,12 @@ void main() {
 
       await _mount(tester, repository);
 
-      await tester.tap(find.text('Τώρα'));
+      await tester.tap(find.text('Live'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
       expect(repository.calls, hasLength(2));
 
-      await tester.tap(find.text('Τώρα'));
+      await tester.tap(find.text('Live'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
 
@@ -910,7 +910,7 @@ void main() {
       expect(find.text('Ταράτσα με θέα, φέρτε ποτό.'), findsOneWidget);
       expect(find.text('Κουκάκι'), findsOneWidget);
       expect(find.text('@nikos'), findsOneWidget);
-      expect(find.byTooltip('Αναφορά'), findsOneWidget);
+      expect(find.byTooltip('Report'), findsOneWidget);
     });
 
     testWidgets('shows BOTH counters, with the tense deciding which leads', (tester) async {
@@ -928,8 +928,8 @@ void main() {
         repository,
       );
 
-      expect(find.text('12 μέσα τώρα'), findsOneWidget);
-      expect(find.text('34 ενδιαφέρονται'), findsOneWidget);
+      expect(find.text('12 here now'), findsOneWidget);
+      expect(find.text('34 interested'), findsOneWidget);
     });
 
     testWidgets('an upcoming party leads with interest instead', (tester) async {
@@ -943,9 +943,9 @@ void main() {
         repository,
       );
 
-      expect(find.text('34 ενδιαφέρονται'), findsOneWidget);
-      expect(find.text('12 δηλώσαν ότι έρχονται'), findsOneWidget);
-      expect(find.text('12 μέσα τώρα'), findsNothing);
+      expect(find.text('34 interested'), findsOneWidget);
+      expect(find.text('12 going'), findsOneWidget);
+      expect(find.text('12 here now'), findsNothing);
     });
 
     testWidgets('a missing column is omitted, never rendered as a blank row', (tester) async {
@@ -980,14 +980,14 @@ void main() {
       final repository = _FakePartyRepository(const []);
 
       await pumpSheet(tester, full(myRsvpStatus: null), repository);
-      expect(find.text('Μ’ ενδιαφέρει'), findsOneWidget);
+      expect(find.text('I am interested'), findsOneWidget);
 
       await pumpSheet(tester, full(myRsvpStatus: 'interested'), repository);
-      expect(find.text('Δήλωσες ενδιαφέρον'), findsOneWidget);
-      expect(find.text('Μ’ ενδιαφέρει'), findsNothing);
+      expect(find.text('You are interested'), findsOneWidget);
+      expect(find.text('I am interested'), findsNothing);
 
       await pumpSheet(tester, full(myRsvpStatus: 'going'), repository);
-      expect(find.text('Δήλωσες ότι έρχεσαι'), findsOneWidget);
+      expect(find.text('You are going'), findsOneWidget);
     });
 
     testWidgets('a party with no cover never asks storage to sign one', (tester) async {

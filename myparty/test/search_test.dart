@@ -141,7 +141,7 @@ void main() {
 
       await _type(tester, 'ta');
       expect(find.text('taratsa_fan'), findsNothing);
-      expect(find.text('Γράψε κι άλλο'), findsOneWidget);
+      expect(find.text('Keep typing'), findsOneWidget);
     });
   });
 
@@ -149,9 +149,9 @@ void main() {
     testWidgets('starts on the type-more hint, naming the minimum', (tester) async {
       await _mount(tester, _FakeSocial(), _FakeParties());
 
-      expect(find.text('Γράψε κι άλλο'), findsOneWidget);
+      expect(find.text('Keep typing'), findsOneWidget);
       expect(
-        find.textContaining('${SearchScreen.minQueryLength} χαρακτήρες'),
+        find.textContaining('${SearchScreen.minQueryLength} characters'),
         findsOneWidget,
         reason: 'the hint should state the actual threshold, not a hardcoded one',
       );
@@ -162,10 +162,10 @@ void main() {
 
       await _type(tester, 'zzzz');
 
-      expect(find.text('Κανένα αποτέλεσμα'), findsOneWidget);
+      expect(find.text('No results'), findsOneWidget);
       // The prefix-only limitation is surfaced to the user rather than left as
       // a mystery, since it is a real narrowing versus what ilike did.
-      expect(find.textContaining('αρχή της λέξης'), findsOneWidget);
+      expect(find.textContaining('start of a word'), findsOneWidget);
     });
 
     testWidgets('an error is a message, not a blank screen', (tester) async {
@@ -175,7 +175,7 @@ void main() {
 
       await _type(tester, 'tar');
 
-      expect(find.text('Κάτι πήγε στραβά'), findsOneWidget);
+      expect(find.text('Something went wrong'), findsOneWidget);
     });
   });
 
@@ -193,9 +193,9 @@ void main() {
 
       await _type(tester, 'warehouse');
 
-      expect(find.text('Άτομα'), findsOneWidget);
-      expect(find.text('Επερχόμενα'), findsOneWidget);
-      expect(find.text('Πέρασαν'), findsOneWidget);
+      expect(find.text('People'), findsOneWidget);
+      expect(find.text('Upcoming'), findsOneWidget);
+      expect(find.text('Past'), findsOneWidget);
       expect(find.text('nikos_p'), findsOneWidget);
       expect(find.text('Psiri Warehouse Rave'), findsOneWidget);
       expect(find.text('Γκάζι Warehouse Opening'), findsOneWidget);
@@ -209,9 +209,9 @@ void main() {
 
       await _type(tester, 'kolonaki');
 
-      expect(find.text('Επερχόμενα'), findsOneWidget);
-      expect(find.text('Πέρασαν'), findsNothing);
-      expect(find.text('Άτομα'), findsNothing);
+      expect(find.text('Upcoming'), findsOneWidget);
+      expect(find.text('Past'), findsNothing);
+      expect(find.text('People'), findsNothing);
     });
 
     testWidgets('the past/upcoming split is the SERVER\'s, not recomputed here',
@@ -231,10 +231,10 @@ void main() {
 
       await _type(tester, 'aaa');
 
-      final pastHeading = tester.getTopLeft(find.text('Πέρασαν')).dy;
+      final pastHeading = tester.getTopLeft(find.text('Past')).dy;
       expect(tester.getTopLeft(find.text('Filed As Past')).dy,
           greaterThan(pastHeading),
-          reason: 'a future-dated party still renders under Πέρασαν when the '
+          reason: 'a future-dated party still renders under Past when the '
               'server said is_past');
       expect(tester.getTopLeft(find.text('Future A')).dy, lessThan(pastHeading));
     });
@@ -256,7 +256,7 @@ void main() {
       // the search half of the shared-sheet rule; map_test.dart asserts the
       // map half against the same widget.
       expect(find.byType(MapPinSheet), findsOneWidget);
-      expect(find.byTooltip('Αναφορά'), findsOneWidget);
+      expect(find.byTooltip('Report'), findsOneWidget);
     });
 
     testWidgets('and it is fully populated, not the thin version', (tester) async {
@@ -293,7 +293,7 @@ void main() {
       expect(inSheet('Υπόγειο τεχνο μέχρι το πρωί.'), findsOneWidget);
       expect(inSheet('@second_host'), findsOneWidget);
       expect(inSheet('Ψυρρή'), findsOneWidget);
-      expect(inSheet('Δήλωσες ενδιαφέρον'), findsOneWidget);
+      expect(inSheet('You are interested'), findsOneWidget);
     });
   });
 }

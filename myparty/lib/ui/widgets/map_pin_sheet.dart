@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../data/party_repository.dart';
 import '../../models/feed_post.dart';
 import '../../models/map_party_pin.dart';
-import '../../utils/greek_date.dart';
+import '../../utils/english_date.dart';
 import '../theme/app_theme.dart';
 import 'diagonal_placeholder.dart';
 import 'privacy_badge.dart';
@@ -79,7 +79,7 @@ class _MapPinSheetState extends State<MapPinSheet> {
     // are conveniences that each call `DateTime.now()` themselves, so the
     // uses below would be separate readings of the clock — and a party
     // crossing its start time between them would print an interested count
-    // under a "μέσα τώρα" label. Same reason [MpMapPin] takes its instant from
+    // under a "here now" label. Same reason [MpMapPin] takes its instant from
     // its parent rather than reading one per field.
     final now = DateTime.now();
     final live = pin.liveAt(now);
@@ -147,10 +147,10 @@ class _MapPinSheetState extends State<MapPinSheet> {
               const SizedBox(height: 5),
               Row(
                 children: [
-                  PrivacyBadge(isPrivate: pin.isPrivate),
+                  PrivacyBadge(isPrivate: pin.isPrivate, english: true),
                   if (live) ...[
                     const SizedBox(width: 6),
-                    Text('ΤΩΡΑ', style: AppTextStyles.mono(size: 9, color: AppColors.pinkLight)),
+                    Text('LIVE', style: AppTextStyles.mono(size: 9, color: AppColors.pinkLight)),
                   ],
                 ],
               ),
@@ -167,7 +167,7 @@ class _MapPinSheetState extends State<MapPinSheet> {
             targetId: pin.id,
           ),
           icon: Icon(Icons.more_horiz, size: 20, color: AppColors.textAlpha(0.5)),
-          tooltip: 'Αναφορά',
+          tooltip: 'Report',
         ),
       ],
     );
@@ -222,8 +222,8 @@ class _MapPinSheetState extends State<MapPinSheet> {
             // a past party is being identified, not attended, so it gets the
             // year and not the clock time.
             startsAt.isAfter(DateTime.now())
-                ? formatPartyStart(startsAt)
-                : formatPartyPast(startsAt),
+                ? formatPartyStartEn(startsAt)
+                : formatPartyPastEn(startsAt),
           ),
         if (pin.area != null) ...[
           const SizedBox(height: 7),
@@ -257,13 +257,13 @@ class _MapPinSheetState extends State<MapPinSheet> {
   /// Both counters, not just the tense-appropriate one.
   ///
   /// The pin shows one number because it has room for one; the sheet is where
-  /// "12 μέσα τώρα" and "34 ενδιαφέρονται" can both be true and both be worth
+  /// "12 here now" and "34 interested" can both be true and both be worth
   /// knowing. The tense still decides which one leads.
   Widget _counts(bool live, int count) {
     final pin = widget.pin;
     final other = live
-        ? '${pin.interestedCount} ενδιαφέρονται'
-        : '${pin.goingCount} δηλώσαν ότι έρχονται';
+        ? '${pin.interestedCount} interested'
+        : '${pin.goingCount} going';
 
     return Row(
       children: [
@@ -274,7 +274,7 @@ class _MapPinSheetState extends State<MapPinSheet> {
             borderRadius: BorderRadius.circular(10),
           ),
           child: Text(
-            live ? '$count μέσα τώρα' : '$count ενδιαφέρονται',
+            live ? '$count here now' : '$count interested',
             style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w500),
           ),
         ),
@@ -308,9 +308,9 @@ class _MapPinSheetState extends State<MapPinSheet> {
     final already = status == 'going' || status == 'interested';
 
     final label = switch (status) {
-      'going' => 'Δήλωσες ότι έρχεσαι',
-      'interested' => 'Δήλωσες ενδιαφέρον',
-      _ => pin.isPrivate ? 'Έρχομαι' : 'Μ’ ενδιαφέρει',
+      'going' => 'You are going',
+      'interested' => 'You are interested',
+      _ => pin.isPrivate ? 'I am going' : 'I am interested',
     };
 
     return SizedBox(
@@ -319,7 +319,7 @@ class _MapPinSheetState extends State<MapPinSheet> {
         onPressed: () {
           Navigator.of(context).pop();
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Έρχεται σύντομα'), behavior: SnackBarBehavior.floating),
+            const SnackBar(content: Text('Coming soon'), behavior: SnackBarBehavior.floating),
           );
         },
         style: ElevatedButton.styleFrom(

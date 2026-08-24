@@ -293,7 +293,7 @@ class _MapScreenState extends State<MapScreen> {
                 children: [
                   Icon(Icons.search, size: 16, color: AppColors.textAlpha(0.5)),
                   const SizedBox(width: 8),
-                  Text('Ψάξε πάρτι ή άτομα',
+                  Text('Search parties or people',
                       style: TextStyle(fontSize: 13.5, color: AppColors.textAlpha(0.5))),
                 ],
               ),
@@ -304,13 +304,13 @@ class _MapScreenState extends State<MapScreen> {
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [
-                _filterPill('Όλα', MapTimeWindow.all),
+                _filterPill('All', MapTimeWindow.all),
                 const SizedBox(width: 7),
-                _filterPill('Τώρα', MapTimeWindow.now),
+                _filterPill('Live', MapTimeWindow.now),
                 const SizedBox(width: 7),
-                _filterPill('Αργότερα απόψε', MapTimeWindow.tonight),
+                _filterPill('Later tonight', MapTimeWindow.tonight),
                 const SizedBox(width: 7),
-                _filterPill('Το ΣΚ', MapTimeWindow.weekend),
+                _filterPill('Weekend', MapTimeWindow.weekend),
               ],
             ),
           ),
@@ -323,13 +323,13 @@ class _MapScreenState extends State<MapScreen> {
   ///
   /// The refetch is the whole feature: the window is a parameter to
   /// `get_parties_near_user`, so a new chip is a new query and not a filter
-  /// over `_pins`. Narrowing the list in Dart would make "Τώρα" mean "whatever
+  /// over `_pins`. Narrowing the list in Dart would make "Live" mean "whatever
   /// happened to be in the last viewport fetch" — indistinguishable on a
   /// six-pin test map and wrong everywhere else, because the previous fetch was
   /// capped at 200 rows chosen by distance with no regard for time.
   ///
-  /// Re-tapping the active chip is a no-op rather than a toggle back to Όλα:
-  /// Όλα is a chip of its own, so a toggle would give two ways to reach one
+  /// Re-tapping the active chip is a no-op rather than a toggle back to All:
+  /// All is a chip of its own, so a toggle would give two ways to reach one
   /// state and make the pill row's single-selection invariant untrue.
   void _selectFilter(MapTimeWindow value) {
     if (_filter == value) return;
@@ -383,9 +383,9 @@ class _MapScreenState extends State<MapScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _legendRow(AppColors.purple, dashed: false, label: 'Δημόσιο · το βλέπουν όλοι'),
+            _legendRow(AppColors.purple, dashed: false, label: 'Public · anyone can see it'),
             const SizedBox(height: 7),
-            _legendRow(AppColors.pink, dashed: true, label: 'Ιδιωτικό · μόνο καλεσμένοι'),
+            _legendRow(AppColors.pink, dashed: true, label: 'Private · invited only'),
           ],
         ),
       ),
