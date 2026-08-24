@@ -8,14 +8,18 @@ import 'package:myparty/ui/theme/app_theme.dart';
 import 'package:myparty/ui/widgets/mp_drop_shape.dart';
 import 'package:myparty/ui/widgets/mp_map_pin.dart';
 
-/// Renders the drop silhouette at the four sizes that matter, with a crosshair
-/// on each tip so the anchor can be checked rather than assumed.
+/// Renders the bubble silhouette at the four sizes that matter, with a
+/// crosshair on each apex so the anchor can be checked rather than assumed.
 ///
-/// The golden is the *shape only* — no thumbnail, no title, no count. Under
-/// `flutter test` there is no real font and text renders in fallback metrics
-/// that look nothing like a handset, so including it would make the picture
-/// less honest, not more. What is being reviewed here is the outline, the size
-/// progression and where the tip lands.
+/// The golden is the *shape only* — no count. Under `flutter test` there is no
+/// real font and text renders in fallback metrics that look nothing like a
+/// handset, so including it would make the picture less honest, not more. What
+/// is being reviewed here is the outline, the size progression and where the
+/// apex lands.
+///
+/// The chip outline this sheet used to draw is gone with the chip: the marker
+/// box is now the bubble exactly, so the box outline alone says everything the
+/// two rectangles used to.
 class _DropSheet extends StatelessWidget {
   const _DropSheet();
 
@@ -52,10 +56,10 @@ class _DropSheet extends StatelessWidget {
               ),
 
             // THE CONTENT BUDGET, drawn to scale: the largest square that
-            // fits inside the circle. Everything the pill used to carry --
-            // thumbnail, title, count -- has to live in here, and at the
-            // smallest public size that is a ~21px box. This is the picture
-            // the layout decision has to be taken from.
+            // fits inside the body circle. Only the count lives in here now --
+            // the thumbnail and the title are gone -- and at the smallest
+            // public size it is a ~22px box holding at most two digits, which
+            // is the whole argument for moving the label inside.
             for (var i = 0; i < drops.length; i++)
               Positioned(
                 left: 40 + i * 200.0 - drops[i].$2.contentExtent / 2,
@@ -65,27 +69,20 @@ class _DropSheet extends StatelessWidget {
                 child: const _ContentBox(),
               ),
 
-            // THE COMPOSITE, to scale: the label chip beside the drop and the
-            // marker box around both. Drawn as rectangles rather than as a
-            // real MpMapPin because the chip's text goes through google_fonts,
-            // which under `flutter test` either attempts a stubbed HTTP fetch
-            // or throws from an unawaited future -- neither of which a golden
-            // survives, and neither of which says anything about the layout.
-            // What is being reviewed here is where the pieces sit.
-            for (var i = 0; i < drops.length; i++) ...[
-              Positioned.fromRect(
-                rect: _metrics[i].chipRect.shift(_origin(i) - _metrics[i].tip),
-                child: const _Outline(Color(0x88B39DFF)),
-              ),
+            // THE MARKER BOX, to scale. It used to be worth drawing next to a
+            // chip outline to show the two pieces sitting in one box; now it
+            // is worth drawing because it should be invisible — the box and
+            // the bubble are the same rectangle, and any gap between them is
+            // slack the anchor would be wrong by.
+            for (var i = 0; i < drops.length; i++)
               Positioned.fromRect(
                 rect: (Offset.zero & Size(_metrics[i].width, _metrics[i].height))
                     .shift(_origin(i) - _metrics[i].tip),
                 child: const _Outline(Color(0x33FFFFFF)),
               ),
-            ],
 
-            // The anchor. Every tip must land on the SAME y, whatever the
-            // drop's size -- that is the property the shape exists for, and
+            // The anchor. Every apex must land on the SAME y, whatever the
+            // bubble's size -- that is the property the shape exists for, and
             // the one a size change can silently break.
             for (var i = 0; i < drops.length; i++)
               Positioned(
@@ -111,9 +108,9 @@ final _metrics = <MpPinMetrics>[
   MpPinMetrics.private(),
 ];
 
-/// Where the coordinate sits for column [i] -- the same anchor line the drops
+/// Where the coordinate sits for column [i] -- the same anchor line the bubbles
 /// are laid out against.
-Offset _origin(int i) => Offset(40 + i * 200.0, 40 + _metrics[i].topPad + _metrics[i].drop.height);
+Offset _origin(int i) => Offset(40 + i * 200.0, 40 + _metrics[i].drop.height);
 
 class _Outline extends StatelessWidget {
   const _Outline(this.color);
@@ -158,7 +155,7 @@ class _CrosshairPainter extends CustomPainter {
 }
 
 void main() {
-  testWidgets('the drop at min / mid / max public size and fixed private', (tester) async {
+  testWidgets('the bubble at min / mid / max public size and fixed private', (tester) async {
     // Size the surface to the sheet so the golden is the drawing and not a
     // drawing in the corner of an 800x600 page.
     tester.view.physicalSize = const Size(880 * 3, 210 * 3);
@@ -168,7 +165,7 @@ void main() {
     await tester.pumpWidget(const _DropSheet());
     await expectLater(
       find.byType(_DropSheet),
-      matchesGoldenFile('goldens/mp_drop_shapes.png'),
+      matchesGoldenFile('goldens/mp_bubble_shapes.png'),
     );
   });
 

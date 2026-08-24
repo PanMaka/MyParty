@@ -127,23 +127,23 @@ class _MapScreenState extends State<MapScreen> {
   /// One pin's marker, sized from the same [now] the pin itself is drawn for.
   ///
   /// The size has to be computed twice — a `Marker` declares its own box and
-  /// the pill inside it declares its own extent — but it must not be *derived*
-  /// twice: a pin whose tier came from a later clock reading than its box
-  /// would be clipped by it. So [MpPinMetrics] answers once here and the same
-  /// instant goes down to [MpMapPin], which re-derives from it rather than
-  /// from a second `DateTime.now()`.
+  /// the bubble inside it declares its own extent — but it must not be
+  /// *derived* twice: a pin whose size came from a later clock reading than
+  /// its box would be clipped by it. So [MpPinMetrics] answers once here and
+  /// the same instant goes down to [MpMapPin], which re-derives from it rather
+  /// than from a second `DateTime.now()`.
   Marker _marker(MapPartyPin pin, DateTime now) {
     final metrics = MpPinMetrics.forPin(pin, now);
     return Marker(
       point: LatLng(pin.lat, pin.lng),
       width: metrics.width,
       height: metrics.boxHeight,
-      // Not a constant any more. The box is asymmetric — drop on the left,
-      // label chip on the right — so the anchor has to name the drop's TIP
-      // rather than an edge of the box, and it moves per pin because the chip
-      // steps by tier while the drop grows continuously. MpPinMetrics computes
-      // it from the same geometry the widget paints, so the two cannot
-      // disagree about where the party is.
+      // A constant again — `Alignment(0, -1)` — now that the label chip is
+      // gone and the box is the bubble exactly. Still read from MpPinMetrics
+      // rather than written down here: it is derived from the same geometry
+      // the widget paints, so a future shape whose apex is not at the bottom
+      // centre moves the anchor with it instead of quietly lying about where
+      // the party is.
       alignment: metrics.anchor,
       child: MpMapPin(pin: pin, now: now, onTap: () => _onPinTap(pin)),
     );
@@ -151,8 +151,11 @@ class _MapScreenState extends State<MapScreen> {
 
   /// The pins in PAINT order: largest first, so the smallest end up on top.
   ///
-  /// Drops collide at low zoom and something has to give. The two alternatives
-  /// were both worse:
+  /// Bubbles collide at low zoom and something has to give. Stripping the
+  /// label took the pin from 112px wide to `2r` — 34px empty, 68px saturated —
+  /// so the ~42m Syntagma cluster now separates around z17 instead of z19, and
+  /// what is left for this sort to handle is the genuinely dense case. The two
+  /// alternatives are still both worse:
   ///
   /// - **Collision offset** moves a drop off its coordinate, which is the one
   ///   thing the teardrop exists to promise. A pin that lies about where the
@@ -162,9 +165,11 @@ class _MapScreenState extends State<MapScreen> {
   ///   would be confidently wrong whenever the cap bit. It also collapses the
   ///   ~50m Syntagma-style clusters this map is built to show.
   ///
-  /// Z-order costs one sort and lies about nothing. A large drop can never
-  /// fully hide a small one, overlapping bodies still show distinct tips, and
-  /// the smaller pin — the harder one to hit — wins the hit test.
+  /// Z-order costs one sort and lies about nothing, and the narrower pin makes
+  /// it stronger rather than redundant: two overlapping bubbles now differ
+  /// only in diameter, so the smaller one always shows as a whole disc inside
+  /// the gap the larger cannot cover, and it — the harder one to hit — wins
+  /// the hit test.
   ///
   /// Sorted for PAINTING only. The server's `is_sponsored desc, distance asc`
   /// ordering decides which 200 rows arrive, which is a different question and

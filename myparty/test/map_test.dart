@@ -1,5 +1,6 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -131,9 +132,6 @@ Future<void> _pumpPin(WidgetTester tester, MapPartyPin pin, DateTime now) {
 /// reports 1.
 int _runningTickers(WidgetTester tester) => tester.binding.transientCallbackCount;
 
-RenderParagraph _paragraph(WidgetTester tester, String text) =>
-    tester.renderObject<RenderParagraph>(find.text(text));
-
 void main() {
   group('MapPartyPin.fromRpcRow', () {
     // The exact column names get_parties_near_user emits, spelled the way the
@@ -238,21 +236,27 @@ void main() {
   });
 
   group('MpPinMetrics', () {
-    test('both tier boundaries, from either side', () {
-      expect(MpPinMetrics.forCount(0).tier, MpPinTier.small);
-      expect(MpPinMetrics.forCount(mpPinMediumFrom - 1).tier, MpPinTier.small);
-      expect(MpPinMetrics.forCount(mpPinMediumFrom).tier, MpPinTier.medium);
-      expect(MpPinMetrics.forCount(mpPinLargeFrom - 1).tier, MpPinTier.medium);
-      expect(MpPinMetrics.forCount(mpPinLargeFrom).tier, MpPinTier.large);
-      expect(MpPinMetrics.forCount(10000).tier, MpPinTier.large);
+    test('the box is the bubble exactly, with nothing overhanging it', () {
+      // The teardrop's box had a `topPad` term because its chip could stand
+      // taller than its circle and overhang the top — and since the tip is
+      // measured from the box's BOTTOM, forgetting that term moved the anchor
+      // on precisely the smallest and most numerous pins. With the chip gone
+      // there is no overhang to account for, and this is the assertion that
+      // keeps it that way.
+      for (final count in [0, 25, 100, 400]) {
+        final m = MpPinMetrics.forCount(count);
+        expect(m.width, m.drop.width);
+        expect(m.height, m.drop.height);
+        expect(m.boxHeight, m.drop.height);
+      }
     });
 
-    test('width never goes backwards, least of all across a boundary', () {
-      // Each tier's width grows on a sqrt that saturates, so a tier ceiling
-      // and the next tier's floor are the one place the ladder could invert:
+    test('width never goes backwards, least of all near saturation', () {
+      // Width is now `2r` on a sqrt that saturates, so it is monotonic by
+      // construction — which is worth a sweep rather than an argument, because
       // a 25-person party drawing narrower than a 24-person one would read as
-      // a smaller party. Swept rather than spot-checked, because the failure
-      // is a single step in a range nobody looks at.
+      // a smaller party and the failure would be one step in a range nobody
+      // looks at.
       var previous = 0.0;
       for (var count = 0; count <= 500; count++) {
         final width = MpPinMetrics.forCount(count).width;
@@ -263,26 +267,30 @@ void main() {
     });
 
     test('a negative count is drawn as an empty party, not as an error', () {
-      expect(MpPinMetrics.forCount(-5).tier, MpPinTier.small);
       expect(MpPinMetrics.forCount(-5).width, MpPinMetrics.forCount(0).width);
     });
 
-    test('the small tier has the least room for a label', () {
-      // The invariant behind the truncation test below: whatever the tiers'
-      // dimensions become, the tightest label row is the one at the bottom, so
-      // that is where the ellipsis has to be proved.
-      final small = MpPinMetrics.forCount(0);
-      final medium = MpPinMetrics.forCount(mpPinMediumFrom);
-      final large = MpPinMetrics.forCount(mpPinLargeFrom);
-
-      expect(small.labelWidth, lessThan(medium.labelWidth));
-      expect(medium.labelWidth, lessThan(large.labelWidth));
+    test('the anchor is the bottom centre of the box at every size', () {
+      // Constant now that the box is symmetric, but asserted through the
+      // geometry rather than against `Alignment.topCenter` — the property that
+      // matters is that inverting flutter_map's placement lands on the apex,
+      // not that the value happens to be (0, -1) today.
+      for (final m in [
+        MpPinMetrics.forCount(0),
+        MpPinMetrics.forCount(100),
+        MpPinMetrics.private(),
+      ]) {
+        expect(m.tip.dx, closeTo(m.width / 2, 0.001));
+        expect(m.tip.dy, closeTo(m.height, 0.001));
+        expect(m.anchor.x, closeTo(0, 0.001));
+        expect(m.anchor.y, closeTo(-1, 0.001));
+      }
     });
 
-    test('the tier follows the tense, not a number frozen at fetch time', () {
+    test('the size follows the tense, not a number frozen at fetch time', () {
       // The same pin, the same fetch, two clocks. A party four people are
-      // interested in and two hundred turn up to is a small pin before it
-      // starts and a large one after — with no refetch, and with no
+      // interested in and two hundred turn up to is a small bubble before it
+      // starts and a saturated one after — with no refetch, and with no
       // server-computed `live` flag involved.
       final start = DateTime.parse('2026-08-21T20:00:00Z');
       final pin = _pin(
@@ -294,10 +302,48 @@ void main() {
         goingCount: 200,
       );
 
-      expect(MpPinMetrics.forPin(pin, start.subtract(const Duration(hours: 1))).tier, MpPinTier.small);
-      expect(MpPinMetrics.forPin(pin, start.add(const Duration(hours: 1))).tier, MpPinTier.large);
+      final before = MpPinMetrics.forPin(pin, start.subtract(const Duration(hours: 1)));
+      final during = MpPinMetrics.forPin(pin, start.add(const Duration(hours: 1)));
+      final after = MpPinMetrics.forPin(pin, start.add(const Duration(hours: 9)));
+
+      expect(during.width, greaterThan(before.width));
+      expect(during.drop.radius, MpDropGeometry.maxRadius);
       // And back down once it is over, because the count reverts to interest.
-      expect(MpPinMetrics.forPin(pin, start.add(const Duration(hours: 9))).tier, MpPinTier.small);
+      expect(after.width, before.width);
+    });
+
+    test('a label wide enough to be a problem only lands on a saturated bubble', () {
+      // THE INVARIANT THAT REPLACED THE TRUNCATION TEST. The chip needed an
+      // ellipsis because its width stepped by tier while the count it drew had
+      // no upper bound. Inside the bubble that cannot happen: three digits
+      // means a count >= 100, and 100 is exactly where the radius saturates.
+      // So every bubble below maximum radius is drawing at most two glyphs,
+      // and there is no case left to clip.
+      for (var count = 0; count < MpDropGeometry.saturatesAt; count++) {
+        expect('$count'.length, lessThanOrEqualTo(2),
+            reason: 'a sub-saturation count needs more than two digits');
+      }
+      for (final count in [100, 999, 4237]) {
+        expect(MpPinMetrics.forCount(count).drop.radius, MpDropGeometry.maxRadius,
+            reason: 'count $count draws a three- or four-digit label');
+      }
+    });
+
+    test('the label steps down as it gets wider, so it always fits its circle', () {
+      // Measured against the chord available at the text's own height, not
+      // against the inscribed square: the number is a single centred line, so
+      // the width it actually has is the circle's width at +/- half a line.
+      for (final (count, digits) in [(8, 1), (42, 2), (340, 3), (4237, 4)]) {
+        final m = MpPinMetrics.forCount(count);
+        final r = m.drop.radius;
+        final size = MpPinMetrics.labelSizeFor(r, digits);
+        // Roboto Mono advances ~0.60em, plus the 0.08em letter-spacing
+        // AppTextStyles.mono applies to every glyph.
+        final drawn = digits * size * 0.68;
+        final available = 2 * math.sqrt(r * r - (size / 2) * (size / 2));
+        expect(drawn, lessThan(available),
+            reason: 'a $digits-digit label overflows the r=$r bubble');
+      }
     });
   });
 
@@ -373,55 +419,92 @@ void main() {
     });
   });
 
-  group('MpMapPin label row', () {
+  group('MpMapPin label', () {
     final start = DateTime.parse('2026-08-21T20:00:00Z');
 
-    testWidgets('the count truncates at the smallest tier rather than overflowing', (tester) async {
-      // Asserted at the SMALL tier deliberately. It has the least labelWidth
-      // of the three, so it is the tier that overflows first — and it is also
-      // the one nobody looks at, because a small party is the boring case.
-      // The row overflowed for real once already, at counts the payload fix
-      // made reachable for the first time; a shape whose width now varies per
-      // tier reopens that at every step of the ladder.
-      //
-      // `didExceedMaxLines` is the assertion, not the absence of a red box: a
-      // RenderFlex overflow fails the test by itself, but so would a layout
-      // that merely happened to fit, and that would stop testing anything the
-      // moment a font changed.
+    testWidgets('the pin draws the count and nothing else', (tester) async {
+      // The whole label, asserted as an absence as much as a presence: the
+      // title, the area and the unit suffix are the three things that were on
+      // the pin and are now only in MapPinSheet, one tap away.
       final pin = _pin(
         id: 'p',
         title: 'Ταράτσα στο Κουκάκι',
         startsAt: start,
-        interestedCount: mpPinMediumFrom - 1,
+        interestedCount: 24,
       );
 
       await _pumpPin(tester, pin, start.subtract(const Duration(hours: 1)));
 
-      expect(MpPinMetrics.forPin(pin, start.subtract(const Duration(hours: 1))).tier, MpPinTier.small);
-
-      final meta = _paragraph(tester, '${mpPinMediumFrom - 1} ενδ.');
-      expect(meta.didExceedMaxLines, isTrue);
-      expect(meta.size.width, lessThanOrEqualTo(MpPinMetrics.forCount(mpPinMediumFrom - 1).labelWidth));
-
-      final title = _paragraph(tester, 'Ταράτσα στο Κουκάκι');
-      expect(title.didExceedMaxLines, isTrue);
+      expect(find.text('24'), findsOneWidget);
+      expect(find.text('Ταράτσα στο Κουκάκι'), findsNothing);
+      expect(find.text('24 ενδ.'), findsNothing);
+      expect(find.textContaining('ενδ.'), findsNothing);
 
       await _teardown(tester);
     });
 
-    testWidgets('a four-digit live count still fits its pin at every tier', (tester) async {
-      // The width formula saturates ~26px into a tier, so the label is not
-      // rescued by a bigger pin however big the party gets. Each of these
-      // would throw a RenderFlex overflow if the Flexible were dropped.
-      for (final count in [0, 7, mpPinMediumFrom, 99, mpPinLargeFrom, 4237]) {
-        final pin = _pin(id: 'p', title: 'Techno Noir Warehouse', startsAt: start, goingCount: count);
+    testWidgets('a live pin draws the going count, still bare', (tester) async {
+      final pin = _pin(
+        id: 'p',
+        title: 'Τώρα',
+        startsAt: start,
+        endsAt: start.add(const Duration(hours: 8)),
+        goingCount: 12,
+        interestedCount: 99,
+      );
+
+      await _pumpPin(tester, pin, start.add(const Duration(hours: 1)));
+
+      expect(find.text('12'), findsOneWidget);
+      expect(find.text('99'), findsNothing);
+      expect(find.textContaining('μέσα'), findsNothing);
+
+      await _teardown(tester);
+    });
+
+    testWidgets('every count from empty to four digits fits without overflowing', (tester) async {
+      // Each of these would throw a RenderFlex overflow or clip visibly if the
+      // step-down in labelSizeFor were dropped. 4237 is only reachable as a
+      // live going_count, and only on a saturated bubble.
+      for (final count in [0, 7, 25, 99, 100, 4237]) {
+        final pin = _pin(id: 'p', title: 'Techno Noir', startsAt: start, goingCount: count);
 
         await _pumpPin(tester, pin, start.add(const Duration(hours: 1)));
 
-        expect(find.text('$count μέσα'), findsOneWidget, reason: 'count $count');
+        expect(find.text('$count'), findsOneWidget, reason: 'count $count');
         expect(tester.takeException(), isNull, reason: 'count $count overflowed its pin');
+
+        // And it is inside the bubble, not merely rendered somewhere: the text
+        // has to fit within the body circle it is centred in.
+        final m = MpPinMetrics.forCount(count);
+        final drawn = tester.getSize(find.text('$count'));
+        expect(drawn.width, lessThanOrEqualTo(2 * m.drop.radius), reason: 'count $count');
       }
 
+      await _teardown(tester);
+    });
+
+    testWidgets('a private pin is the same size whatever its count says', (tester) async {
+      // The widget-level form of the geometry control: the number changes, the
+      // silhouette does not. This is the property that keeps attendance
+      // unreadable from a private pin's shape.
+      final sizes = <Size>{};
+      for (final count in [0, 1, 99, 5000]) {
+        final pin = _pin(
+          id: 'p',
+          title: 'Ιδιωτικό',
+          startsAt: start,
+          interestedCount: count,
+          isPrivate: true,
+        );
+
+        await _pumpPin(tester, pin, start.subtract(const Duration(hours: 1)));
+
+        expect(find.text('$count'), findsOneWidget);
+        sizes.add(tester.getSize(find.byType(MpMapPin)));
+      }
+
+      expect(sizes, hasLength(1));
       await _teardown(tester);
     });
   });
@@ -455,11 +538,13 @@ void main() {
       // The counts that used to be a hardcoded 0 for every pin on the map.
       // Both pins carry both numbers, and each must print the OTHER one from
       // its neighbour — so a pin reading the wrong counter fails here rather
-      // than passing by coincidence.
-      expect(find.text('12 μέσα'), findsOneWidget);
-      expect(find.text('34 ενδ.'), findsOneWidget);
-      expect(find.text('99 ενδ.'), findsNothing);
-      expect(find.text('88 μέσα'), findsNothing);
+      // than passing by coincidence. Bare numbers now: the live one is the
+      // going count, the upcoming one the interested count, and the pulse is
+      // what distinguishes them.
+      expect(find.text('12'), findsOneWidget);
+      expect(find.text('34'), findsOneWidget);
+      expect(find.text('99'), findsNothing);
+      expect(find.text('88'), findsNothing);
 
       await _teardown(tester);
     });
@@ -487,7 +572,7 @@ void main() {
       await _teardown(tester);
     });
 
-    testWidgets('pin size steps by tier instead of being uniform', (tester) async {
+    testWidgets('pin size tracks the count continuously instead of being uniform', (tester) async {
       final now = DateTime.now();
       final repository = _FakePartyRepository([
         _pin(id: 'small', title: 'Μικρό', startsAt: now.add(const Duration(days: 1)), interestedCount: 1),
@@ -509,48 +594,43 @@ void main() {
 
       await _mount(tester, repository);
 
-      Size sizeOf(String title) => tester.getSize(find.ancestor(
-            of: find.text(title),
+      // Found by the count now, not the title — the title is not on the pin
+      // any more, which is the point of the change.
+      Size sizeOf(int count) => tester.getSize(find.ancestor(
+            of: find.text('$count'),
             matching: find.byType(MpMapPin),
           ));
 
-      final small = sizeOf('Μικρό');
-      final medium = sizeOf('Μεσαίο');
-      final large = sizeOf('Μεγάλο');
+      final small = sizeOf(1);
+      final medium = sizeOf(40);
+      final large = sizeOf(400);
 
-      // Height is now the DROP and nothing else — the chip is centred on the
-      // circle and never the tallest thing — so it varies continuously with
-      // the count instead of stepping. Every pin was 112x52 before, because
-      // every count was 0.
+      // BOTH axes move now. On the teardrop only the height varied, because
+      // width was dominated by a chip that stepped in three fixed sizes; with
+      // the chip gone width is 2r and carries the same signal the height does.
       expect(small.height, lessThan(medium.height));
       expect(medium.height, lessThan(large.height));
+      expect(small.width, lessThan(medium.width));
+      expect(medium.width, lessThan(large.width));
 
       // The top is SATURATED, not merely large. 400 interested and 100
-      // interested draw the same drop, which is what keeps 200 pins on one
+      // interested draw the same bubble, which is what keeps 200 pins on one
       // screen readable.
       expect(
         large.height,
         closeTo(MpDropGeometry.maxRadius * (1 + MpDropGeometry.tipRatio), 0.01),
       );
+      expect(large.width, closeTo(2 * MpDropGeometry.maxRadius, 0.01));
 
-      // Width is the composition: drop diameter + gap + chip. Asserted as the
-      // sum of the parts rather than as three literals, because the failure
-      // that matters is the box disagreeing with what is painted inside it —
-      // nothing clips the marker child, so a box narrower than its contents
-      // does not error, it just overlaps the neighbouring pin.
+      // Asserted against the geometry rather than three literals, because the
+      // failure that matters is the box disagreeing with what is painted
+      // inside it — nothing clips the marker child, so a box narrower than its
+      // contents does not error, it just overlaps the neighbouring pin.
       for (final (size, count) in [(small, 1), (medium, 40), (large, 400)]) {
         final m = MpPinMetrics.forCount(count);
-        expect(size.width, closeTo(m.drop.width + m.gap + m.chipWidth, 0.01));
-        // topPad, not just drop.height. A small drop's chip is taller than its
-        // circle and overhangs the top of the drop, so the box grows upward by
-        // the overhang — and since the tip is measured from the box's BOTTOM,
-        // forgetting the term moves the anchor by exactly that much on the
-        // smallest and most numerous pins.
-        expect(size.height, closeTo(m.topPad + m.drop.height, 0.01));
+        expect(size.width, closeTo(m.drop.width, 0.01));
+        expect(size.height, closeTo(m.drop.height, 0.01));
       }
-      expect(MpPinMetrics.forCount(1).topPad, greaterThan(0),
-          reason: 'the small tier is the case that exercises topPad');
-      expect(MpPinMetrics.forCount(400).topPad, 0);
 
       await _teardown(tester);
     });
@@ -588,16 +668,20 @@ void main() {
       expect(box.height, expected.boxHeight);
       expect(tester.getSize(find.byType(MpMapPin)), Size(expected.width, expected.boxHeight));
 
-      // And it is the live tier, not the interested one: 300 going, 2
-      // interested. Had the screen sized the box off the wrong counter, the
-      // pin would be squeezed into a 38px-tall small-tier box here.
-      expect(expected.tier, MpPinTier.large);
-      expect(box.height, closeTo(expected.topPad + expected.drop.height, 0.01));
+      // And it is sized off the LIVE counter, not the interested one: 300
+      // going, 2 interested. Had the screen read the wrong one the pin would
+      // be squeezed into a minimum-radius box here, so the two sizes are
+      // asserted apart rather than just asserted equal to each other.
+      expect(expected.drop.radius, MpDropGeometry.maxRadius);
+      expect(box.height, closeTo(expected.drop.height, 0.01));
+      expect(MpPinMetrics.forCount(2).drop.radius, lessThan(MpDropGeometry.maxRadius * 0.6),
+          reason: 'the interested count would have drawn a far smaller bubble');
 
-      // THE ANCHOR. The box is asymmetric now, so `Alignment.topCenter` would
-      // put the coordinate under the label chip instead of under the drop's
-      // tip. Inverting flutter_map's placement, the point lands at
-      // (0.5·w·(1−ax), 0.5·h·(1−ay)) inside the box — which must be the tip.
+      // THE ANCHOR. Inverting flutter_map's placement, the point lands at
+      // (0.5·w·(1−ax), 0.5·h·(1−ay)) inside the box — which must be the apex.
+      // Constant now that the box is symmetric, but still derived: a shape
+      // whose apex left the bottom centre would fail here rather than quietly
+      // move every party on the map.
       final marker = tester.widget<MpMapPin>(find.byType(MpMapPin));
       final anchored = Offset(
         0.5 * box.width! * (1 - expected.anchor.x),
