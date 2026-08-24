@@ -9,6 +9,7 @@ import 'package:myparty/models/map_party_pin.dart';
 import 'package:myparty/models/map_time_window.dart';
 import 'package:myparty/ui/screens/map_screen.dart';
 import 'package:myparty/ui/screens/search_screen.dart';
+import 'package:myparty/ui/widgets/map_pin_sheet.dart';
 import 'package:myparty/ui/widgets/mp_drop_shape.dart';
 import 'package:myparty/ui/widgets/mp_map_pin.dart';
 
@@ -28,6 +29,23 @@ class _FakePartyRepository extends PartyRepository {
   /// Every call the screen made, so the test can assert the screen asked for
   /// the viewport it is actually showing rather than just that pins appeared.
   final List<Map<String, double>> calls = [];
+
+  /// Cover paths the sheet asked to sign, and what to answer with.
+  ///
+  /// Overridden rather than left to the real implementation because that one
+  /// reaches `_client.storage`, which under `flutter test` has no Supabase
+  /// client behind it. A pin with no cover never gets here at all —
+  /// `signedCoverUrl` short-circuits on null — which is why the sheet tests
+  /// that do not care about covers need no setup.
+  final List<String?> signRequests = [];
+  String? signedCover;
+
+  @override
+  Future<String?> signedCoverUrl(String? coverPath, {int expiresIn = 3600}) async {
+    signRequests.add(coverPath);
+    if (coverPath == null) return null;
+    return signedCover;
+  }
 
   /// The window each of those calls carried, one entry per [calls] entry.
   ///
@@ -831,6 +849,210 @@ void main() {
       // idle thumb a load generator.
       expect(repository.calls, hasLength(2));
       expect(repository.windows.last, MapTimeWindow.now);
+
+      await _teardown(tester);
+    });
+  });
+
+  group('MapPinSheet', () {
+    final start = DateTime.parse('2026-08-21T20:00:00Z');
+
+    MapPartyPin full({
+      String? description = 'Ταράτσα με θέα, φέρτε ποτό.',
+      String? area = 'Κουκάκι',
+      String? hostUsername = 'nikos',
+      String? myRsvpStatus,
+      String? coverPath,
+      DateTime? startsAt,
+      DateTime? endsAt,
+      int goingCount = 12,
+      int interestedCount = 34,
+    }) {
+      return MapPartyPin(
+        id: 'aaaaaaaa-0000-0000-0000-000000000002',
+        lat: _athens.lat,
+        lng: _athens.lon,
+        title: 'Syntagma Afterparty',
+        isPrivate: false,
+        goingCount: goingCount,
+        interestedCount: interestedCount,
+        startsAt: startsAt ?? start,
+        endsAt: endsAt ?? start.add(const Duration(hours: 8)),
+        area: area,
+        description: description,
+        hostId: '11111111-1111-1111-1111-111111111111',
+        hostUsername: hostUsername,
+        myRsvpStatus: myRsvpStatus,
+        coverPath: coverPath,
+      );
+    }
+
+    Future<void> pumpSheet(
+      WidgetTester tester,
+      MapPartyPin pin,
+      _FakePartyRepository repository,
+    ) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(body: MapPinSheet(pin: pin, repository: repository)),
+      ));
+      await tester.pump();
+    }
+
+    testWidgets('renders everything the pin stopped showing', (tester) async {
+      // The whole point of stripping the pin: none of this is lost, it moves
+      // one tap away. Asserted as a set rather than one field at a time
+      // because the failure that matters is a section quietly missing, not a
+      // section formatted differently.
+      final repository = _FakePartyRepository(const []);
+      await pumpSheet(tester, full(), repository);
+
+      expect(find.text('Syntagma Afterparty'), findsOneWidget);
+      expect(find.text('Ταράτσα με θέα, φέρτε ποτό.'), findsOneWidget);
+      expect(find.text('Κουκάκι'), findsOneWidget);
+      expect(find.text('@nikos'), findsOneWidget);
+      expect(find.byTooltip('Αναφορά'), findsOneWidget);
+    });
+
+    testWidgets('shows BOTH counters, with the tense deciding which leads', (tester) async {
+      // The pin has room for one number; the sheet is where both can be true
+      // at once. A live party leads with who is inside and still reports
+      // interest — and must not print the interested figure as if it were
+      // attendance.
+      final repository = _FakePartyRepository(const []);
+      await pumpSheet(
+        tester,
+        full(
+          startsAt: DateTime.now().subtract(const Duration(hours: 1)),
+          endsAt: DateTime.now().add(const Duration(hours: 3)),
+        ),
+        repository,
+      );
+
+      expect(find.text('12 μέσα τώρα'), findsOneWidget);
+      expect(find.text('34 ενδιαφέρονται'), findsOneWidget);
+    });
+
+    testWidgets('an upcoming party leads with interest instead', (tester) async {
+      final repository = _FakePartyRepository(const []);
+      await pumpSheet(
+        tester,
+        full(
+          startsAt: DateTime.now().add(const Duration(days: 1)),
+          endsAt: DateTime.now().add(const Duration(days: 1, hours: 4)),
+        ),
+        repository,
+      );
+
+      expect(find.text('34 ενδιαφέρονται'), findsOneWidget);
+      expect(find.text('12 δηλώσαν ότι έρχονται'), findsOneWidget);
+      expect(find.text('12 μέσα τώρα'), findsNothing);
+    });
+
+    testWidgets('a missing column is omitted, never rendered as a blank row', (tester) async {
+      // area, description and host_username are all nullable, and an empty row
+      // reads as a field that failed to load rather than one nobody filled in.
+      final repository = _FakePartyRepository(const []);
+      await pumpSheet(
+        tester,
+        full(description: null, area: null, hostUsername: null),
+        repository,
+      );
+
+      expect(find.text('Syntagma Afterparty'), findsOneWidget);
+      expect(find.byIcon(Icons.place_outlined), findsNothing);
+      expect(find.byIcon(Icons.person_outline), findsNothing);
+      // The time is the one fact that is non-null in the schema, so it stays.
+      expect(find.byIcon(Icons.schedule), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a whitespace-only description is treated as absent', (tester) async {
+      // `description` is host-written free text; the schema does not stop it
+      // being blank, and a section containing only spaces is a gap with no
+      // explanation.
+      final repository = _FakePartyRepository(const []);
+      await pumpSheet(tester, full(description: '   '), repository);
+
+      expect(find.text('   '), findsNothing);
+    });
+
+    testWidgets('the action button reads back an RSVP the viewer already made', (tester) async {
+      final repository = _FakePartyRepository(const []);
+
+      await pumpSheet(tester, full(myRsvpStatus: null), repository);
+      expect(find.text('Μ’ ενδιαφέρει'), findsOneWidget);
+
+      await pumpSheet(tester, full(myRsvpStatus: 'interested'), repository);
+      expect(find.text('Δήλωσες ενδιαφέρον'), findsOneWidget);
+      expect(find.text('Μ’ ενδιαφέρει'), findsNothing);
+
+      await pumpSheet(tester, full(myRsvpStatus: 'going'), repository);
+      expect(find.text('Δήλωσες ότι έρχεσαι'), findsOneWidget);
+    });
+
+    testWidgets('a party with no cover never asks storage to sign one', (tester) async {
+      // `party-covers` is private and every signature is a round trip, so the
+      // sheet must not spend one to be told there is no object.
+      final repository = _FakePartyRepository(const []);
+      await pumpSheet(tester, full(coverPath: null), repository);
+
+      expect(repository.signRequests, isEmpty);
+    });
+
+    testWidgets('a party with a cover signs exactly its own path', (tester) async {
+      final repository = _FakePartyRepository(const [])
+        ..signedCover = 'https://example.test/signed.jpg';
+
+      await pumpSheet(
+        tester,
+        full(coverPath: 'aaaaaaaa-0000-0000-0000-000000000002/cover.jpg'),
+        repository,
+      );
+      await tester.pump();
+
+      expect(repository.signRequests,
+          ['aaaaaaaa-0000-0000-0000-000000000002/cover.jpg']);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a cover that will not sign falls back to the placeholder', (tester) async {
+      // Same rendering as a party that never had one: there is deliberately no
+      // error state for a picture.
+      final repository = _FakePartyRepository(const [])..signedCover = null;
+
+      await pumpSheet(
+        tester,
+        full(coverPath: 'aaaaaaaa-0000-0000-0000-000000000002/cover.jpg'),
+        repository,
+      );
+      await tester.pump();
+
+      expect(find.byType(Image), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('tapping a pin opens THIS sheet, not a lookalike', (tester) async {
+      // The map half of the shared-sheet rule; search_test.dart asserts the
+      // other half. Both must reach MapPinSheet itself, because that is what
+      // makes the report action and the counts identical from either screen.
+      final now = DateTime.now();
+      final repository = _FakePartyRepository([
+        _pin(
+          id: 'p',
+          title: 'Ταράτσα',
+          startsAt: now.add(const Duration(days: 1)),
+          endsAt: now.add(const Duration(days: 1, hours: 4)),
+          interestedCount: 7,
+        ),
+      ]);
+
+      await _mount(tester, repository);
+      await tester.tap(find.byType(MpMapPin));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(find.byType(MapPinSheet), findsOneWidget);
+      expect(find.text('Ταράτσα'), findsOneWidget);
 
       await _teardown(tester);
     });

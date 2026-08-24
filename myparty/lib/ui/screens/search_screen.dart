@@ -135,7 +135,8 @@ class _SearchScreenState extends State<SearchScreen> {
   /// `lat`/`lon` so a hit is a [MapPartyPin], which means the report action and
   /// the live attendee count behave identically whether the party was reached
   /// from a pin or from a search result.
-  void _openParty(MapPartyPin pin) => showMapPinSheet(context, pin);
+  void _openParty(MapPartyPin pin) =>
+      showMapPinSheet(context, pin, repository: _parties);
 
   @override
   Widget build(BuildContext context) {

@@ -6,6 +6,7 @@ import 'package:myparty/data/social_repository.dart';
 import 'package:myparty/models/map_party_pin.dart';
 import 'package:myparty/models/profile.dart';
 import 'package:myparty/ui/screens/search_screen.dart';
+import 'package:myparty/ui/widgets/map_pin_sheet.dart';
 
 /// Records every query it was asked, so the tests can assert what was NOT sent
 /// as well as what came back. Half of this screen's job is not querying.
@@ -42,13 +43,28 @@ Profile _profile(String username, {int followers = 0}) => Profile(
       followingCount: 0,
     );
 
-MapPartyPin _pin(String title, {String? area, bool isPrivate = false}) => MapPartyPin(
+MapPartyPin _pin(
+  String title, {
+  String? area,
+  bool isPrivate = false,
+  // Both were map-only until 20260824094606 added them to search_parties.
+  // Defaulted here rather than left null so the shared-sheet test below is
+  // exercising the payload search ACTUALLY returns now -- a null default would
+  // quietly keep asserting the old, thinner shape.
+  String? description = 'Υπόγειο τεχνο μέχρι το πρωί.',
+  String? hostUsername = 'second_host',
+  String? myRsvpStatus,
+}) =>
+    MapPartyPin(
       id: 'bbbbbbbb-0000-0000-0000-${title.hashCode.abs().toString().padLeft(12, '0').substring(0, 12)}',
       lat: 37.9758,
       lng: 23.7351,
       title: title,
       area: area,
       isPrivate: isPrivate,
+      description: description,
+      hostUsername: hostUsername,
+      myRsvpStatus: myRsvpStatus,
       startsAt: DateTime.now().add(const Duration(days: 1)),
       endsAt: DateTime.now().add(const Duration(days: 1, hours: 6)),
     );
@@ -236,9 +252,48 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
 
-      // MapPinSheet's report affordance is the marker that this is the real
-      // sheet and not a lookalike built for search.
+      // The TYPE, not merely a lookalike carrying the same affordance. This is
+      // the search half of the shared-sheet rule; map_test.dart asserts the
+      // map half against the same widget.
+      expect(find.byType(MapPinSheet), findsOneWidget);
       expect(find.byTooltip('Αναφορά'), findsOneWidget);
+    });
+
+    testWidgets('and it is fully populated, not the thin version', (tester) async {
+      // THE REGRESSION THIS EXISTS FOR. `description` and `my_rsvp_status`
+      // were in get_parties_near_user and not in search_parties, so this sheet
+      // rendered a blank body and a button blind to the viewer's own RSVP when
+      // it was reached from search rather than from a pin. Both are now in
+      // both payloads (20260824094606), and 20_party_search.test.sql asserts
+      // that parity structurally on the server side.
+      final parties = _FakeParties(
+        results: PartySearchResults(
+          upcoming: [
+            _pin('Psiri Warehouse Rave', area: 'Ψυρρή', myRsvpStatus: 'interested'),
+          ],
+          past: const [],
+        ),
+      );
+      await _mount(tester, _FakeSocial(), parties);
+      await _type(tester, 'warehouse');
+
+      await tester.tap(find.text('Psiri Warehouse Rave'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      // Scoped to the sheet rather than to the whole tree: the result row
+      // behind it also prints the area, so an unscoped find.text('Ψυρρή')
+      // matches twice and would pass just as happily if the SHEET were the one
+      // missing it.
+      Finder inSheet(String text) => find.descendant(
+            of: find.byType(MapPinSheet),
+            matching: find.text(text),
+          );
+
+      expect(inSheet('Υπόγειο τεχνο μέχρι το πρωί.'), findsOneWidget);
+      expect(inSheet('@second_host'), findsOneWidget);
+      expect(inSheet('Ψυρρή'), findsOneWidget);
+      expect(inSheet('Δήλωσες ενδιαφέρον'), findsOneWidget);
     });
   });
 }

@@ -116,7 +116,8 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  void _onPinTap(MapPartyPin pin) => showMapPinSheet(context, pin);
+  void _onPinTap(MapPartyPin pin) =>
+      showMapPinSheet(context, pin, repository: _repository);
 
   void _openSearch() {
     Navigator.of(context).push(MaterialPageRoute(

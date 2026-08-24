@@ -179,8 +179,32 @@ class PartyRepository {
     final withCovers = parties.where((p) => p.hasCover).toList();
     if (withCovers.isEmpty) return {};
 
-    final byPath = {for (final p in withCovers) p.coverPath!: p.id};
+    return _signCovers(
+      {for (final p in withCovers) p.coverPath!: p.id},
+      expiresIn,
+    );
+  }
 
+  /// One cover, for a surface that holds a single party rather than a list —
+  /// [MapPinSheet], which opens on one pin.
+  ///
+  /// Separate entry point, shared body: the bucket name, the RLS argument
+  /// above and the drop-on-failure policy all stay in [_signCovers], so this
+  /// cannot come to disagree with the list form about any of them. Returns
+  /// null for a party with no cover, which is the same answer the sheet acts
+  /// on as a cover that would not sign — both draw the placeholder.
+  Future<String?> signedCoverUrl(String? coverPath, {int expiresIn = 3600}) async {
+    if (coverPath == null) return null;
+    final signed = await _signCovers({coverPath: coverPath}, expiresIn);
+    return signed[coverPath];
+  }
+
+  /// Signs [byPath] — storage key to caller's chosen result key — in ONE
+  /// request, dropping anything that fails.
+  Future<Map<String, String>> _signCovers(
+    Map<String, String> byPath,
+    int expiresIn,
+  ) async {
     final results = await _client.storage
         .from('party-covers')
         .createSignedUrlsResult(byPath.keys.toList(), expiresIn);

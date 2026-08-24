@@ -34,6 +34,26 @@ class MapPartyPin {
   /// Neighbourhood label written by the host; null means they did not say.
   final String? area;
 
+  /// The host's blurb. Null means they wrote none — an empty body, not a
+  /// missing one — so the sheet omits the section rather than showing a gap.
+  final String? description;
+
+  /// The host, as both payloads report them. `hostUsername` comes from an
+  /// INNER JOIN on `profiles` in both RPCs, so it is null only if the column
+  /// itself is (see the tombstone rule in CLAUDE.md — a deleted host still
+  /// has a scrubbed handle and still renders).
+  final String? hostId;
+  final String? hostUsername;
+
+  /// The VIEWER's own RSVP — `'interested'`, `'going'`, or null for neither.
+  ///
+  /// A property of who is asking, unlike [goingCount] and [interestedCount]
+  /// which are properties of the party. Kept as a string for the same reason
+  /// [RsvpParty.rsvpStatus] is: nothing in the client branches on it yet
+  /// beyond rendering, and an enum would be a wire contract to maintain for a
+  /// value that currently only gets compared.
+  final String? myRsvpStatus;
+
   /// A storage key into the private `party-covers` bucket, never a URL —
   /// resolving it needs a signed URL from the repository layer, the same
   /// arrangement as `profiles.avatar_path`.
@@ -50,6 +70,10 @@ class MapPartyPin {
     this.startsAt,
     this.endsAt,
     this.area,
+    this.description,
+    this.hostId,
+    this.hostUsername,
+    this.myRsvpStatus,
     this.coverPath,
   });
 
@@ -68,6 +92,15 @@ class MapPartyPin {
       startsAt: _parseTimestamp(row['starts_at']),
       endsAt: _parseTimestamp(row['ends_at']),
       area: row['area'] as String?,
+      // All four were in the payload and unread until the sheet needed them.
+      // `description` and `my_rsvp_status` were map-only until
+      // 20260824094606 added them to search_parties, so that both screens can
+      // fill the same sheet — see the parity assertion in
+      // 20_party_search.test.sql.
+      description: row['description'] as String?,
+      hostId: row['host_id'] as String?,
+      hostUsername: row['host_username'] as String?,
+      myRsvpStatus: row['my_rsvp_status'] as String?,
       coverPath: row['cover_path'] as String?,
     );
   }
