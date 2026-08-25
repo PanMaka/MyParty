@@ -79,8 +79,8 @@ MapPartyPin _pin({
   required String title,
   required DateTime? startsAt,
   DateTime? endsAt,
-  int goingCount = 0,
-  int interestedCount = 0,
+  int? goingCount = 0,
+  int? interestedCount = 0,
   double latOffset = 0,
   bool isPrivate = false,
 }) {
@@ -457,6 +457,32 @@ void main() {
       expect(find.text('Ταράτσα στο Κουκάκι'), findsNothing);
       expect(find.text('24 interested'), findsNothing);
       expect(find.textContaining('interested'), findsNothing);
+
+      await _teardown(tester);
+    });
+
+    testWidgets('a private pin draws a lock and never a number', (tester) async {
+      // The last place attendance was still visible on a private pin. The
+      // radius has been fixed since the map rework, but the LABEL printed the
+      // count regardless, so the figure was on screen whatever the geometry
+      // did. With the server no longer sending it there is nothing to print.
+      final pin = _pin(
+        id: 'p',
+        title: 'Rooftop in Koukaki',
+        startsAt: start,
+        isPrivate: true,
+        goingCount: null,
+        interestedCount: null,
+      );
+
+      await _pumpPin(tester, pin, start.subtract(const Duration(hours: 1)));
+
+      expect(find.byIcon(Icons.lock), findsOneWidget);
+      // No digit anywhere in the marker.
+      expect(
+        find.byWidgetPredicate((w) => w is Text && RegExp(r'\d').hasMatch(w.data ?? '')),
+        findsNothing,
+      );
 
       await _teardown(tester);
     });
@@ -865,15 +891,16 @@ void main() {
       String? coverPath,
       DateTime? startsAt,
       DateTime? endsAt,
-      int goingCount = 12,
-      int interestedCount = 34,
+      int? goingCount = 12,
+      int? interestedCount = 34,
+      bool isPrivate = false,
     }) {
       return MapPartyPin(
         id: 'aaaaaaaa-0000-0000-0000-000000000002',
         lat: _athens.lat,
         lng: _athens.lon,
         title: 'Syntagma Afterparty',
-        isPrivate: false,
+        isPrivate: isPrivate,
         goingCount: goingCount,
         interestedCount: interestedCount,
         startsAt: startsAt ?? start,
@@ -976,18 +1003,57 @@ void main() {
       expect(find.text('   '), findsNothing);
     });
 
-    testWidgets('the action button reads back an RSVP the viewer already made', (tester) async {
+    testWidgets('a public party offers both answers and lights the current one', (tester) async {
+      // Two buttons, always both present -- switching between them is an
+      // `update rsvps set status`, so the other answer has to stay reachable.
+      // The tick is what moves.
       final repository = _FakePartyRepository(const []);
 
       await pumpSheet(tester, full(myRsvpStatus: null), repository);
-      expect(find.text('I am interested'), findsOneWidget);
+      expect(find.text('Going'), findsOneWidget);
+      expect(find.text('Interested'), findsOneWidget);
 
       await pumpSheet(tester, full(myRsvpStatus: 'interested'), repository);
-      expect(find.text('You are interested'), findsOneWidget);
-      expect(find.text('I am interested'), findsNothing);
+      expect(find.text('Interested ✓'), findsOneWidget);
+      expect(find.text('Going'), findsOneWidget);
 
       await pumpSheet(tester, full(myRsvpStatus: 'going'), repository);
-      expect(find.text('You are going'), findsOneWidget);
+      expect(find.text('Going ✓'), findsOneWidget);
+      expect(find.text('Interested'), findsOneWidget);
+    });
+
+    testWidgets('a private party offers ONE answer, and it is not Interested', (tester) async {
+      // The server refuses an 'interested' row on a private party
+      // (20260825090050), so offering the button would be an affordance that
+      // returns 42501. Asserted as an absence, which is the whole point.
+      final repository = _FakePartyRepository(const []);
+
+      await pumpSheet(tester, full(isPrivate: true, myRsvpStatus: null), repository);
+      expect(find.text('Coming'), findsOneWidget);
+      expect(find.text('Interested'), findsNothing);
+      expect(find.text('Going'), findsNothing);
+
+      await pumpSheet(tester, full(isPrivate: true, myRsvpStatus: 'going'), repository);
+      expect(find.text('You are coming ✓'), findsOneWidget);
+      expect(find.text('Interested'), findsNothing);
+    });
+
+    testWidgets('a private party shows no counts in the sheet at all', (tester) async {
+      // goingCount/interestedCount are null because the RPC no longer sends
+      // them for a private row. The counts row is omitted rather than blanked
+      // or zeroed -- "0 going" is a legible, wrong answer.
+      final repository = _FakePartyRepository(const []);
+      await pumpSheet(
+        tester,
+        full(isPrivate: true, goingCount: null, interestedCount: null),
+        repository,
+      );
+
+      expect(find.textContaining('interested'), findsNothing);
+      expect(find.textContaining('going'), findsNothing);
+      expect(find.textContaining('here now'), findsNothing);
+      expect(find.text('0'), findsNothing);
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('a party with no cover never asks storage to sign one', (tester) async {

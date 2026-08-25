@@ -25,15 +25,8 @@ class PartyDetailSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final party = mpParties[partyId]!;
     final store = context.watch<MpStore>();
-    final interested = store.interestedIn(partyId);
+    final rsvp = store.rsvpFor(partyId);
     final priv = party.isPrivate;
-
-    final ctaLabel = interested
-        ? (priv ? 'Going ✓' : 'In my events ✓')
-        : (priv ? 'I’m coming' : 'Interested');
-    final ctaGradient = interested
-        ? null
-        : (priv ? AppColors.pinkGradient : AppColors.purpleGradient);
 
     return SafeArea(
       top: false,
@@ -56,7 +49,11 @@ class PartyDetailSheet extends StatelessWidget {
                   children: [
                     _chip(party.time, mono: true),
                     _chip(party.dist),
-                    _chip(party.crowd),
+                    // `crowd` is the attendance line ("24 inside now",
+                    // "96 interested"), so a private party gets no chip at all
+                    // rather than an empty one. Time and distance stay: they
+                    // are properties of the event, not of who is at it.
+                    if (!priv) _chip(party.crowd),
                   ],
                 ),
               ),
@@ -75,8 +72,12 @@ class PartyDetailSheet extends StatelessWidget {
                       children: [
                         Text('THE PARTY STORY',
                             style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.5))),
-                        Text(party.posters,
-                            style: TextStyle(fontSize: 11, color: AppColors.textAlpha(0.4))),
+                        // "11 people posting" counts people who are AT the
+                        // party. It is a headcount wearing a different noun,
+                        // so it goes with the rest of them on a private row.
+                        if (!priv)
+                          Text(party.posters,
+                              style: TextStyle(fontSize: 11, color: AppColors.textAlpha(0.4))),
                       ],
                     ),
                     const SizedBox(height: 9),
@@ -168,34 +169,42 @@ class PartyDetailSheet extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(16, 18, 16, 26),
                 child: Column(
                   children: [
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: () => store.toggleInterest(partyId, hypeBumpOnJoin: priv ? 8 : 6),
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          backgroundColor: interested ? Colors.white.withValues(alpha: 0.09) : Colors.transparent,
-                          shadowColor: Colors.transparent,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                        ).copyWith(
-                          backgroundColor: interested
-                              ? WidgetStatePropertyAll(Colors.white.withValues(alpha: 0.09))
-                              : null,
-                        ),
-                        child: Ink(
-                          decoration: BoxDecoration(
-                            gradient: interested ? null : ctaGradient,
-                            borderRadius: BorderRadius.circular(14),
+                    // One answer on a private party, two on a public one --
+                    // the same rule PartyCard and MapPinSheet apply, for the
+                    // same reason: the rsvps policy refuses 'interested' on a
+                    // private party (20260825090050).
+                    if (priv)
+                      _cta(
+                        label: 'Coming',
+                        selected: rsvp == MpRsvp.going,
+                        gradient: AppColors.privateGradient,
+                        accent: AppColors.private,
+                        onTap: () => store.setRsvp(partyId, MpRsvp.going),
+                      )
+                    else
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _cta(
+                              label: 'Going',
+                              selected: rsvp == MpRsvp.going,
+                              gradient: AppColors.purpleGradient,
+                              accent: AppColors.purple,
+                              onTap: () => store.setRsvp(partyId, MpRsvp.going, hypeBumpOnJoin: 6),
+                            ),
                           ),
-                          child: Container(
-                            alignment: Alignment.center,
-                            padding: const EdgeInsets.symmetric(vertical: 3),
-                            child: Text(ctaLabel,
-                                style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _cta(
+                              label: 'Interested',
+                              selected: rsvp == MpRsvp.interested,
+                              gradient: AppColors.purpleGradient,
+                              accent: AppColors.purple,
+                              onTap: () => store.setRsvp(partyId, MpRsvp.interested, hypeBumpOnJoin: 3),
+                            ),
                           ),
-                        ),
+                        ],
                       ),
-                    ),
                     const SizedBox(height: 8),
                     Row(
                       children: [
@@ -344,6 +353,50 @@ class PartyDetailSheet extends StatelessWidget {
           : Text(text, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w500)),
     );
   }
+}
+
+/// One RSVP answer in the sheet's footer, lit when it is the viewer's current
+/// one. Mirrors PartyCard's `_rsvpButton` at sheet scale.
+///
+/// Tapping the lit one withdraws the answer -- a DELETE of the row, not a
+/// third enum value.
+Widget _cta({
+  required String label,
+  required bool selected,
+  required Gradient gradient,
+  required Color accent,
+  required VoidCallback onTap,
+}) {
+  return SizedBox(
+    width: double.infinity,
+    child: ElevatedButton(
+      onPressed: onTap,
+      style: ElevatedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        backgroundColor: Colors.transparent,
+        shadowColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      ),
+      child: Ink(
+        decoration: BoxDecoration(
+          gradient: selected ? null : gradient,
+          color: selected ? accent.withValues(alpha: 0.16) : null,
+          border: selected ? Border.all(color: accent) : null,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Container(
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(vertical: 3),
+          child: Text(
+            selected ? '$label ✓' : label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800),
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 void _comingSoon(BuildContext context) {

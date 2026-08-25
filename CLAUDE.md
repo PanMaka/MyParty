@@ -64,6 +64,64 @@ and also unbuildable under `flutter test`); `PushService`, `LocationReporter`
 and the `Notifications` app-scoped wiring; `showLocationConsentSheet`,
 `NotificationSettingsScreen` and `AccountDeletionScreen`.
 
+**A private party holds no attendance, and that is enforced in three places
+because one would not hold.** Decided Phase 16b.
+
+- **The write policy.** `rsvps` INSERT and UPDATE both call
+  `rsvp_status_allowed(party_id, status)`, which is false for `'interested'`
+  on a private party. So the interested counter on a private row can never be
+  non-zero — the rule is upstream of the counter rather than applied to it.
+  The term is in the UPDATE's **`with check`**, not its `using`: `using` sees
+  the OLD row, so spelled there it would test the status being replaced and
+  wave through exactly the write it forbids (`going` → `interested`).
+- **The read RPCs.** `get_parties_near_user` and `search_parties` both return
+  **NULL**, not 0, for `going_count`/`interested_count` on a private row. Zero
+  is a legible, wrong answer indistinguishable from a real empty party; NULL is
+  "not answered for this row", and it forces `int?` on the client so a surface
+  that forgets fails to compile rather than rendering a confident 0. Both RPCs,
+  because `MapPinSheet` is fed by either one — fixing one would leave the
+  identical widget printing the number when reached from search.
+- **The client.** No count, no hype bar, no "N people posting" on a private
+  party, and one action ("Coming") instead of two.
+
+`party_is_private` is `security definer` for gotcha 1's reason: privacy is a
+property of the PARTY, not of the viewer, so answered through the caller's
+filtered view of `public.parties` an invisible row reads as *not private* and
+the write is permitted. Unlike `can_user_access_party` (gotcha 11) there is no
+per-user variant to parameterise.
+
+**The ceiling, so nobody mistakes this for more:** an RLS policy binds callers
+that go through RLS. A future `security definer` RPC inserting rsvps bypasses
+all three policies and must call `rsvp_status_allowed` itself. Nothing writes
+`rsvps` server-side today — `create_party_with_invites` writes `invitations` —
+so the policy is currently the complete enforcement surface. If that changes,
+the rule moves to a `before insert or update` row trigger.
+
+**`rsvp_status` has exactly two values and un-RSVPing is a `DELETE`.** There is
+deliberately no `'declined'`: "not going" is the absence of a row, which the
+DELETE policy and the counter trigger's DELETE branch have supported since the
+table was created. A third value would record an absence the absent row already
+records, and would widen `my_rsvp_status` on three read RPCs to do it.
+`22_private_party_counts_and_rsvp.test.sql` asserts the enum stays at two, so
+adding one is a red test rather than a silent widening.
+
+`my_rsvp_status` is deliberately **still transmitted** for private parties: it
+is a property of the CALLER, not of the party, so suppressing it would break
+the button label while protecting nothing — the viewer already knows their own
+answer. `parties.going_count` is likewise untouched and still maintained; the
+host has a guest list, and `party_tier` still reads it.
+
+**Red means private; `AppColors.destructive` means destructive.** Private moved
+pink → `AppColors.private` (#F23557) across the map bubble, `PrivacyBadge` and
+every card accent, so one colour means private app-wide. It is a *separate
+token* from the #E5484D that account deletion uses — a private party is
+exclusive, not dangerous. Red **joins** the dashed outline rather than replacing
+it: red-vs-purple is exactly the pair red-green colour blindness collapses, so
+the dash has to carry the distinction on its own for those readers. The private
+bubble draws a **lock**, not a number — that label was the last place a private
+party's attendance was still on screen, since the radius has been fixed since
+the map rework but the label printed the count regardless.
+
 Story visibility uses the **wide** `can_access_party`, not
 `can_chat_in_party` — deliberately the opposite call from chat. A story is
 read-only content attached to a party, so anyone who may look at the party may

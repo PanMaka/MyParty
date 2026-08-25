@@ -305,7 +305,7 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Widget _partyTile(MapPartyPin pin, {required bool past}) {
-    final accent = pin.isPrivate ? AppColors.pink : AppColors.purple;
+    final accent = pin.isPrivate ? AppColors.private : AppColors.purple;
     return GestureDetector(
       onTap: () => _openParty(pin),
       behavior: HitTestBehavior.opaque,
@@ -352,7 +352,7 @@ class _SearchScreenState extends State<SearchScreen> {
                             overflow: TextOverflow.ellipsis,
                             style: AppTextStyles.mono(
                               size: 9,
-                              color: pin.isPrivate ? AppColors.pinkLight : AppColors.purpleLight,
+                              color: pin.isPrivate ? AppColors.privateLight : AppColors.purpleLight,
                             ),
                           ),
                         ),

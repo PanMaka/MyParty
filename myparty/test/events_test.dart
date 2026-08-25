@@ -8,6 +8,7 @@ import 'package:myparty/models/rsvp_party.dart';
 import 'package:myparty/state/mp_store.dart';
 import 'package:myparty/ui/screens/events_screen.dart';
 import 'package:myparty/ui/widgets/party_card.dart';
+import 'package:myparty/ui/widgets/party_detail_sheet.dart';
 
 /// Answers [PartyRepository.fetchMyRsvps] from a list instead of the network.
 ///
@@ -43,6 +44,17 @@ RsvpParty _rsvp({
     rsvpStatus: status,
     goingCount: going,
     interestedCount: interested,
+  );
+}
+
+/// One PartyCard on its own, with a real store behind it.
+///
+/// `autoDecay: false` because MpStore otherwise runs a 2.6s periodic timer
+/// that pumpAndSettle would wait on forever.
+Widget _card(String partyId, {MpStore? store}) {
+  return ChangeNotifierProvider<MpStore>(
+    create: (_) => store ?? MpStore(autoDecay: false),
+    child: MaterialApp(home: Scaffold(body: SingleChildScrollView(child: PartyCard(partyId: partyId)))),
   );
 }
 
@@ -132,13 +144,16 @@ void main() {
       final now = DateTime.now();
       await tester.pumpWidget(_host(_FakePartyRepository([
         _rsvp(title: 'Tonight one', startsAt: now.add(const Duration(hours: 2))),
+        // 'going', not 'interested': a private party cannot hold an
+        // interested row at all since 20260825090050, so an 'interested'
+        // fixture here would be describing a state the database refuses.
         _rsvp(
           title: 'Later this week',
           startsAt: now.add(const Duration(days: 3)),
           isPrivate: true,
-          status: 'interested',
-          going: 0,
-          interested: 7,
+          status: 'going',
+          going: 5,
+          interested: 0,
         ),
         _rsvp(title: 'Much later', startsAt: now.add(const Duration(days: 20))),
       ])));
@@ -151,16 +166,22 @@ void main() {
       expect(find.text('THIS WEEK'), findsOneWidget);
       expect(find.text('LATER'), findsOneWidget);
 
+      // The two public rows say GOING; the private one says COMING, matching
+      // the single button that wrote it.
       expect(find.text('GOING'), findsNWidgets(2));
-      expect(find.text('INTERESTED'), findsOneWidget);
+      expect(find.text('COMING'), findsOneWidget);
+      expect(find.text('INTERESTED'), findsNothing);
 
       // PrivacyBadge is shared with six untranslated surfaces, so this screen
       // opts in per call site rather than flipping the widget's default.
       expect(find.text('PRIVATE'), findsOneWidget);
       expect(find.text('PUBLIC'), findsNWidgets(2));
 
+      // Attendance on the two PUBLIC rows only. The private row carries a
+      // going_count of 5 in the fixture and still prints nothing.
       expect(find.text('4 going'), findsNWidgets(2));
-      expect(find.text('7 interested'), findsOneWidget);
+      expect(find.text('5 going'), findsNothing);
+      expect(find.textContaining('interested'), findsNothing);
 
       // formatPartyStartEn, not its Greek twin.
       expect(find.textContaining('Tonight '), findsWidgets);
@@ -186,6 +207,121 @@ void main() {
 
       expect(find.text('We couldn’t load your events.'), findsOneWidget);
       expect(find.text('Try again'), findsOneWidget);
+    });
+  });
+
+  // 'maria' and 'taratsa' are private in the mock data; 'vinyl' is public.
+  group('actions and counts differ by privacy', () {
+    testWidgets('a PUBLIC card offers both answers', (tester) async {
+      // 'vinyl' is seeded as interested, so that button carries the tick and
+      // the other does not -- both are present either way, which is the point:
+      // switching has to stay one tap.
+      await tester.pumpWidget(_card('vinyl'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Going'), findsOneWidget);
+      expect(find.text('Interested ✓'), findsOneWidget);
+      expect(find.text('Coming'), findsNothing);
+    });
+
+    testWidgets('a PRIVATE card offers exactly one, and it is not Interested', (tester) async {
+      // The server refuses an 'interested' row on a private party
+      // (20260825090050). Offering the button would be an affordance that
+      // comes back 42501, so its ABSENCE is the assertion that matters.
+      await tester.pumpWidget(_card('maria'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Coming'), findsOneWidget);
+      expect(find.text('Interested'), findsNothing);
+      expect(find.text('Going'), findsNothing);
+    });
+
+    testWidgets('a PRIVATE card shows no hype and no attendance', (tester) async {
+      await tester.pumpWidget(_card('maria'));
+      await tester.pumpAndSettle();
+
+      // The hype bar is removed, not blanked: a percentage that moves when
+      // people join is attendance one derivative removed.
+      expect(find.text('HYPE NOW'), findsNothing);
+      expect(find.textContaining('%'), findsNothing);
+      expect(find.byIcon(Icons.local_fire_department), findsNothing);
+    });
+
+    testWidgets('a PUBLIC card still shows hype', (tester) async {
+      await tester.pumpWidget(_card('vinyl'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('HYPE NOW'), findsOneWidget);
+      expect(find.byIcon(Icons.local_fire_department), findsOneWidget);
+    });
+
+    testWidgets('a public party switches between the two answers', (tester) async {
+      final store = MpStore(autoDecay: false);
+      await tester.pumpWidget(_card('vinyl', store: store));
+      await tester.pumpAndSettle();
+
+      // Seeded as interested.
+      expect(store.rsvpFor('vinyl'), MpRsvp.interested);
+      expect(find.text('Interested ✓'), findsOneWidget);
+
+      await tester.tap(find.text('Going'));
+      await tester.pumpAndSettle();
+
+      // Switched in place -- the mock analogue of `update rsvps set status`,
+      // which the counter trigger handles as one delta rather than a
+      // delete-then-insert.
+      expect(store.rsvpFor('vinyl'), MpRsvp.going);
+      expect(find.text('Going ✓'), findsOneWidget);
+      expect(find.text('Interested'), findsOneWidget);
+    });
+
+    testWidgets('tapping the selected answer withdraws it entirely', (tester) async {
+      // Un-tap is a DELETE of the row, not a third enum value. `rsvp_status`
+      // has exactly two values and 22_private_party_counts_and_rsvp asserts
+      // it stays that way -- so "not going" can only be the absence of a row.
+      final store = MpStore(autoDecay: false);
+      await tester.pumpWidget(_card('taratsa', store: store));
+      await tester.pumpAndSettle();
+
+      expect(store.rsvpFor('taratsa'), MpRsvp.going);
+      expect(find.text('Coming ✓'), findsOneWidget);
+
+      await tester.tap(find.text('Coming ✓'));
+      await tester.pumpAndSettle();
+
+      expect(store.rsvpFor('taratsa'), isNull);
+      expect(find.text('Coming'), findsOneWidget);
+    });
+
+    testWidgets('the private detail sheet hides the crowd chip and offers one action', (tester) async {
+      await tester.pumpWidget(_card('maria'));
+      await tester.pumpAndSettle();
+
+      // The cover opens the sheet. Tap the TITLE rather than the card's
+      // centre -- a public card is taller, so its centre falls below the
+      // cover's GestureDetector and the two cases would not be comparable.
+      await tester.tap(find.text('Maria’s Birthday'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(PartyDetailSheet), findsOneWidget);
+      expect(find.text('Coming'), findsWidgets);
+      expect(find.text('Interested'), findsNothing);
+      // '31 inside' is the mock crowd string for this party.
+      expect(find.text('31 inside'), findsNothing);
+      expect(find.textContaining('people posting'), findsNothing);
+    });
+
+    testWidgets('the public detail sheet still shows the crowd chip and both actions', (tester) async {
+      await tester.pumpWidget(_card('vinyl'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Techno Monday · DJ Iris'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(PartyDetailSheet), findsOneWidget);
+      expect(find.text('180 inside · 312 interested'), findsOneWidget);
+      expect(find.text('46 people posting'), findsOneWidget);
+      expect(find.text('Going'), findsWidgets);
     });
   });
 }

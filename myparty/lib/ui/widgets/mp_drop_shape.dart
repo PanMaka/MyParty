@@ -130,7 +130,16 @@ class MpDropGeometry {
   /// flag.
   factory MpDropGeometry.forPin(MapPartyPin pin, DateTime now) {
     if (pin.isPrivate) return MpDropGeometry.private();
-    return MpDropGeometry.forCount(pin.attendeeCountAt(now));
+    // The `?? 0` is for a PUBLIC party only, and it is unreachable through the
+    // RPCs: 20260825090051 nulls the counters for private rows and no other
+    // row. It is spelled here rather than as a `!` so a payload change can
+    // only cost a minimum-size bubble, never a crash.
+    //
+    // The private branch above still runs BEFORE the count is read, which is
+    // the control described in the class header -- reordering these two lines
+    // to inspect the count first would put a private pin and an attendance
+    // number into the same expression again.
+    return MpDropGeometry.forCount(pin.attendeeCountAt(now) ?? 0);
   }
 
   /// The outline, in the marker box's own coordinates.

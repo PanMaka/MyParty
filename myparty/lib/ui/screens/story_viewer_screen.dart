@@ -315,7 +315,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-              color: widget.isPrivate ? AppColors.pink : AppColors.purple,
+              color: widget.isPrivate ? AppColors.private : AppColors.purple,
               width: 1.5,
             ),
           ),

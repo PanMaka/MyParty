@@ -380,7 +380,7 @@ class _FeedScreenState extends State<FeedScreen> {
   /// sits on screen long enough will fall back to the striped placeholder
   /// rather than showing a broken image. Refreshing the feed re-signs it.
   Widget _storyTile(BuildContext context, StoryRail rail) {
-    final accent = rail.isPrivate ? AppColors.pink : AppColors.purple;
+    final accent = rail.isPrivate ? AppColors.private : AppColors.purple;
     final coverUrl = _railCovers[rail.coverStoryId];
 
     return GestureDetector(

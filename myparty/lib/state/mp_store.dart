@@ -5,6 +5,19 @@ import 'package:flutter/foundation.dart';
 
 import '../models/mp_party.dart';
 
+/// The two answers `public.rsvp_status` holds, and the only two it will hold —
+/// 22_private_party_counts_and_rsvp asserts the enum stays at two values.
+///
+/// There is deliberately no `declined`. "Not going" is the ABSENCE of a row:
+/// un-tapping deletes it, which the rsvps DELETE policy and the counter
+/// trigger's DELETE branch have supported since the table was created. A third
+/// value would record an absence the absent row already records, and would
+/// widen `my_rsvp_status` on three read RPCs to do it.
+///
+/// A PRIVATE party only ever takes [going] — the rsvps write policies refuse
+/// [interested] on one (20260825090050), so "Coming" writes 'going'.
+enum MpRsvp { interested, going }
+
 /// Shared mock/interactive state for the redesigned screens, mirroring the
 /// single component state tree of the original design prototype.
 class MpStore extends ChangeNotifier {
@@ -19,13 +32,20 @@ class MpStore extends ChangeNotifier {
   }
 
   final Map<String, int> _hype = {'vinyl': 64, 'taratsa': 41};
-  final Map<String, bool> _interested = {
-    'vinyl': true,
-    'taratsa': true,
-    'anodos': true,
-    'maria': false,
-    'kapsimo': false,
-    'nefeli': true,
+
+  /// The viewer's own answer per party, absent when they have not answered.
+  ///
+  /// A map with no entry rather than a `false`: the tri-state (none /
+  /// interested / going) is the shape `rsvps` actually has, and a bool could
+  /// not express "going" and "interested" as different answers to the same
+  /// question. Private keys hold only [MpRsvp.going].
+  final Map<String, MpRsvp> _rsvp = {
+    'vinyl': MpRsvp.interested,
+    'taratsa': MpRsvp.going, // private
+    'anodos': MpRsvp.interested,
+    'kapsimo': MpRsvp.going,
+    'nefeli': MpRsvp.going, // private
+    // 'maria' (private) is deliberately absent: no answer yet.
   };
   // _invited / invited / toggleInvited / invitedCount lived here until Phase 11
   // and were already unreachable when they were removed: the host wizard keeps
@@ -46,7 +66,9 @@ class MpStore extends ChangeNotifier {
   Map<String, MpParty> get parties => mpParties;
 
   int hypeOf(String id) => _hype[id] ?? 0;
-  bool interestedIn(String id) => _interested[id] ?? false;
+
+  /// The viewer's answer, or null if they have not given one.
+  MpRsvp? rsvpFor(String id) => _rsvp[id];
   bool get copied => _copied;
 
   void bump(String id, int amount) {
@@ -54,11 +76,25 @@ class MpStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  void toggleInterest(String id, {int hypeBumpOnJoin = 0}) {
-    final next = !(_interested[id] ?? false);
-    _interested[id] = next;
-    if (next && hypeBumpOnJoin > 0) {
-      _hype[id] = math.min(100, (_hype[id] ?? 0) + hypeBumpOnJoin);
+  /// Answers [status] for [id], or withdraws the answer if it is already the
+  /// current one.
+  ///
+  /// Tapping the selected button is the un-RSVP, and un-RSVP REMOVES the entry
+  /// — the mock analogue of `delete from rsvps`. Tapping the other button on a
+  /// public party replaces the answer in place, which is the `update rsvps set
+  /// status` the counter trigger handles as a single delta.
+  ///
+  /// The hype bump is only ever applied on a public party, by the caller:
+  /// a private party displays no hype at all, so bumping a number nothing
+  /// renders would be state that exists only to be leaked later.
+  void setRsvp(String id, MpRsvp status, {int hypeBumpOnJoin = 0}) {
+    if (_rsvp[id] == status) {
+      _rsvp.remove(id);
+    } else {
+      _rsvp[id] = status;
+      if (hypeBumpOnJoin > 0) {
+        _hype[id] = math.min(100, (_hype[id] ?? 0) + hypeBumpOnJoin);
+      }
     }
     notifyListeners();
   }

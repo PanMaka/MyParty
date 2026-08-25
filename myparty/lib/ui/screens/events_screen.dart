@@ -245,8 +245,13 @@ class _EventsScreenState extends State<EventsScreen> {
   }
 
   Widget _rsvpRow(BuildContext context, RsvpParty rsvp) {
-    final accent = rsvp.isPrivate ? AppColors.pink : AppColors.purple;
-    final crowd = rsvp.goingCount > 0 ? '${rsvp.goingCount} going' : '${rsvp.interestedCount} interested';
+    final accent = rsvp.isPrivate ? AppColors.private : AppColors.purple;
+    // Attendance, so a private party has none to show. Computed inside the
+    // guard rather than blanked afterwards: an unused `crowd` string built
+    // from two counts is exactly the value a later edit renders by accident.
+    final crowd = rsvp.isPrivate
+        ? null
+        : (rsvp.goingCount > 0 ? '${rsvp.goingCount} going' : '${rsvp.interestedCount} interested');
     return Padding(
       padding: const EdgeInsets.only(bottom: 9),
       child: GestureDetector(
@@ -304,8 +309,16 @@ class _EventsScreenState extends State<EventsScreen> {
                         children: [
                           PrivacyBadge(isPrivate: rsvp.isPrivate, english: true),
                           const SizedBox(width: 5),
-                          Text(rsvp.rsvpStatus == 'going' ? 'GOING' : 'INTERESTED',
-                              style: AppTextStyles.mono(size: 9, color: AppColors.textAlpha(0.45))),
+                          // 'COMING' on a private party. Its rsvp row is
+                          // always 'going' -- the policy permits nothing else
+                          // -- so the word is the only thing that varies, and
+                          // it matches the button that wrote it.
+                          Text(
+                            rsvp.isPrivate
+                                ? 'COMING'
+                                : (rsvp.rsvpStatus == 'going' ? 'GOING' : 'INTERESTED'),
+                            style: AppTextStyles.mono(size: 9, color: AppColors.textAlpha(0.45)),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 3),
@@ -316,10 +329,11 @@ class _EventsScreenState extends State<EventsScreen> {
                             maxLines: 1, overflow: TextOverflow.ellipsis,
                             style: TextStyle(fontSize: 11.5, color: AppColors.textAlpha(0.55))),
                       ),
-                      Padding(
-                        padding: const EdgeInsets.only(top: 7),
-                        child: Text(crowd, style: TextStyle(fontSize: 10.5, color: AppColors.textAlpha(0.5))),
-                      ),
+                      if (crowd != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 7),
+                          child: Text(crowd, style: TextStyle(fontSize: 10.5, color: AppColors.textAlpha(0.5))),
+                        ),
                     ],
                   ),
                 ),

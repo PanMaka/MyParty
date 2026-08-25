@@ -48,7 +48,11 @@ class PrivacyBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: (_private ? AppColors.pink : AppColors.purple).withValues(alpha: 0.9),
+        // Red, not pink, since Phase 16b: one colour means private across the
+        // map bubble, this badge and the card borders, so a pin and the badge
+        // in the sheet it opens cannot disagree. Deliberately NOT
+        // AppColors.destructive — see the token's doc comment.
+        color: (_private ? AppColors.private : AppColors.purple).withValues(alpha: 0.9),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Row(

@@ -120,8 +120,14 @@ class _MapPinSheetState extends State<MapPinSheet> {
                   ),
                 ),
               ],
-              const SizedBox(height: 14),
-              _counts(live, count),
+              // Omitted entirely for a private party — not rendered as a
+              // blank row, not rendered as "0". `count` is null there because
+              // the server sent no number (20260825090051), so there is
+              // nothing to lay out and the CTA moves up to close the gap.
+              if (count != null) ...[
+                const SizedBox(height: 14),
+                _counts(live, count),
+              ],
               const SizedBox(height: 18),
               _action(),
             ],
@@ -259,6 +265,9 @@ class _MapPinSheetState extends State<MapPinSheet> {
   /// The pin shows one number because it has room for one; the sheet is where
   /// "12 here now" and "34 interested" can both be true and both be worth
   /// knowing. The tense still decides which one leads.
+  /// PUBLIC parties only. [count] is non-null by the caller's guard, and the
+  /// two counters it reads alongside are non-null for the same reason: the
+  /// server nulls all three together or none of them.
   Widget _counts(bool live, int count) {
     final pin = widget.pin;
     final other = live
@@ -299,20 +308,62 @@ class _MapPinSheetState extends State<MapPinSheet> {
   /// phase: an RSVP needs optimistic state, a rollback and a story for the two
   /// counters this sheet is displaying.
   ///
-  /// What is NOT a placeholder is the label. `my_rsvp_status` now arrives from
-  /// both RPCs, so the button reads the viewer's existing answer back to them
-  /// instead of inviting them to repeat it.
+  /// What is NOT a placeholder is the SHAPE. How many buttons there are, what
+  /// they say, and which one is lit are all decided here from `is_private` and
+  /// `my_rsvp_status`, both of which arrive from either RPC.
+  ///
+  /// PUBLIC: two answers, and the viewer can switch between them — which is a
+  /// plain `update rsvps set status`, the case the counter trigger's UPDATE
+  /// branch has always handled in one delta.
+  ///
+  /// PRIVATE: one answer, 'going', wearing the word "Coming". Not a UI
+  /// preference — 20260825090050 makes the rsvps policy REFUSE an 'interested'
+  /// row on a private party, so a second button here would be an affordance
+  /// the server answers with a 42501.
   Widget _action() {
     final pin = widget.pin;
     final status = pin.myRsvpStatus;
-    final already = status == 'going' || status == 'interested';
 
-    final label = switch (status) {
-      'going' => 'You are going',
-      'interested' => 'You are interested',
-      _ => pin.isPrivate ? 'I am going' : 'I am interested',
-    };
+    if (pin.isPrivate) {
+      return _rsvpButton(
+        label: status == 'going' ? 'You are coming ✓' : 'Coming',
+        selected: status == 'going',
+        gradient: AppColors.privateGradient,
+      );
+    }
 
+    return Row(
+      children: [
+        Expanded(
+          child: _rsvpButton(
+            label: status == 'going' ? 'Going ✓' : 'Going',
+            selected: status == 'going',
+            gradient: AppColors.purpleGradient,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _rsvpButton(
+            label: status == 'interested' ? 'Interested ✓' : 'Interested',
+            selected: status == 'interested',
+            gradient: AppColors.purpleGradient,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// One RSVP answer. [selected] is the viewer's current one.
+  ///
+  /// Tapping the selected button is the un-RSVP, and un-RSVP is a DELETE of
+  /// the row — there is no third enum value standing for "not going".
+  /// `rsvp_status` has exactly two values and 22_private_party_counts_and_rsvp
+  /// asserts it stays that way.
+  Widget _rsvpButton({
+    required String label,
+    required bool selected,
+    required Gradient gradient,
+  }) {
     return SizedBox(
       width: double.infinity,
       child: ElevatedButton(
@@ -333,9 +384,9 @@ class _MapPinSheetState extends State<MapPinSheet> {
             // An answered RSVP drops the gradient for a flat outline: the
             // gradient is a call to action, and repeating it on a decision
             // already taken is what makes a button look unresponsive.
-            gradient: already ? null : (pin.isPrivate ? AppColors.pinkGradient : AppColors.purpleGradient),
-            color: already ? Colors.white.withValues(alpha: 0.06) : null,
-            border: already ? Border.all(color: AppColors.hairline) : null,
+            gradient: selected ? null : gradient,
+            color: selected ? Colors.white.withValues(alpha: 0.06) : null,
+            border: selected ? Border.all(color: AppColors.hairline) : null,
             borderRadius: BorderRadius.circular(14),
           ),
           child: Container(
@@ -343,10 +394,12 @@ class _MapPinSheetState extends State<MapPinSheet> {
             padding: const EdgeInsets.symmetric(vertical: 3),
             child: Text(
               label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 14.5,
                 fontWeight: FontWeight.w800,
-                color: already ? AppColors.textAlpha(0.7) : Colors.white,
+                color: selected ? AppColors.textAlpha(0.7) : Colors.white,
               ),
             ),
           ),

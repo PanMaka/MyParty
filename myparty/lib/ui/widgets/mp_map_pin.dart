@@ -108,7 +108,9 @@ class MpPinMetrics {
   /// and no server flag involved.
   factory MpPinMetrics.forPin(MapPartyPin pin, DateTime now) {
     if (pin.isPrivate) return MpPinMetrics.private();
-    return MpPinMetrics.forCount(pin.attendeeCountAt(now));
+    // See MpDropGeometry.forPin: private branches first, and the coalesce
+    // below can only ever apply to a public row.
+    return MpPinMetrics.forCount(pin.attendeeCountAt(now) ?? 0);
   }
 
   /// The type size for a label of [digits] glyphs inside a bubble of [radius].
@@ -209,15 +211,22 @@ class _MpMapPinState extends State<MpMapPin> with TickerProviderStateMixin {
     final live = pin.liveAt(widget.now);
     final count = pin.attendeeCountAt(widget.now);
     final m = MpPinMetrics.forPin(pin, widget.now);
-    final accent = pin.isPrivate ? AppColors.pink : AppColors.purple;
+    final accent = pin.isPrivate ? AppColors.private : AppColors.purple;
     final pulse = _pulse;
 
-    // The bare number, with no unit and no title. Which of the two counters it
-    // is comes from the tense — `going` while live, `interested` before — and
-    // the pulse is what tells the reader which tense they are looking at. The
-    // exact wording lives in MapPinSheet, one tap away, where there is room to
-    // say it.
-    final label = '$count';
+    // The bare number, with no unit and no title — for a PUBLIC party. Which
+    // of the two counters it is comes from the tense (`going` while live,
+    // `interested` before), and the pulse is what tells the reader which tense
+    // they are looking at. The exact wording lives in MapPinSheet, one tap
+    // away, where there is room to say it.
+    //
+    // Null for a private party, and the bubble draws a lock instead. That is
+    // the last place attendance was still visible on a private pin: the radius
+    // has been fixed since the map rework, but the label printed the count
+    // regardless, so the number was on screen no matter what the geometry did.
+    // With the server no longer sending it (20260825090051) there is nothing
+    // to print, and the lock says why rather than leaving an empty bubble.
+    final label = count == null ? null : '$count';
 
     return GestureDetector(
       onTap: widget.onTap,
@@ -270,22 +279,31 @@ class _MpMapPinState extends State<MpMapPin> with TickerProviderStateMixin {
               ),
             ),
 
-            // The count, centred in the body circle. No Flexible, no
-            // ellipsis and no maxLines: the saturation rule means a label
-            // wide enough to be a problem can only appear on a bubble already
-            // at maximum radius. See MpPinMetrics.labelSizeFor.
+            // The count, centred in the body circle — or a lock, when there
+            // is no count to draw. No Flexible, no ellipsis and no maxLines:
+            // the saturation rule means a label wide enough to be a problem
+            // can only appear on a bubble already at maximum radius. See
+            // MpPinMetrics.labelSizeFor.
             Positioned.fromRect(
               rect: m.circleRect,
               child: Center(
-                child: Text(
-                  label,
-                  textAlign: TextAlign.center,
-                  style: AppTextStyles.mono(
-                    size: MpPinMetrics.labelSizeFor(m.drop.radius, label.length),
-                    weight: FontWeight.w600,
-                    color: live ? Colors.white : (pin.isPrivate ? AppColors.pinkLight : AppColors.purpleLight),
-                  ),
-                ),
+                child: label == null
+                    // Same glyph PrivacyBadge uses, so the pin and the badge
+                    // in the sheet it opens say private the same way.
+                    ? Icon(
+                        Icons.lock,
+                        size: m.drop.radius * 0.78,
+                        color: live ? Colors.white : AppColors.privateLight,
+                      )
+                    : Text(
+                        label,
+                        textAlign: TextAlign.center,
+                        style: AppTextStyles.mono(
+                          size: MpPinMetrics.labelSizeFor(m.drop.radius, label.length),
+                          weight: FontWeight.w600,
+                          color: live ? Colors.white : AppColors.purpleLight,
+                        ),
+                      ),
               ),
             ),
           ],

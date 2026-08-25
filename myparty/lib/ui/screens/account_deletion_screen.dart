@@ -99,7 +99,7 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Διαγραφή', style: TextStyle(color: Color(0xFFE5484D))),
+            child: const Text('Διαγραφή', style: TextStyle(color: AppColors.destructive)),
           ),
         ],
       ),
@@ -275,13 +275,13 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
         padding: const EdgeInsets.all(13),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(15),
-          color: const Color(0xFFE5484D).withValues(alpha: 0.10),
-          border: Border.all(color: const Color(0xFFE5484D).withValues(alpha: 0.35)),
+          color: AppColors.destructive.withValues(alpha: 0.10),
+          border: Border.all(color: AppColors.destructive.withValues(alpha: 0.35)),
         ),
         child: Center(
           child: Text(
             label,
-            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFFE5484D)),
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.destructive),
           ),
         ),
       ),

@@ -198,7 +198,7 @@ class _StoryPickerSheetState extends State<StoryPickerSheet> {
 
   Widget _row(StoryTarget target) {
     final uploading = _uploadingPartyId == target.partyId;
-    final accent = target.isPrivate ? AppColors.pink : AppColors.purple;
+    final accent = target.isPrivate ? AppColors.private : AppColors.purple;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),

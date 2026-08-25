@@ -26,8 +26,8 @@ class PartyCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = context.watch<MpStore>();
     final party = mpParties[partyId]!;
-    final interested = store.interestedIn(partyId);
-    final accent = party.isPrivate ? AppColors.pink : AppColors.purple;
+    final rsvp = store.rsvpFor(partyId);
+    final accent = party.isPrivate ? AppColors.private : AppColors.purple;
 
     final body = Container(
       clipBehavior: Clip.antiAlias,
@@ -107,21 +107,28 @@ class PartyCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Expanded(
-                      child: HypeBar(
-                        percent: store.hypeOf(partyId),
-                        label: '${store.hypeOf(partyId)}%',
-                        gradient: party.isPrivate ? const LinearGradient(colors: [AppColors.purpleDeep, AppColors.pink]) : AppColors.purpleGradient,
-                        onTap: () => store.bump(partyId, 5),
+                // The hype bar is PUBLIC-ONLY, and it is removed rather than
+                // blanked. A percentage derived from attendance IS attendance:
+                // it moves when people join, so a reader watching it learns the
+                // same thing the count would have told them, one derivative
+                // removed. The bump button goes with it -- there is nothing
+                // left for it to move.
+                if (!party.isPrivate)
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Expanded(
+                        child: HypeBar(
+                          percent: store.hypeOf(partyId),
+                          label: '${store.hypeOf(partyId)}%',
+                          gradient: AppColors.purpleGradient,
+                          onTap: () => store.bump(partyId, 5),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 9),
-                    _hypeBumpButton(accent: accent, onTap: () => store.bump(partyId, 5)),
-                  ],
-                ),
+                      const SizedBox(width: 9),
+                      _hypeBumpButton(accent: accent, onTap: () => store.bump(partyId, 5)),
+                    ],
+                  ),
                 // The like pill that used to sit here is gone. Likes are a
                 // property of a post (`post_likes`), not of a party — there
                 // is no parties.like_count in the schema and no phase that
@@ -135,15 +142,50 @@ class PartyCard extends StatelessWidget {
                     label: '${party.commentCount}',
                   ),
                 ),
+                // ONE action on a private party, TWO on a public one.
+                //
+                // The private button writes 'going' and says "Coming":
+                // 20260825090050 makes the rsvps policy refuse an 'interested'
+                // row on a private party, so an Interested button here would be
+                // an affordance the server answers with a 42501.
+                //
+                // Tapping the selected button withdraws the answer, which is a
+                // DELETE of the row rather than a third enum value -- the same
+                // already-selected pattern this card has always shown, now with
+                // two buttons to be selected between.
                 Padding(
                   padding: const EdgeInsets.only(top: 12),
-                  child: _interestButton(
-                    interested: interested,
-                    onLabel: party.isPrivate ? 'I’m coming' : 'Interested',
-                    offLabel: party.isPrivate ? 'Going ✓' : 'In my events ✓',
-                    gradient: party.isPrivate ? AppColors.pinkGradient : AppColors.purpleGradient,
-                    onTap: () => store.toggleInterest(partyId, hypeBumpOnJoin: 6),
-                  ),
+                  child: party.isPrivate
+                      ? _rsvpButton(
+                          label: 'Coming',
+                          selected: rsvp == MpRsvp.going,
+                          gradient: AppColors.privateGradient,
+                          accent: AppColors.private,
+                          onTap: () => store.setRsvp(partyId, MpRsvp.going),
+                        )
+                      : Row(
+                          children: [
+                            Expanded(
+                              child: _rsvpButton(
+                                label: 'Going',
+                                selected: rsvp == MpRsvp.going,
+                                gradient: AppColors.purpleGradient,
+                                accent: AppColors.purple,
+                                onTap: () => store.setRsvp(partyId, MpRsvp.going, hypeBumpOnJoin: 6),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: _rsvpButton(
+                                label: 'Interested',
+                                selected: rsvp == MpRsvp.interested,
+                                gradient: AppColors.purpleGradient,
+                                accent: AppColors.purple,
+                                onTap: () => store.setRsvp(partyId, MpRsvp.interested, hypeBumpOnJoin: 3),
+                              ),
+                            ),
+                          ],
+                        ),
                 ),
               ],
             ),
@@ -199,11 +241,17 @@ Widget _reactionPill({VoidCallback? onTap, required IconData icon, required Stri
   );
 }
 
-Widget _interestButton({
-  required bool interested,
-  required String onLabel,
-  required String offLabel,
+/// One RSVP answer, lit when it is the viewer's current one.
+///
+/// [accent] is the PARTY's colour, so a selected answer on a private party
+/// reads red rather than borrowing public purple. The selected state is an
+/// outline, and an outline in the wrong colour is the one place the privacy
+/// signal could quietly disagree with the border drawn around the whole card.
+Widget _rsvpButton({
+  required String label,
+  required bool selected,
   required Gradient gradient,
+  required Color accent,
   required VoidCallback onTap,
 }) {
   return GestureDetector(
@@ -212,14 +260,20 @@ Widget _interestButton({
       padding: const EdgeInsets.symmetric(vertical: 10),
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        gradient: interested ? null : gradient,
-        color: interested ? AppColors.purple.withValues(alpha: 0.16) : null,
-        border: interested ? Border.all(color: AppColors.purple) : null,
+        gradient: selected ? null : gradient,
+        color: selected ? accent.withValues(alpha: 0.16) : null,
+        border: selected ? Border.all(color: accent) : null,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
-        interested ? offLabel : onLabel,
-        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: interested ? AppColors.purpleLight : Colors.white),
+        selected ? '$label ✓' : label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+          color: selected ? AppColors.text : Colors.white,
+        ),
       ),
     ),
   );

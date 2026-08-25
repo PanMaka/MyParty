@@ -39,8 +39,12 @@ select throws_ok(
 
 select tests.authenticate_as('22222222-2222-2222-2222-222222222222'); -- invitee
 
+-- 'going', not 'interested': a private party accepts only 'going' since
+-- 20260825090050. The assertion below is about ACCESS -- can an invited guest
+-- rsvp at all -- so the status change preserves its intent. The refusal of
+-- 'interested' is asserted on its own in 22_private_party_counts_and_rsvp.
 insert into public.rsvps (party_id, user_id, status) values
-  ('aaaaaaaa-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222', 'interested');
+  ('aaaaaaaa-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222', 'going');
 
 select isnt_empty(
   $$ select 1 from public.rsvps
@@ -49,10 +53,12 @@ select isnt_empty(
   'invited guest can rsvp to the private party they were invited to'
 );
 
+-- going_count rather than interested_count, for the same reason. The counter
+-- trigger's interested branch is still covered, on the public party below.
 select is(
-  (select interested_count from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000001'),
+  (select going_count from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000001'),
   1,
-  'interested_count on the private party ticks up by 1 after the invitee''s insert'
+  'going_count on the private party ticks up by 1 after the invitee''s insert'
 );
 
 select tests.authenticate_as('44444444-4444-4444-4444-444444444444'); -- stranger
@@ -138,8 +144,12 @@ select results_eq(
   $$ select going_count, my_rsvp_status, is_invited
      from public.get_parties_near_user(23.7348, 37.9755, 500)
      where party_id = 'aaaaaaaa-0000-0000-0000-000000000001' $$,
-  $$ values (0, 'interested'::public.rsvp_status, true) $$,
-  'get_parties_near_user reports the caller''s own rsvp status, going_count and invited flag'
+  -- going_count is NULL, not 0: this party is private, and 20260825090051
+  -- stops the RPC transmitting attendance for private rows. my_rsvp_status is
+  -- unaffected -- it is a property of the CALLER, not of the party, so it is
+  -- still reported and is still what the sheet reads its button label from.
+  $$ values (null::integer, 'going'::public.rsvp_status, true) $$,
+  'get_parties_near_user reports the caller''s own rsvp status and invited flag, with a NULL going_count on a private party'
 );
 
 select tests.clear_authentication();

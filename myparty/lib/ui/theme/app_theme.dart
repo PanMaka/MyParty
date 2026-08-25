@@ -17,6 +17,29 @@ class AppColors {
   static const pinkDeep = Color(0xFFB7436B);
   static const pinkLight = Color(0xFFEDA8C0);
 
+  /// PRIVATE. One colour for the concept, everywhere it appears — the map
+  /// bubble, the PRIVATE badge on seven surfaces, and the card borders — so
+  /// a pin and the badge in the sheet it opens cannot disagree about what
+  /// private looks like.
+  ///
+  /// Deliberately NOT [destructive], which is a different red for a different
+  /// idea. A private party is exclusive, not dangerous, and the two must stay
+  /// tellable apart if they ever share a screen.
+  ///
+  /// Red replaces pink as the private accent but does NOT replace the dashed
+  /// outline it is drawn with — see [MpDropPainter]. Colour is the fast
+  /// channel and the dash is the reliable one: red-vs-purple is exactly the
+  /// pair red-green colour blindness collapses, so the shape has to carry the
+  /// distinction on its own for those readers.
+  static const private = Color(0xFFF23557);
+  static const privateDeep = Color(0xFFC4213C);
+  static const privateLight = Color(0xFFFF9AAC);
+
+  /// Destructive actions only: account deletion, and anything else that
+  /// permanently removes data. Was an unnamed literal repeated four times in
+  /// account_deletion_screen.dart.
+  static const destructive = Color(0xFFE5484D);
+
   static const purpleGradient = LinearGradient(
     colors: [purpleDeep, purple],
   );
@@ -26,6 +49,10 @@ class AppColors {
   );
   static const pinkGradient = LinearGradient(
     colors: [pinkDeep, pink],
+  );
+  /// The private-party CTA fill, mirroring [purpleGradient] for public.
+  static const privateGradient = LinearGradient(
+    colors: [privateDeep, private],
   );
   static const likeGradient = LinearGradient(
     colors: [pink, purpleDeep],
