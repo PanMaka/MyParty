@@ -266,6 +266,22 @@ void main() {
     await tester.pumpAndSettle(const Duration(seconds: 6));
   });
 
+  // ==========================================================================
+  // The feed's story rail is HIDDEN FOR LAUNCH (FeedScreen._storiesEnabled).
+  //
+  // The two tests below are skipped rather than deleted, and left byte-for-byte
+  // as they were. Everything they exercise still exists and still works — the
+  // rail widget, StoryRail, the repository call behind it — so they are the
+  // coverage that comes back the moment the flag flips, and rewriting them now
+  // to assert the hidden state would throw away the only description of what
+  // the feature is supposed to look like.
+  //
+  // The launch state gets its own assertion instead, immediately after.
+  // ==========================================================================
+  // `testWidgets` takes skip: bool, not a reason string — the why is the
+  // block comment above, and it is why that comment is as long as it is.
+  const railHidden = true;
+
   testWidgets('the feed story row renders real rails, not the four hardcoded tiles', (tester) async {
     final stories = _FakeStoryRepository(rails: [
       _rail(partyId: 'p1', title: 'Γενέθλια Μαρίας'),
@@ -282,7 +298,7 @@ void main() {
     expect(find.text('3 stories'), findsNWidgets(2));
     // 'Kápsimo' was the hardcoded venue tile — it has no source any more.
     expect(find.textContaining('Kápsimo'), findsNothing);
-  });
+  }, skip: railHidden);
 
   testWidgets('an empty rail leaves just the upload tile, and the feed still renders', (tester) async {
     await tester.pumpWidget(MaterialApp(
@@ -294,6 +310,28 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('Ανέβασε'), findsOneWidget);
+    expect(find.textContaining('Ήσυχα εδώ.'), findsOneWidget);
+  }, skip: railHidden);
+
+  testWidgets('neither story entry point is on the feed while the flag is off', (tester) async {
+    // The launch state, asserted as an absence. Both doors, because they are
+    // two independent widgets in two places and hiding one is the easy half.
+    final stories = _FakeStoryRepository(rails: [
+      _rail(partyId: 'p1', title: 'Γενέθλια Μαρίας'),
+    ]);
+
+    await tester.pumpWidget(MaterialApp(
+      home: FeedScreen(repository: _EmptyFeedRepository(), storyRepository: stories),
+    ));
+    await tester.pumpAndSettle();
+
+    // The header's "+ Story" button…
+    expect(find.text('+ Story'), findsNothing);
+    // …and the rail itself, which would otherwise show this rail.
+    expect(find.text('Γενέθλια Μαρίας'), findsNothing);
+    expect(find.textContaining('Ανέβασε'), findsNothing);
+
+    // The feed below it is untouched — this hides a row, not the screen.
     expect(find.textContaining('Ήσυχα εδώ.'), findsOneWidget);
   });
 

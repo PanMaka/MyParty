@@ -64,6 +64,83 @@ and also unbuildable under `flutter test`); `PushService`, `LocationReporter`
 and the `Notifications` app-scoped wiring; `showLocationConsentSheet`,
 `NotificationSettingsScreen` and `AccountDeletionScreen`.
 
+**Group chat belongs to private parties only** (Phase 16c). `can_chat_in_party`
+is now `can_access_party AND party_is_private`. The participation disjunction
+(host/invited/rsvp'd) was **deleted, not lost**: it existed solely to stop a
+public party's chat being world-writable, and on a private party it is a
+tautology — `can_access_party` already means host-or-invited there, and an
+`rsvps` row can only exist where `can_access_party` passed, so "rsvp'd" implies
+"invited". **A revert must restore that clause in the same migration**, or
+public chat comes back writable by the entire user base. Existing public-party
+messages were hidden with `hidden_reason` naming the migration rather than left
+to fall out of the policy silently — a moderator asking "what was taken down"
+has to find them. Guarded at all three client entry points; `MessagesScreen`
+needs none because `get_party_chats` already filters on the helper.
+
+**Party posts are HOST-ONLY, and the rule lives in the INSERT policy** —
+`is_party_host` in the `party_posts` INSERT policy, with **no** matching
+`author_id = host_id` filter on the read side. Two places expressing one rule
+drift; the policy is what makes it true, a read filter would only make it look
+true while non-host rows accumulated. Three consequences worth knowing:
+
+- **`get_feed` becomes a host broadcast.** It shows posts from every accessible
+  party by any author; with host-only writing it can only ever show host posts.
+  `post_likes`/`post_comments` are untouched, so guests still react and reply —
+  the feed keeps its conversation and loses guest authorship. Reversing is one
+  migration and the read side needs no change either way.
+- **`can_moderate_post`'s two arms now name the same person on every row.** A
+  post's author is always the party's host, so host-arm and author-arm cannot
+  be told apart by a test. Both stay in the helper: unlike the chat clause this
+  one is not costless to remove, and there is no second statement of the rule
+  for it to drift against.
+- **Gotcha 2 no longer bites `party_posts`.** The author-side `is_blocked` term
+  was there because a blocked user could post on a third party's public party;
+  now the author IS the host, so `can_access_party`'s host block already covers
+  every case. The term stays — it is one widening away from mattering again —
+  but `05_feed_posts_and_reports.test.sql` can no longer demonstrate it failing
+  on its own, and says so. Gotcha 2 is still live for `post_comments`,
+  `messages` and `stories`, whose authors are still anybody.
+
+**Post media got the handshake it never had.** `media_path` is derived by a
+before-insert trigger from `{party_id}/{post_id}.{ext}` and carries **no insert
+grant** — closing an edge where the client could write a storage key while the
+`post-media` bucket has no INSERT policy for any role, making every media post
+a dangling reference by construction. The flow mirrors stories exactly: insert
+with `media_type` → `post_upload_target` → signed PUT via the **`post-media`
+edge function** → `confirm_post_upload`, which checks `storage.objects` for the
+bytes before making the row visible. A media post is invisible until confirmed,
+to its author included, which is what makes an abandoned handshake safe.
+
+**The `post-media` edge function has ONE route, and the asymmetry is
+deliberate.** Unlike `story-media`, whose bucket ships zero policies in either
+direction, `post-media` HAS a select policy following party visibility — so
+reads are signed client-side under RLS (`FeedRepository.signedPostMediaUrls`,
+same shape as `PartyRepository.signedCoverUrls`) and only the upload side needs
+the service key. Adding a view route would mean holding the service key while
+re-deciding a question the storage policy already answers correctly.
+
+**Stories are hidden for launch and ship in a later update.** `FeedScreen.
+_storiesEnabled = false` hides the two UI doors — the header's "+ Story" button
+and the rail — **and nothing else**. Every table, RPC, policy, the upload
+handshake, `StoryRepository`, `StoryViewerScreen`, `showStoryPickerSheet` and
+`07_stories.test.sql` are untouched and still exercised. The **`story-cleanup`
+pg_cron job must keep running** (`*/5`, verified active): it hides expired rows
+and deletes their objects over pg_net, so stopping it would let the
+`story-media` bucket accumulate files nothing will ever collect. Two widget
+tests are `skip:`ped verbatim rather than rewritten — they are the coverage that
+returns when the flag flips — and a third asserts the hidden state.
+
+**BACKLOG — retiring `mpParties` is now one blocking piece.** The const map's
+keys are strings like `'taratsa'` rather than uuids, and that single fact now
+blocks **three** features on the parties tab: host posts on the cards (they are
+rendered on the MINE tab instead, which carries real `RsvpParty.partyId`), the
+`PartyDetailSheet` group-chat button, and its story tiles. They are one job, not
+three. **It takes `hype` with it**: there is no hype column in the schema and no
+phase that adds one, so `MpStore._hype`, `HypeBar` and the bump button have
+nowhere to land — the same decision `credibility_score` already got. Doing it
+means moving ALL PARTIES onto a real list RPC and deciding what, if anything,
+replaces hype.
+
 **A private party holds no attendance, and that is enforced in three places
 because one would not hold.** Decided Phase 16b.
 

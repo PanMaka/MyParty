@@ -73,10 +73,20 @@ class FeedPostCard extends StatelessWidget {
               height: 190,
               child: DiagonalStripePlaceholder(
                 colors: [Color(0xFF1A1522), Color(0xFF141020)],
-                // The post-media bucket is private and signed-URL only, so
-                // there is nothing to render until the signing endpoint
-                // lands. A placeholder beats a broken image.
-                label: 'φωτό',
+                // STILL a placeholder, but no longer for the reason this
+                // comment used to give. There IS a signing path now —
+                // `post-media` has a select policy following party visibility,
+                // so FeedRepository.signedPostMediaUrls signs straight from
+                // the client, the same way party covers do.
+                //
+                // What is missing is the plumbing on THIS screen: the feed
+                // pages by keyset, so signing would have to happen per page
+                // and be threaded through FeedScreen's pagination state.
+                // EventsScreen's MINE tab renders real post media today
+                // because it fetches one party's posts in one shot and can
+                // sign them in one call. Doing it here is the same work,
+                // against a harder lifecycle.
+                label: 'photo',
               ),
             ),
           Padding(

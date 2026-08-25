@@ -2,12 +2,14 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../data/feed_repository.dart';
 import '../../data/party_repository.dart';
 import '../../models/mp_party.dart';
 import '../../models/rsvp_party.dart';
 import '../../utils/english_date.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
+import '../widgets/host_post_strip.dart';
 import '../widgets/mp_bottom_nav.dart';
 import '../widgets/party_card.dart';
 import '../widgets/privacy_badge.dart';
@@ -15,9 +17,13 @@ import 'chat_screen.dart';
 import 'host_wizard_screen.dart';
 
 class EventsScreen extends StatefulWidget {
-  const EventsScreen({super.key, this.onNavigate, this.repository});
+  const EventsScreen({super.key, this.onNavigate, this.repository, this.feed});
 
   final ValueChanged<MpTab>? onNavigate;
+
+  /// Injectable alongside [repository], for the same reason and by the same
+  /// pattern. Supplies the host posts rendered under each RSVP row.
+  final FeedRepository? feed;
 
   /// Injectable so widget tests can subclass [PartyRepository] without a
   /// Supabase client ever existing, the same seam [MapScreen] and
@@ -32,6 +38,7 @@ class EventsScreen extends StatefulWidget {
 
 class _EventsScreenState extends State<EventsScreen> {
   late final PartyRepository _repository = widget.repository ?? PartyRepository();
+  late final FeedRepository _feed = widget.feed ?? FeedRepository();
   bool _showAll = true;
   late Future<List<RsvpParty>> _rsvpsFuture;
 
@@ -339,6 +346,12 @@ class _EventsScreenState extends State<EventsScreen> {
                           padding: const EdgeInsets.only(top: 7),
                           child: Text(crowd, style: TextStyle(fontSize: 10.5, color: AppColors.textAlpha(0.5))),
                         ),
+                      // The host's photos of this party. Nothing is drawn when
+                      // there are none — no placeholder, no skeleton, no "no
+                      // photos yet": an empty strip would take vertical space
+                      // on every row to say nothing, and most parties have no
+                      // posts.
+                      HostPostStrip(partyId: rsvp.partyId, feed: _feed),
                     ],
                   ),
                 ),

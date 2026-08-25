@@ -332,20 +332,29 @@ select throws_ok(
 -- ============================================================
 
 -- --- posts: 30 per author per hour ---
-select tests.authenticate_as('22222222-2222-2222-2222-222222222222');
+-- The author is the party's HOST, and has to be: since 20260825095311 only a
+-- host may post, so an invitee flooding their own quota is no longer a state
+-- the database can reach. The limit itself is unchanged and still per-author
+-- across all parties, not per-party.
+-- blocked_user on the party they host, NOT the seed's main host: this section
+-- spends an author's entire hourly quota, and the comments fixture further
+-- down inserts a post as 11111111. The rate limit is a TRIGGER, so it fires
+-- even for that fixture's `reset role` superuser insert -- spending the main
+-- host's quota here would make an unrelated section fail with a rate limit.
+select tests.authenticate_as('55555555-5555-5555-5555-555555555555');
 
 select lives_ok(
   $$ insert into public.party_posts (party_id, author_id, body)
-     select 'aaaaaaaa-0000-0000-0000-000000000002',
-            '22222222-2222-2222-2222-222222222222', 'post ' || g
+     select 'aaaaaaaa-0000-0000-0000-000000000021',
+            '55555555-5555-5555-5555-555555555555', 'post ' || g
      from generate_series(1, 30) g $$,
   'posts: 30 in an hour is allowed'
 );
 
 select throws_ok(
   $$ insert into public.party_posts (party_id, author_id, body)
-     values ('aaaaaaaa-0000-0000-0000-000000000002',
-             '22222222-2222-2222-2222-222222222222', 'one too many') $$,
+     values ('aaaaaaaa-0000-0000-0000-000000000021',
+             '55555555-5555-5555-5555-555555555555', 'one too many') $$,
   '42501',
   'post rate limit exceeded: 30 per hour',
   'posts: the 31st in an hour is refused'
@@ -356,12 +365,16 @@ select throws_ok(
 -- were false, every per-row limit in this schema -- posts, comments, messages,
 -- stories -- would be bypassable with a single PostgREST array insert, and all
 -- four would still pass their one-row-at-a-time tests.
-select tests.authenticate_as('44444444-4444-4444-4444-444444444444');
+-- A DIFFERENT host on a party they own, deliberately: the limit is per author
+-- per hour, so reusing the host above would refuse this for the boring reason
+-- (their quota is already spent) and stop testing the bulk-insert property at
+-- all.
+select tests.authenticate_as('66666666-6666-6666-6666-666666666666');
 
 select throws_ok(
   $$ insert into public.party_posts (party_id, author_id, body)
-     select 'aaaaaaaa-0000-0000-0000-000000000002',
-            '44444444-4444-4444-4444-444444444444', 'bulk ' || g
+     select 'aaaaaaaa-0000-0000-0000-000000000013',
+            '66666666-6666-6666-6666-666666666666', 'bulk ' || g
      from generate_series(1, 31) g $$,
   '42501',
   'post rate limit exceeded: 30 per hour',
@@ -369,6 +382,11 @@ select throws_ok(
 );
 
 -- Same property, on the limit that shipped in Phase 5 without a test for it.
+-- Back to the stranger: stories are still open to anyone who can access the
+-- party, and the author_id below has to match auth.uid() or the stories
+-- policy refuses it before the rate limit is ever consulted.
+select tests.authenticate_as('44444444-4444-4444-4444-444444444444');
+
 select throws_ok(
   $$ insert into public.stories (party_id, author_id, content_type)
      select 'aaaaaaaa-0000-0000-0000-000000000002',

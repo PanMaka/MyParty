@@ -394,6 +394,17 @@ deno_version = 2
 enabled = true
 verify_jwt = true
 
+# Phase 16c. Issues signed UPLOAD urls for the post-media bucket, and nothing
+# else. That bucket, unlike story-media, HAS a select policy following party
+# visibility, so reads are signed by the client under RLS and never come
+# through here -- a view route would mean holding the service key while
+# re-deciding a question the storage policy already answers. verify_jwt stays
+# on: the function forwards the caller's token to public.post_upload_target and
+# signs only the path that RPC hands back.
+[functions.post-media]
+enabled = true
+verify_jwt = true
+
 # Phase 7c. Drains notification_jobs and calls FCM HTTP v1. Woken by the insert
 # trigger on that table and by the every-minute cron, both over pg_net reading
 # vault (20260817083542) — never by a client.
