@@ -208,32 +208,31 @@ class PartyDetailSheet extends StatelessWidget {
                     const SizedBox(height: 8),
                     Row(
                       children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            // This sheet is still driven by the const
-                            // `mpParties` map, whose keys are strings like
-                            // 'taratsa' rather than uuids — the same reason
-                            // Phase 4 wired the report action into MapPinSheet
-                            // and not here. ChatScreen now needs a real
-                            // parties.id, so this button stays a placeholder
-                            // until PartyDetailSheet itself ships real.
-                            onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Coming soon'),
-                                behavior: SnackBarBehavior.floating,
+                        // PRIVATE only. A public party has no group chat since
+                        // 20260825094044, so the entry point is gone rather
+                        // than disabled — on a private party it is still the
+                        // placeholder it was, because this sheet is driven by
+                        // the const `mpParties` map whose keys are strings
+                        // like 'taratsa' rather than uuids, and ChatScreen
+                        // needs a real parties.id. Two separate reasons this
+                        // button does nothing; only the first is deliberate
+                        // product behaviour.
+                        if (priv) ...[
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () => _comingSoon(context),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                side: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+                                backgroundColor: Colors.white.withValues(alpha: 0.06),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
+                                foregroundColor: AppColors.text,
                               ),
+                              child: const Text('Group chat', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
                             ),
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              side: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
-                              backgroundColor: Colors.white.withValues(alpha: 0.06),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
-                              foregroundColor: AppColors.text,
-                            ),
-                            child: const Text('Group chat', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
                           ),
-                        ),
-                        const SizedBox(width: 8),
+                          const SizedBox(width: 8),
+                        ],
                         Expanded(
                           child: OutlinedButton(
                             onPressed: () => _comingSoon(context),

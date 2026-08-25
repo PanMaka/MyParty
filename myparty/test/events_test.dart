@@ -293,6 +293,55 @@ void main() {
       expect(find.text('Coming'), findsOneWidget);
     });
 
+    testWidgets('only a PRIVATE rsvp row opens a chat', (tester) async {
+      // A public party has no group chat since 20260825094044. The row is
+      // inert rather than opening a screen that could never load a message --
+      // and the rule behind it is can_chat_in_party, not this guard: a
+      // hand-rolled insert is refused by the messages policy either way.
+      final now = DateTime.now();
+      await tester.pumpWidget(_host(_FakePartyRepository([
+        _rsvp(title: 'Public one', startsAt: now.add(const Duration(hours: 2))),
+        _rsvp(
+          title: 'Private one',
+          startsAt: now.add(const Duration(hours: 3)),
+          isPrivate: true,
+        ),
+      ])));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('MINE'));
+      await tester.pumpAndSettle();
+
+      GestureDetector rowFor(String title) => tester.widget<GestureDetector>(
+            find.ancestor(of: find.text(title), matching: find.byType(GestureDetector)).first,
+          );
+
+      expect(rowFor('Public one').onTap, isNull);
+      expect(rowFor('Private one').onTap, isNotNull);
+    });
+
+    testWidgets('the group chat entry is absent on a public detail sheet', (tester) async {
+      await tester.pumpWidget(_card('vinyl'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Techno Monday · DJ Iris'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(PartyDetailSheet), findsOneWidget);
+      expect(find.text('Group chat'), findsNothing);
+      // Directions stays, so this is the chat entry going rather than the
+      // whole button row.
+      expect(find.text('Directions'), findsOneWidget);
+    });
+
+    testWidgets('the group chat entry is present on a private detail sheet', (tester) async {
+      await tester.pumpWidget(_card('maria'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Maria’s Birthday'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Group chat'), findsOneWidget);
+      expect(find.text('Directions'), findsOneWidget);
+    });
+
     testWidgets('the private detail sheet hides the crowd chip and offers one action', (tester) async {
       await tester.pumpWidget(_card('maria'));
       await tester.pumpAndSettle();

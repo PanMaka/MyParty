@@ -255,18 +255,23 @@ class _EventsScreenState extends State<EventsScreen> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 9),
       child: GestureDetector(
-        // An RsvpParty is a real `parties` row, and an rsvp is exactly what
-        // can_chat_in_party counts as participation — so this row can open
-        // the real group chat rather than the "coming soon" placeholder it
-        // used to show.
-        onTap: () => Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => ChatScreen(
-            partyId: rsvp.partyId,
-            partyTitle: rsvp.title,
-            isPrivate: rsvp.isPrivate,
-            memberCount: rsvp.goingCount,
-          ),
-        )),
+        // PRIVATE parties only. A public party has no group chat since
+        // 20260825094044, so there is nothing for this row to open and it is
+        // inert rather than opening a screen that would come back empty.
+        //
+        // The button being absent is the courtesy; the rule is that
+        // can_chat_in_party returns false, and the messages policy would
+        // refuse the write even if this tap were restored by hand.
+        onTap: rsvp.isPrivate
+            ? () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => ChatScreen(
+                    partyId: rsvp.partyId,
+                    partyTitle: rsvp.title,
+                    isPrivate: rsvp.isPrivate,
+                    memberCount: rsvp.goingCount,
+                  ),
+                ))
+            : null,
         // The rounding moved from the BoxDecoration onto a ClipRRect; the
         // asymmetric border below is unchanged.
         //
