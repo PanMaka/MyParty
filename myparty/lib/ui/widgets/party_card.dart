@@ -9,11 +9,14 @@ import 'diagonal_placeholder.dart';
 import 'hype_bar.dart';
 import 'party_detail_sheet.dart';
 
-/// Full party card for the "ΟΛΑ ΤΑ PARTY" list — cover, name/host, a
-/// public/private ring badge (solid purple = ΔΗΜΟΣΙΟ, dashed magenta =
-/// ΙΔΙΩΤΙΚΟ, mirroring the map pin ring), a live indicator, the shared hype
+/// Full party card for the "ALL PARTIES" list — cover, name/host, a
+/// public/private ring badge (solid purple = PUBLIC, dashed magenta =
+/// PRIVATE, mirroring the map pin ring), a live indicator, the shared hype
 /// bar and the interest button — same building blocks the party posts used
 /// to render inline in the feed.
+///
+/// Rendered only by EventsScreen, which is why this file could be translated
+/// outright rather than growing PrivacyBadge's opt-in `english` flag.
 class PartyCard extends StatelessWidget {
   final String partyId;
 
@@ -136,8 +139,8 @@ class PartyCard extends StatelessWidget {
                   padding: const EdgeInsets.only(top: 12),
                   child: _interestButton(
                     interested: interested,
-                    onLabel: party.isPrivate ? 'Έρχομαι' : 'Μ’ ενδιαφέρει',
-                    offLabel: party.isPrivate ? 'Έρχεσαι ✓' : 'Στα events μου ✓',
+                    onLabel: party.isPrivate ? 'I’m coming' : 'Interested',
+                    offLabel: party.isPrivate ? 'Going ✓' : 'In my events ✓',
                     gradient: party.isPrivate ? AppColors.pinkGradient : AppColors.purpleGradient,
                     onTap: () => store.toggleInterest(partyId, hypeBumpOnJoin: 6),
                   ),

@@ -29,8 +29,8 @@ class PartyDetailSheet extends StatelessWidget {
     final priv = party.isPrivate;
 
     final ctaLabel = interested
-        ? (priv ? 'Έρχεσαι ✓' : 'Στα events μου ✓')
-        : (priv ? 'Έρχομαι' : 'Μ’ ενδιαφέρει');
+        ? (priv ? 'Going ✓' : 'In my events ✓')
+        : (priv ? 'I’m coming' : 'Interested');
     final ctaGradient = interested
         ? null
         : (priv ? AppColors.pinkGradient : AppColors.purpleGradient);
@@ -73,7 +73,7 @@ class PartyDetailSheet extends StatelessWidget {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('ΤΟ STORY ΤΟΥ ΠΑΡΤΙ',
+                        Text('THE PARTY STORY',
                             style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.5))),
                         Text(party.posters,
                             style: TextStyle(fontSize: 11, color: AppColors.textAlpha(0.4))),
@@ -159,7 +159,7 @@ class PartyDetailSheet extends StatelessWidget {
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(99)),
                         foregroundColor: AppColors.text,
                       ),
-                      child: const Text('Προφίλ', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
+                      child: const Text('Profile', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
                     ),
                   ],
                 ),
@@ -210,7 +210,7 @@ class PartyDetailSheet extends StatelessWidget {
                             // until PartyDetailSheet itself ships real.
                             onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
-                                content: Text('Έρχεται σύντομα'),
+                                content: Text('Coming soon'),
                                 behavior: SnackBarBehavior.floating,
                               ),
                             ),
@@ -235,7 +235,7 @@ class PartyDetailSheet extends StatelessWidget {
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
                               foregroundColor: AppColors.text,
                             ),
-                            child: const Text('Οδηγίες', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                            child: const Text('Directions', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
                           ),
                         ),
                       ],
@@ -296,7 +296,12 @@ class PartyDetailSheet extends StatelessWidget {
             left: 12,
             child: Row(
               children: [
-                PrivacyBadge(isPrivate: party.isPrivate, suffix: party.isPrivate ? 'ΜΟΝΟ ΚΑΛΕΣΜΕΝΟΙ' : null, fontSize: 9),
+                PrivacyBadge(
+                  isPrivate: party.isPrivate,
+                  suffix: party.isPrivate ? 'INVITE ONLY' : null,
+                  fontSize: 9,
+                  english: true,
+                ),
                 if (party.live) ...[
                   const SizedBox(width: 6),
                   Container(
@@ -305,7 +310,7 @@ class PartyDetailSheet extends StatelessWidget {
                       color: Colors.black.withValues(alpha: 0.7),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Text('ΤΩΡΑ', style: AppTextStyles.mono(size: 9)),
+                    child: Text('NOW', style: AppTextStyles.mono(size: 9)),
                   ),
                 ],
               ],
@@ -343,6 +348,6 @@ class PartyDetailSheet extends StatelessWidget {
 
 void _comingSoon(BuildContext context) {
   ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(content: Text('Έρχεται σύντομα'), behavior: SnackBarBehavior.floating),
+    const SnackBar(content: Text('Coming soon'), behavior: SnackBarBehavior.floating),
   );
 }

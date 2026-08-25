@@ -1,9 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../data/party_repository.dart';
 import '../../models/mp_party.dart';
 import '../../models/rsvp_party.dart';
-import '../../utils/greek_date.dart';
+import '../../utils/english_date.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
 import '../widgets/mp_bottom_nav.dart';
@@ -13,16 +15,23 @@ import 'chat_screen.dart';
 import 'host_wizard_screen.dart';
 
 class EventsScreen extends StatefulWidget {
+  const EventsScreen({super.key, this.onNavigate, this.repository});
+
   final ValueChanged<MpTab>? onNavigate;
 
-  const EventsScreen({super.key, this.onNavigate});
+  /// Injectable so widget tests can subclass [PartyRepository] without a
+  /// Supabase client ever existing, the same seam [MapScreen] and
+  /// [ProfileScreen] already take. This screen constructed its own repository
+  /// in [State.initState], which is why it was untested — the translation
+  /// below is the first thing here worth asserting.
+  final PartyRepository? repository;
 
   @override
   State<EventsScreen> createState() => _EventsScreenState();
 }
 
 class _EventsScreenState extends State<EventsScreen> {
-  final _repository = PartyRepository();
+  late final PartyRepository _repository = widget.repository ?? PartyRepository();
   bool _showAll = true;
   late Future<List<RsvpParty>> _rsvpsFuture;
 
@@ -30,10 +39,25 @@ class _EventsScreenState extends State<EventsScreen> {
   void initState() {
     super.initState();
     _rsvpsFuture = _repository.fetchMyRsvps();
+    _observe(_rsvpsFuture);
+  }
+
+  /// Marks the fetch's failure as handled without consuming it.
+  ///
+  /// The FutureBuilder that renders the error is on the "Mine" tab, and "All
+  /// parties" is the default -- so on a failed fetch nothing is listening to
+  /// this future until the user switches tabs, and Dart reports the rejection
+  /// as an unhandled async error in the meantime. `_rsvpsFuture` itself is
+  /// untouched: the tab still renders `_errorState()` when it is opened.
+  void _observe(Future<List<RsvpParty>> future) {
+    unawaited(future.then((_) {}, onError: (_) {}));
   }
 
   void _reloadRsvps() {
-    setState(() => _rsvpsFuture = _repository.fetchMyRsvps());
+    setState(() {
+      _rsvpsFuture = _repository.fetchMyRsvps();
+      _observe(_rsvpsFuture);
+    });
   }
 
   @override
@@ -51,52 +75,79 @@ class _EventsScreenState extends State<EventsScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('Τα events μου', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -0.5)),
+                  // The wordmark replaces the old 'Τα events μου' title.
+                  //
+                  // Height-constrained so the M keeps its aspect ratio, and
+                  // labelled because swapping a Text for an Image otherwise
+                  // leaves the screen's heading with no accessible name --
+                  // TalkBack would announce nothing where it used to read the
+                  // title out.
+                  //
+                  // 30px is sized for a TRIMMED, TRANSPARENT asset. The file
+                  // currently in assets/ is a 1254x1254 square whose alpha is
+                  // 255 everywhere, on #040406 rather than the app's #0B0A10,
+                  // and the M occupies only the middle ~45% of it -- so today
+                  // this renders a ~14px glyph inside a visible black tile.
+                  // See the note in the PR: the fix is a new export, not a
+                  // BlendMode or a crop here.
+                  Semantics(
+                    label: 'MyParty',
+                    image: true,
+                    header: true,
+                    child: Image.asset(
+                      'assets/images/content.png',
+                      height: 30,
+                      fit: BoxFit.contain,
+                      filterQuality: FilterQuality.medium,
+                    ),
+                  ),
                   Container(
                     padding: const EdgeInsets.all(3),
                     decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(99)),
                     child: Row(
                       children: [
-                        _segment('ΔΙΚΑ ΜΟΥ', !_showAll, () => setState(() => _showAll = false)),
-                        _segment('ΟΛΑ ΤΑ PARTY', _showAll, () => setState(() => _showAll = true)),
+                        _segment('MINE', !_showAll, () => setState(() => _showAll = false)),
+                        _segment('ALL PARTIES', _showAll, () => setState(() => _showAll = true)),
                       ],
                     ),
                   ),
                 ],
               ),
             ),
+            // Deliberately quiet. This used to be a full-bleed brand-gradient
+            // card with a 30px glow and a two-line pitch, which made hosting
+            // the loudest thing on a screen whose subject is other people's
+            // parties. It is now the same hairline pill idiom the reaction
+            // buttons on PartyCard use, shrink-wrapped and left-aligned, so it
+            // reads as one more control rather than the headline. The pitch
+            // copy went with it -- an ad inside a button is exactly the weight
+            // being removed.
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 8, 14, 4),
-              child: GestureDetector(
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const HostWizardScreen())),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
-                  decoration: BoxDecoration(
-                    gradient: AppColors.brandGradient,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [BoxShadow(color: AppColors.purpleDeep.withValues(alpha: 0.4), blurRadius: 30, offset: const Offset(0, 10))],
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 38,
-                        height: 38,
-                        decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.28), borderRadius: BorderRadius.circular(12)),
-                        child: const Icon(Icons.add, color: Colors.white, size: 22),
-                      ),
-                      const SizedBox(width: 12),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Διοργάνωσε πάρτι', style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800, letterSpacing: -0.2)),
-                            SizedBox(height: 1),
-                            Text('Ένα λινκ αντί για 100 μηνύματα. Κάτω από ένα λεπτό.',
-                                style: TextStyle(fontSize: 11.5, color: Color(0xBFFFFFFF))),
-                          ],
-                        ),
-                      ),
-                    ],
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: GestureDetector(
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const HostWizardScreen())),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(11),
+                      border: Border.all(color: AppColors.hairline),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.add, size: 15, color: AppColors.purpleLight),
+                        const SizedBox(width: 6),
+                        Text('Host a party',
+                            style: TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: -0.1,
+                                color: AppColors.textAlpha(0.85))),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -108,7 +159,7 @@ class _EventsScreenState extends State<EventsScreen> {
                       children: [
                         Padding(
                           padding: const EdgeInsets.only(left: 2, bottom: 9),
-                          child: Text('ΟΛΑ ΤΑ PARTY', style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.6))),
+                          child: Text('ALL PARTIES', style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.6))),
                         ),
                         for (final party in allParties) ...[
                           PartyCard(partyId: party.id),
@@ -150,14 +201,14 @@ class _EventsScreenState extends State<EventsScreen> {
                         return ListView(
                           padding: const EdgeInsets.fromLTRB(14, 16, 14, 96),
                           children: [
-                            if (tonight.isNotEmpty) _rsvpSection(context, 'ΑΠΟΨΕ', tonight, live: true),
+                            if (tonight.isNotEmpty) _rsvpSection(context, 'TONIGHT', tonight, live: true),
                             if (thisWeek.isNotEmpty) ...[
                               const SizedBox(height: 20),
-                              _rsvpSection(context, 'ΑΥΤΗ ΤΗ ΒΔΟΜΑΔΑ', thisWeek),
+                              _rsvpSection(context, 'THIS WEEK', thisWeek),
                             ],
                             if (later.isNotEmpty) ...[
                               const SizedBox(height: 20),
-                              _rsvpSection(context, 'ΑΡΓΟΤΕΡΑ', later),
+                              _rsvpSection(context, 'LATER', later),
                             ],
                           ],
                         );
@@ -195,7 +246,7 @@ class _EventsScreenState extends State<EventsScreen> {
 
   Widget _rsvpRow(BuildContext context, RsvpParty rsvp) {
     final accent = rsvp.isPrivate ? AppColors.pink : AppColors.purple;
-    final crowd = rsvp.goingCount > 0 ? '${rsvp.goingCount} πάνε' : '${rsvp.interestedCount} ενδιαφέρονται';
+    final crowd = rsvp.goingCount > 0 ? '${rsvp.goingCount} going' : '${rsvp.interestedCount} interested';
     return Padding(
       padding: const EdgeInsets.only(bottom: 9),
       child: GestureDetector(
@@ -211,64 +262,75 @@ class _EventsScreenState extends State<EventsScreen> {
             memberCount: rsvp.goingCount,
           ),
         )),
-        child: Container(
-          padding: const EdgeInsets.all(11),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.035),
-            borderRadius: BorderRadius.circular(15),
-            border: Border(
-              top: BorderSide(color: accent.withValues(alpha: 0.3)),
-              bottom: BorderSide(color: accent.withValues(alpha: 0.3)),
-              right: BorderSide(color: accent.withValues(alpha: 0.3)),
-              left: BorderSide(color: accent, width: 3),
+        // The rounding moved from the BoxDecoration onto a ClipRRect; the
+        // asymmetric border below is unchanged.
+        //
+        // Flutter asserts at PAINT time that a borderRadius may only be given
+        // on a border with uniform sides, and this row pairs a 3px left accent
+        // with 1px elsewhere — so it threw on every debug build the moment an
+        // RSVP rendered. It survived because this screen had no widget test
+        // until now. Clipping instead of rounding keeps the design intact.
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(15),
+          child: Container(
+            padding: const EdgeInsets.all(11),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.035),
+              border: Border(
+                top: BorderSide(color: accent.withValues(alpha: 0.3)),
+                bottom: BorderSide(color: accent.withValues(alpha: 0.3)),
+                right: BorderSide(color: accent.withValues(alpha: 0.3)),
+                left: BorderSide(color: accent, width: 3),
+              ),
             ),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 62,
-                height: 70,
-                clipBehavior: Clip.antiAlias,
-                decoration: BoxDecoration(borderRadius: BorderRadius.circular(11)),
-                child: DiagonalStripePlaceholder(
-                  colors: rsvp.isPrivate ? const [Color(0xFF1C1622), Color(0xFF151020)] : const [Color(0xFF1D1730), Color(0xFF161126)],
-                  label: 'cover',
+            child: Row(
+              children: [
+                Container(
+                  width: 62,
+                  height: 70,
+                  clipBehavior: Clip.antiAlias,
+                  decoration: BoxDecoration(borderRadius: BorderRadius.circular(11)),
+                  child: DiagonalStripePlaceholder(
+                    colors: rsvp.isPrivate ? const [Color(0xFF1C1622), Color(0xFF151020)] : const [Color(0xFF1D1730), Color(0xFF161126)],
+                    label: 'cover',
+                  ),
                 ),
-              ),
-              const SizedBox(width: 11),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        PrivacyBadge(isPrivate: rsvp.isPrivate),
-                        const SizedBox(width: 5),
-                        Text(rsvp.rsvpStatus == 'going' ? 'ΠΑΩ' : 'ΜΕ ΕΝΔΙΑΦΕΡΕΙ',
-                            style: AppTextStyles.mono(size: 9, color: AppColors.textAlpha(0.45))),
-                      ],
-                    ),
-                    const SizedBox(height: 3),
-                    Text(rsvp.title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: -0.2)),
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Text(formatPartyStart(rsvp.startsAt),
-                          maxLines: 1, overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 11.5, color: AppColors.textAlpha(0.55))),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.only(top: 7),
-                      child: Text(crowd, style: TextStyle(fontSize: 10.5, color: AppColors.textAlpha(0.5))),
-                    ),
-                  ],
+                const SizedBox(width: 11),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          PrivacyBadge(isPrivate: rsvp.isPrivate, english: true),
+                          const SizedBox(width: 5),
+                          Text(rsvp.rsvpStatus == 'going' ? 'GOING' : 'INTERESTED',
+                              style: AppTextStyles.mono(size: 9, color: AppColors.textAlpha(0.45))),
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      Text(rsvp.title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: -0.2)),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(formatPartyStartEn(rsvp.startsAt),
+                            maxLines: 1, overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 11.5, color: AppColors.textAlpha(0.55))),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 7),
+                        child: Text(crowd, style: TextStyle(fontSize: 10.5, color: AppColors.textAlpha(0.5))),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
     );
   }
+
 
   Widget _errorState() {
     return Center(
@@ -277,7 +339,7 @@ class _EventsScreenState extends State<EventsScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('Δεν μπορέσαμε να φορτώσουμε τα events σου.',
+            Text('We couldn’t load your events.',
                 textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: AppColors.textAlpha(0.6))),
             const SizedBox(height: 12),
             GestureDetector(
@@ -285,7 +347,7 @@ class _EventsScreenState extends State<EventsScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 11),
                 decoration: BoxDecoration(gradient: AppColors.purpleGradient, borderRadius: BorderRadius.circular(12)),
-                child: const Text('Δοκίμασε ξανά', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                child: const Text('Try again', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
               ),
             ),
           ],
@@ -311,9 +373,9 @@ class _EventsScreenState extends State<EventsScreen> {
               child: const Icon(Icons.explore_outlined, color: AppColors.purple, size: 26),
             ),
             const SizedBox(height: 14),
-            const Text('Δεν πας κάπου ακόμα', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+            const Text('You’re not going anywhere yet', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
             const SizedBox(height: 8),
-            Text('Ο χάρτης δείχνει τι γίνεται τώρα κοντά σου. Κάτι θα βρεις μέσα σε δύο τετράγωνα.',
+            Text('The map shows what’s happening near you right now. There’s something within two blocks.',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 13, height: 1.5, color: AppColors.textAlpha(0.55))),
             const SizedBox(height: 18),
@@ -322,7 +384,7 @@ class _EventsScreenState extends State<EventsScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
                 decoration: BoxDecoration(gradient: AppColors.purpleGradient, borderRadius: BorderRadius.circular(13)),
-                child: const Text('Άνοιξε τον χάρτη', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
+                child: const Text('Open the map', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
               ),
             ),
           ],

@@ -25,7 +25,7 @@ class HypeBar extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text('HYPE ΤΩΡΑ',
+            Text('HYPE NOW',
                 style: AppTextStyles.mono(size: 10, color: AppColors.textAlpha(0.5))),
             Text(label, style: AppTextStyles.mono(size: 11, weight: FontWeight.w700, color: AppColors.pink)),
           ],
