@@ -5,7 +5,11 @@ import '../theme/app_theme.dart';
 enum MpTab { feed, events, map, messages, profile }
 
 /// The custom 5-tab bottom bar with a raised gradient circular map button,
-/// matching the design's Ροή / Parties / Χάρτης / Μηνύματα / Προφίλ bar.
+/// matching the design's Feed / Parties / Map / Messages / Profile bar.
+///
+/// The labels were the design's Greek (Ροή / Χάρτης / Μηνύματα / Προφίλ) until the
+/// English pass reached the chrome. 'Parties' never needed translating, which
+/// is why this bar read as half-done.
 class MpBottomNav extends StatelessWidget {
   final MpTab current;
   final ValueChanged<MpTab> onSelect;
@@ -27,11 +31,11 @@ class MpBottomNav extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          _item(MpTab.feed, Icons.waves_rounded, 'Ροή'),
+          _item(MpTab.feed, Icons.waves_rounded, 'Feed'),
           _item(MpTab.events, Icons.event_note_outlined, 'Parties'),
           _mapItem(),
-          _item(MpTab.messages, Icons.chat_bubble_outline, 'Μηνύματα', dot: true),
-          _item(MpTab.profile, Icons.person_outline, 'Προφίλ'),
+          _item(MpTab.messages, Icons.chat_bubble_outline, 'Messages', dot: true),
+          _item(MpTab.profile, Icons.person_outline, 'Profile'),
         ],
       ),
     );
@@ -98,7 +102,7 @@ class MpBottomNav extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 5),
-            const Text('Χάρτης',
+            const Text('Map',
                 style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, color: AppColors.text)),
           ],
         ),

@@ -90,7 +90,7 @@ void main() {
       await tester.pumpWidget(_host(_FakePartyRepository(const [])));
       await tester.pumpAndSettle();
 
-      expect(find.text('MINE'), findsOneWidget);
+      expect(find.text('MY PARTIES'), findsOneWidget);
       expect(find.text('ALL PARTIES'), findsWidgets);
       expect(find.text('ΔΙΚΑ ΜΟΥ'), findsNothing);
     });
@@ -159,7 +159,7 @@ void main() {
       ])));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('MINE'));
+      await tester.tap(find.text('MY PARTIES'));
       await tester.pumpAndSettle();
 
       expect(find.text('TONIGHT'), findsOneWidget);
@@ -191,7 +191,7 @@ void main() {
     testWidgets('the empty state is translated', (tester) async {
       await tester.pumpWidget(_host(_FakePartyRepository(const [])));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('MINE'));
+      await tester.tap(find.text('MY PARTIES'));
       await tester.pumpAndSettle();
 
       expect(find.text('You’re not going anywhere yet'), findsOneWidget);
@@ -202,7 +202,7 @@ void main() {
     testWidgets('the error state is translated', (tester) async {
       await tester.pumpWidget(_host(_FakePartyRepository(const [], fail: true)));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('MINE'));
+      await tester.tap(find.text('MY PARTIES'));
       await tester.pumpAndSettle();
 
       expect(find.text('We couldn’t load your events.'), findsOneWidget);
@@ -308,7 +308,7 @@ void main() {
         ),
       ])));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('MINE'));
+      await tester.tap(find.text('MY PARTIES'));
       await tester.pumpAndSettle();
 
       GestureDetector rowFor(String title) => tester.widget<GestureDetector>(
@@ -338,8 +338,38 @@ void main() {
       await tester.tap(find.text('Maria’s Birthday'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Group chat'), findsOneWidget);
+      // Scoped to the SHEET. The card underneath now carries its own 'Group
+      // chat' pill, so an unscoped find.text matches twice and the assertion
+      // would pass on a sheet that had lost its button entirely.
+      expect(
+        find.descendant(of: find.byType(PartyDetailSheet), matching: find.text('Group chat')),
+        findsOneWidget,
+      );
       expect(find.text('Directions'), findsOneWidget);
+    });
+
+    testWidgets('the card carries a group chat pill on a private party only', (tester) async {
+      await tester.pumpWidget(_card('maria'));
+      await tester.pumpAndSettle();
+
+      // The card, before anything is tapped -- no sheet is open yet, so this
+      // is unambiguously the pill.
+      expect(find.byType(PartyDetailSheet), findsNothing);
+      expect(find.text('Group chat'), findsOneWidget);
+      expect(find.byIcon(Icons.forum_outlined), findsOneWidget);
+    });
+
+    testWidgets('a public card carries no chat pill and no comment count', (tester) async {
+      await tester.pumpWidget(_card('vinyl'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Group chat'), findsNothing);
+      expect(find.byIcon(Icons.forum_outlined), findsNothing);
+      // '34' was MpParty.commentCount for this party -- a counter with no
+      // parties.comment_count behind it, deleted with the pill rather than
+      // moved onto the private one. A bare number reappearing here means the
+      // mock counter came back.
+      expect(find.text('34'), findsNothing);
     });
 
     testWidgets('the private detail sheet hides the crowd chip and offers one action', (tester) async {

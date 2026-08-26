@@ -28,7 +28,6 @@ class MpParty {
   final double lng;
   final int pop;
   final int sortKey;
-  final int commentCount;
 
   const MpParty({
     required this.id,
@@ -49,7 +48,6 @@ class MpParty {
     required this.lng,
     required this.pop,
     required this.sortKey,
-    required this.commentCount,
   });
 
   bool get isPrivate => type == MpPartyType.private;
@@ -78,7 +76,6 @@ const Map<String, MpParty> mpParties = {
     lng: 23.7249,
     pop: 24,
     sortKey: 3,
-    commentCount: 61,
   ),
   'vinyl': MpParty(
     id: 'vinyl',
@@ -100,7 +97,6 @@ const Map<String, MpParty> mpParties = {
     lng: 23.7247,
     pop: 180,
     sortKey: 2,
-    commentCount: 34,
   ),
   'maria': MpParty(
     id: 'maria',
@@ -121,7 +117,6 @@ const Map<String, MpParty> mpParties = {
     lng: 23.7357,
     pop: 31,
     sortKey: 1,
-    commentCount: 12,
   ),
   'kapsimo': MpParty(
     id: 'kapsimo',
@@ -142,7 +137,6 @@ const Map<String, MpParty> mpParties = {
     lng: 23.7148,
     pop: 96,
     sortKey: 4,
-    commentCount: 27,
   ),
   'anodos': MpParty(
     id: 'anodos',
@@ -164,7 +158,6 @@ const Map<String, MpParty> mpParties = {
     lng: 23.7281,
     pop: 54,
     sortKey: 5,
-    commentCount: 19,
   ),
   'nefeli': MpParty(
     id: 'nefeli',
@@ -185,6 +178,5 @@ const Map<String, MpParty> mpParties = {
     lng: 23.7112,
     pop: 14,
     sortKey: 6,
-    commentCount: 6,
   ),
 };

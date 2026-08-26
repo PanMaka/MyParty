@@ -134,14 +134,37 @@ class PartyCard extends StatelessWidget {
                 // is no parties.like_count in the schema and no phase that
                 // adds one, so it was a counter that could only ever stay
                 // mock. `MpStore._likes`, which backed it, went with it.
-                Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: _reactionPill(
-                    onTap: () => showPartyDetailSheet(context, partyId),
-                    icon: Icons.chat_bubble_outline,
-                    label: '${party.commentCount}',
+                //
+                // The comment-count pill that replaced it is gone for the same
+                // reason and has been rebuilt as a group-chat entry point,
+                // PRIVATE-ONLY, matching PartyDetailSheet's button and the
+                // 20260825094044 rule behind it. Three things happened here at
+                // once, and only the first is product behaviour:
+                //
+                //  - A public party has no group chat, so a public card gets
+                //    no pill at all rather than a disabled one.
+                //  - The NUMBER is gone. `MpParty.commentCount` was mock in
+                //    the way the like count was — comments hang off
+                //    `post_comments`, a property of a post, and there is no
+                //    parties.comment_count for it to ever become. Printing a
+                //    message count next to a chat icon would have promised a
+                //    second unbacked counter in the place of the first.
+                //  - It still does not OPEN anything. This card is driven by
+                //    the const `mpParties` map whose keys are strings like
+                //    'taratsa', and ChatScreen needs a real parties.id — the
+                //    same blocker that leaves the detail sheet's button on
+                //    _comingSoon. It is wired to the identical placeholder so
+                //    the two doors cannot drift apart before mpParties
+                //    retires and they are both pointed at ChatScreen together.
+                if (party.isPrivate)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: _reactionPill(
+                      onTap: () => comingSoon(context),
+                      icon: Icons.forum_outlined,
+                      label: 'Group chat',
+                    ),
                   ),
-                ),
                 // ONE action on a private party, TWO on a public one.
                 //
                 // The private button writes 'going' and says "Coming":

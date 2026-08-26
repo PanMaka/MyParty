@@ -113,7 +113,7 @@ class _EventsScreenState extends State<EventsScreen> {
                     decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(99)),
                     child: Row(
                       children: [
-                        _segment('MINE', !_showAll, () => setState(() => _showAll = false)),
+                        _segment('MY PARTIES', !_showAll, () => setState(() => _showAll = false)),
                         _segment('ALL PARTIES', _showAll, () => setState(() => _showAll = true)),
                       ],
                     ),

@@ -90,7 +90,7 @@ class PartyDetailSheet extends StatelessWidget {
                       // passing a mock key would fetch nothing and blame the
                       // network for it. Real entry points into the reel are the
                       // feed's story rail and the picker sheet.
-                      onTap: () => _comingSoon(context),
+                      onTap: () => comingSoon(context),
                       child: Row(
                         children: [
                           for (final t in const ['23:41', '00:12'])
@@ -154,7 +154,7 @@ class PartyDetailSheet extends StatelessWidget {
                       ),
                     ),
                     OutlinedButton(
-                      onPressed: () => _comingSoon(context),
+                      onPressed: () => comingSoon(context),
                       style: OutlinedButton.styleFrom(
                         side: BorderSide(color: Colors.white.withValues(alpha: 0.16)),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(99)),
@@ -220,7 +220,7 @@ class PartyDetailSheet extends StatelessWidget {
                         if (priv) ...[
                           Expanded(
                             child: OutlinedButton(
-                              onPressed: () => _comingSoon(context),
+                              onPressed: () => comingSoon(context),
                               style: OutlinedButton.styleFrom(
                                 padding: const EdgeInsets.symmetric(vertical: 12),
                                 side: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
@@ -235,7 +235,7 @@ class PartyDetailSheet extends StatelessWidget {
                         ],
                         Expanded(
                           child: OutlinedButton(
-                            onPressed: () => _comingSoon(context),
+                            onPressed: () => comingSoon(context),
                             style: OutlinedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 12),
                               side: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
@@ -398,7 +398,12 @@ Widget _cta({
   );
 }
 
-void _comingSoon(BuildContext context) {
+/// Public so [PartyCard]'s group-chat pill can share it.
+///
+/// Both doors are placeholders for the same reason — `mpParties` keys are
+/// strings, not uuids, so neither has a `parties.id` to hand [ChatScreen] —
+/// and they should stop being placeholders in the same commit.
+void comingSoon(BuildContext context) {
   ScaffoldMessenger.of(context).showSnackBar(
     const SnackBar(content: Text('Coming soon'), behavior: SnackBarBehavior.floating),
   );
