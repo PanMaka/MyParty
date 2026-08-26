@@ -146,8 +146,10 @@ because one would not hold.** Decided Phase 16b.
 
 - **The write policy.** `rsvps` INSERT and UPDATE both call
   `rsvp_status_allowed(party_id, status)`, which is false for `'interested'`
-  on a private party. So the interested counter on a private row can never be
-  non-zero — the rule is upstream of the counter rather than applied to it.
+  on a private party, so no private row carries an interested *status*.
+  This used to imply that `interested_count` on a private row could never be
+  non-zero; **Phase 17 retired that** (see below) and the read RPCs are now the
+  only thing protecting the number.
   The term is in the UPDATE's **`with check`**, not its `using`: `using` sees
   the OLD row, so spelled there it would test the status being replaced and
   wave through exactly the write it forbids (`going` → `interested`).
@@ -186,7 +188,55 @@ adding one is a red test rather than a silent widening.
 is a property of the CALLER, not of the party, so suppressing it would break
 the button label while protecting nothing — the viewer already knows their own
 answer. `parties.going_count` is likewise untouched and still maintained; the
-host has a guest list, and `party_tier` still reads it.
+host has a guest list. (`party_tier` does **not** read it, contrary to what
+this said before Phase 17 — `party_tier` is a plain column set by the host in
+`create_party_with_invites` and only ever read back as a zoom filter. Nothing
+in the schema derives a number from either counter.)
+
+**`interested_count` INCLUDES everyone going — it is a superset, not a
+sibling.** Phase 17 (`20260826093437`). Going implies interested: a party with
+30 going and 0 interested was reporting zero interest in a full room. The
+change is entirely in `sync_party_rsvp_counters` plus a backfill
+(`interested_count += going_count`); `going_count` is untouched in meaning and
+value, and `rsvp_status` is untouched — a row is still exactly one of the two,
+and anything reading `r.status` is unaffected, `get_profile_stats` included
+(it counts `rsvps` rows, not these columns).
+
+Three things about it that look wrong without the argument:
+
+- **A status flip moves `going_count` alone.** Not "both counters move" —
+  interested membership does not change in *either* direction, because the
+  person was already counted before the flip and still is after it. The
+  UPDATE branch therefore touches one column. A partial revert that increments
+  both on insert but still decrements interested on the flip passes every
+  insert assertion and drifts the counter down on every commit;
+  `24_going_implies_interested.test.sql` asserts both directions separately
+  for that reason.
+- **Private parties are included, and that retired an invariant on purpose.**
+  A private party with one going now has `interested_count = 1`, where
+  20260825090050 previously made 0 the only reachable value. Nothing transmits
+  it — 20260825090051 nulls **both** counters on a private row and is
+  untouched — so the suppression that actually protects the number is intact.
+  The alternative, incrementing interested only on public parties, buys the
+  invariant back for a `parties.is_private` lookup on every rsvp write and a
+  rule with two shapes. `22_private` asserts the new value directly so nobody
+  "restores" the old one.
+- **The backfill is a blind delta, not a recount.** A recount from `rsvps`
+  would be self-healing, which is worse here: it would paper over any
+  pre-existing drift at the one moment that drift is worth finding. The
+  migration ends with a `going_count > interested_count` check that fails the
+  apply.
+
+**Nothing sums the two, and nothing may start.** Surveyed at Phase 17: all five
+readers (`get_parties_near_user`, `search_parties`, `get_hosted_parties`,
+`get_party_chats`, `export_account_data`) pass the columns through untouched,
+and no Dart surface adds them. Two client consequences were accepted rather
+than fixed: the **map pin grows before a party starts**, since
+`MpDropGeometry.forPin` sizes on `attendeeCountAt` which is `interested_count`
+pre-live (saturates at 100, so only parties under that move), and
+**`MapPinSheet` prints both side by side**, which now shows overlapping sets —
+"12 here now" beside "46 interested" means 46 of whom 12 arrived, not 58. The
+doc comments on both were corrected; the UI was not.
 
 **Red means private; `AppColors.destructive` means destructive.** Private moved
 pink → `AppColors.private` (#F23557) across the map bubble, `PrivacyBadge` and

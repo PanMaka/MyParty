@@ -4,9 +4,18 @@
 -- Two independent rules that together make "a private party shows no counts"
 -- true at the source rather than by client convention:
 --   1. 20260825090050 -- the rsvps write policies refuse 'interested' on a
---      private party, so the interested counter can never be non-zero there.
+--      private party, so no private row carries an interested STATUS.
 --   2. 20260825090051 -- get_parties_near_user and search_parties return NULL
 --      for both counters on a private row, so the figure is not transmitted.
+--
+-- Rule 1 used to imply a third thing -- that interested_count on a private row
+-- could never be non-zero -- and since 20260826093437 it no longer does.
+-- interested_count now counts EVERY rsvp, so a private party with one going
+-- has interested_count = 1. That retirement is deliberate, and rule 2 is what
+-- was actually protecting the number: it nulls BOTH counters on a private row,
+-- unchanged by that migration and still asserted below. The private-row
+-- counter value is asserted directly further down so the change is recorded
+-- here rather than only in the migration.
 --
 -- Each is asserted on its own, and each is asserted NEGATIVELY (who cannot
 -- write / what is not returned), because both are only interesting in the
@@ -17,7 +26,7 @@
 -- PARTY_PUBLIC  'aaaaaaaa-...0002' "Syntagma Afterparty", host = host.
 begin;
 set search_path to public, extensions;
-select plan(21);
+select plan(22);
 
 -- ===========================================================================
 -- The enum still has exactly two values.
@@ -155,11 +164,15 @@ update public.rsvps set status = 'going'
 where party_id = 'aaaaaaaa-0000-0000-0000-000000000002'
 and user_id = '22222222-2222-2222-2222-222222222222';
 
+-- (1, 1), not (0, 1). The transition moves going_count alone since
+-- 20260826093437: the person was counted as interested before saying going and
+-- is still counted after. Reading this as "both counters moving" is what the
+-- old assertion said, and it is now exactly backwards.
 select results_eq(
   $$ select interested_count, going_count from public.parties
      where id = 'aaaaaaaa-0000-0000-0000-000000000002' $$,
-  $$ values (0, 1) $$,
-  'a public party switches interested -> going in place, both counters moving'
+  $$ values (1, 1) $$,
+  'a public party switches interested -> going with going_count alone moving'
 );
 
 -- ===========================================================================
@@ -195,7 +208,7 @@ select results_eq(
   $$ select going_count, interested_count
      from public.get_parties_near_user(23.7351, 37.9758, 500)
      where party_id = 'aaaaaaaa-0000-0000-0000-000000000002' $$,
-  $$ values (1, 0) $$,
+  $$ values (1, 1) $$,
   'get_parties_near_user still transmits real counters on a public party'
 );
 
@@ -212,19 +225,38 @@ select results_eq(
 select results_eq(
   $$ select going_count, interested_count from public.search_parties('syntagma')
      where party_id = 'aaaaaaaa-0000-0000-0000-000000000002' $$,
-  $$ values (1, 0) $$,
+  $$ values (1, 1) $$,
   'search_parties still transmits real counters on a public party'
 );
 
--- The columns themselves are untouched: the HOST still has a guest list, and
--- party_tier still reads them. Suppression is at the transmission boundary,
--- not in the data.
+-- The columns themselves are untouched: the HOST still has a guest list.
+-- Suppression is at the transmission boundary, not in the data.
+--
+-- (This comment used to add "and party_tier still reads them". It does not --
+-- party_tier is a plain column set by the host in create_party_with_invites
+-- and only ever read back as a zoom-tier filter. Nothing in the schema derives
+-- a number from these two.)
 select tests.authenticate_as('11111111-1111-1111-1111-111111111111'); -- host
 
 select is(
   (select going_count from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000001'),
   1,
   'parties.going_count is still maintained on a private party -- the host has a guest list'
+);
+
+-- The retired invariant, asserted in its new form rather than deleted.
+--
+-- Before 20260826093437 this was 0 and could not be anything else, because
+-- 'interested' is an illegal status here. It is now 1: interested_count counts
+-- every rsvp regardless of status, private parties included. Nothing
+-- transmits it -- the NULL assertions above are what protect the number -- and
+-- asserting the value here is what stops somebody "restoring" the old
+-- guarantee by special-casing private parties in the trigger, which would put
+-- a party lookup on every rsvp write to defend a figure nobody can read.
+select is(
+  (select interested_count from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000001'),
+  1,
+  'interested_count on a private party counts the going rsvp -- the old "always 0" invariant is retired, not broken'
 );
 
 select tests.clear_authentication();

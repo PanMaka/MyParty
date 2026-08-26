@@ -74,9 +74,14 @@ select results_eq(
 );
 
 -- Tied to the trigger rather than to the literal 1 above: flipping the same
--- rsvp to 'going' must move the number from one column to the other, which is
--- the only thing that proves the map is reading sync_party_rsvp_counters and
--- not a coincidence.
+-- rsvp to 'going' must move going_count, which is the only thing that proves
+-- the map is reading sync_party_rsvp_counters and not a coincidence.
+--
+-- It used to say the number moved BETWEEN the columns, and that stopped being
+-- true at 20260826093437: interested_count is now a superset of going_count,
+-- so the flip lifts going_count to 1 and leaves interested_count where it was.
+-- The assertion still does its job -- one of the two numbers changes in
+-- response to a write, and it is the payload that reports it.
 select tests.authenticate_as('33333333-3333-3333-3333-333333333333');
 update public.rsvps set status = 'going'
 where party_id = 'dddddddd-1111-0000-0000-000000000001'
@@ -87,7 +92,7 @@ select results_eq(
   $$ select interested_count, going_count
      from public.get_parties_near_user(23.7348, 37.9755, 500, 500)
      where party_id = 'dddddddd-1111-0000-0000-000000000001' $$,
-  $$ values (0, 1) $$,
+  $$ values (1, 1) $$,
   'both counters track the rsvp counter trigger, not a snapshot'
 );
 

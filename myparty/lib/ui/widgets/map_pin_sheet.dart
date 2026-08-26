@@ -263,8 +263,13 @@ class _MapPinSheetState extends State<MapPinSheet> {
   /// Both counters, not just the tense-appropriate one.
   ///
   /// The pin shows one number because it has room for one; the sheet is where
-  /// "12 here now" and "34 interested" can both be true and both be worth
-  /// knowing. The tense still decides which one leads.
+  /// both are worth knowing. The tense still decides which one leads.
+  ///
+  /// They OVERLAP, and did not always. Since 20260826093437 `interested_count`
+  /// includes everyone going, so "12 here now" alongside "46 interested" means
+  /// 46 people of whom 12 have arrived — not 58. Nothing here adds them and
+  /// nothing should; if this ever grows a total, it is `interestedCount`
+  /// alone.
   /// PUBLIC parties only. [count] is non-null by the caller's guard, and the
   /// two counters it reads alongside are non-null for the same reason: the
   /// server nulls all three together or none of them.

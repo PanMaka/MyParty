@@ -153,7 +153,13 @@ class MapPartyPin {
 
   /// The number a pin prints, and it is a different number depending on the
   /// tense: a live party reports who is *inside* it ("N here now"), one that
-  /// has not started reports who is *interested* ("N interested"). Both
+  /// has not started reports who is *interested* ("N interested").
+  ///
+  /// Since 20260826093437 the second of those is a SUPERSET of the first —
+  /// `interested_count` counts every rsvp, going included — so the pre-live
+  /// number is now the larger one and the pin shrinks when the party starts.
+  /// That is the intended reading (interest before, presence during), but it
+  /// means the two are no longer disjoint sets and must never be summed. Both
   /// surfaces — [MpMapPin] and [MapPinSheet] — pair this with [live], so the
   /// count and its label can never disagree about which of the two it is.
   ///

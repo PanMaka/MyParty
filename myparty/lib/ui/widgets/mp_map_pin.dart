@@ -124,8 +124,15 @@ class MpPinMetrics {
   /// which is why nothing here clips, and why the truncation test the chip
   /// needed is gone rather than ported.
   ///
-  /// Four digits is reachable only by a live party's `going_count`, and only
-  /// on a saturated bubble, so it gets the tightest step.
+  /// Four digits is reachable only on a saturated bubble, so it gets the
+  /// tightest step.
+  ///
+  /// It used to say "only by a live party's `going_count`", and 20260826093437
+  /// made that false in the safe direction: `interested_count` now includes
+  /// everyone going, so it is >= `going_count` on every row and a PRE-live pin
+  /// is the one that reaches four digits first. Nothing here needed changing —
+  /// the saturation rule is stated in terms of the count, not of which counter
+  /// it came from — but the reasoning is no longer what the comment said.
   static double labelSizeFor(double radius, int digits) {
     if (digits >= 4) return radius * 0.48;
     if (digits == 3) return radius * 0.62;

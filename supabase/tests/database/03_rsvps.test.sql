@@ -4,7 +4,7 @@
 -- new columns on get_parties_near_user.
 begin;
 set search_path to public, extensions;
-select plan(13);
+select plan(14);
 
 -- PARTY_PUBLIC ('aaaaaaaa-0000-0000-0000-000000000002', "Syntagma
 -- Afterparty"): public, hosted by host.
@@ -73,10 +73,17 @@ select is(
   'going_count on the public party ticks up by 1 on an interested->going update'
 );
 
+-- The assertion this replaced said 0, and said it correctly until
+-- 20260826093437: interested_count used to be a SIBLING of going_count and the
+-- transition moved the person across. It is now a superset, so the flip leaves
+-- it alone -- the stranger was interested before saying going and still is.
+-- Full coverage of the new rule is in 23_going_implies_interested; this stays
+-- here because a reader of this file would otherwise still be told the two
+-- counters are disjoint.
 select is(
   (select interested_count from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
-  0,
-  'interested_count on the public party ticks back down on the same update'
+  1,
+  'interested_count does NOT tick back down on the same update -- going implies interested'
 );
 
 delete from public.rsvps
@@ -87,6 +94,15 @@ select is(
   (select going_count from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
   0,
   'going_count on the public party ticks back down after the rsvp is deleted'
+);
+
+-- The delete has to take the row out of BOTH sets. A delete branch that
+-- decremented only going_count would leave interested_count permanently
+-- inflated, and nothing else in this file would notice.
+select is(
+  (select interested_count from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
+  0,
+  'interested_count ticks back down too -- the delete leaves both sets'
 );
 
 select tests.authenticate_as('11111111-1111-1111-1111-111111111111'); -- host
