@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
 import 'package:myparty/data/party_repository.dart';
-import 'package:myparty/models/mp_party.dart';
+import 'package:myparty/models/party_list_item.dart';
 import 'package:myparty/models/rsvp_party.dart';
 import 'package:myparty/state/mp_store.dart';
 import 'package:myparty/ui/screens/events_screen.dart';
@@ -16,16 +16,106 @@ import 'package:myparty/ui/widgets/party_detail_sheet.dart';
 /// lazily — no client is ever constructed here, the same trick `map_test.dart`
 /// relies on.
 class _FakePartyRepository extends PartyRepository {
-  _FakePartyRepository(this.rsvps, {this.fail = false});
+  _FakePartyRepository(
+    this.rsvps, {
+    this.fail = false,
+    this.pages = const {},
+    this.listFails = false,
+  });
 
   final List<RsvpParty> rsvps;
   final bool fail;
+
+  /// One canned page per sort, so a test can assert that changing the sort
+  /// REFETCHES rather than reorders what is already loaded. Keyed by sort
+  /// because that is the whole contract under test: the order is the server's
+  /// answer, not a local `..sort()`.
+  final Map<PartySort, List<PartyListItem>> pages;
+  final bool listFails;
+
+  /// Every sort the screen asked for, in order. The assertion that the sort
+  /// reached the server at all lives on this.
+  final List<PartySort> sortsRequested = [];
 
   @override
   Future<List<RsvpParty>> fetchMyRsvps() async {
     if (fail) throw Exception('nope');
     return rsvps;
   }
+
+  @override
+  Future<PartyListPage> fetchPartiesList({
+    PartySort sort = PartySort.soonest,
+    int limit = 30,
+    PartyListCursor? cursor,
+  }) async {
+    sortsRequested.add(sort);
+    if (listFails) throw Exception('nope');
+    // Always a short page, so the screen treats it as the end of the list and
+    // does not page forever against a fake that would happily repeat itself.
+    return PartyListPage(items: pages[sort] ?? const [], cursor: null);
+  }
+
+  @override
+  Future<Map<String, String>> signedListCoverUrls(
+    List<PartyListItem> items, {
+    int expiresIn = 3600,
+  }) async =>
+      {};
+
+  final List<({String partyId, MpRsvp status, MpRsvp? current})> rsvpWrites = [];
+
+  @override
+  Future<void> setRsvp({
+    required String partyId,
+    required MpRsvp status,
+    required MpRsvp? current,
+  }) async {
+    rsvpWrites.add((partyId: partyId, status: status, current: current));
+  }
+}
+
+/// A row of the ALL PARTIES list.
+///
+/// [interested] and [going] default to NON-null, and a PRIVATE item is built
+/// with both null -- which is what the server actually sends for a private row
+/// (20260825090051). Building a private fixture with numbers would let a card
+/// that forgot to hide them pass.
+PartyListItem _item({
+  required String id,
+  required String title,
+  bool isPrivate = false,
+  bool isLive = false,
+  DateTime? startsAt,
+  int? interested = 12,
+  int? going = 4,
+  MpRsvp? myRsvp,
+  String host = 'someone',
+  String? area = 'Psyrri',
+  bool isInvited = false,
+  int sortGroup = 1,
+  int sortRank = 0,
+}) {
+  return PartyListItem(
+    partyId: id,
+    title: title,
+    description: 'A description.',
+    startsAt: startsAt ?? DateTime.now().add(const Duration(hours: 5)),
+    endsAt: null,
+    area: area,
+    coverPath: null,
+    isPrivate: isPrivate,
+    isSponsored: false,
+    hostId: '11111111-1111-1111-1111-111111111111',
+    hostUsername: host,
+    isLive: isLive,
+    goingCount: isPrivate ? null : going,
+    interestedCount: isPrivate ? null : interested,
+    myRsvp: myRsvp,
+    isInvited: isInvited,
+    sortGroup: isPrivate ? 0 : sortGroup,
+    sortRank: sortRank,
+  );
 }
 
 RsvpParty _rsvp({
@@ -47,14 +137,17 @@ RsvpParty _rsvp({
   );
 }
 
-/// One PartyCard on its own, with a real store behind it.
+/// One PartyCard on its own.
 ///
-/// `autoDecay: false` because MpStore otherwise runs a 2.6s periodic timer
-/// that pumpAndSettle would wait on forever.
-Widget _card(String partyId, {MpStore? store}) {
-  return ChangeNotifierProvider<MpStore>(
-    create: (_) => store ?? MpStore(autoDecay: false),
-    child: MaterialApp(home: Scaffold(body: SingleChildScrollView(child: PartyCard(partyId: partyId)))),
+/// No MpStore any more: the card is handed an immutable row and reports taps
+/// through [onRsvp], so there is no shared mutable state left for it to read.
+Widget _card(PartyListItem item, {void Function(MpRsvp)? onRsvp}) {
+  return MaterialApp(
+    home: Scaffold(
+      body: SingleChildScrollView(
+        child: PartyCard(item: item, onRsvp: onRsvp ?? (_) {}),
+      ),
+    ),
   );
 }
 
@@ -112,31 +205,35 @@ void main() {
       expect(button.width, lessThan(screen.width * 0.4));
     });
 
-    testWidgets('the mock party list renders English content', (tester) async {
-      await tester.pumpWidget(_host(_FakePartyRepository(const [])));
+    testWidgets('the party list renders real rows in English', (tester) async {
+      // Was "the mock party list": it asserted over every field of every
+      // mpParties entry, which was the right test while the data was a const
+      // map shipped in the binary. There is no such data any more -- the rows
+      // come from get_parties_list -- so what is left to assert here is the
+      // CHROME, which is still ours to get wrong.
+      await tester.pumpWidget(_host(_FakePartyRepository(const [], pages: {
+        PartySort.soonest: [
+          _item(id: 'p1', title: 'Techno Monday', host: 'vinyl_room'),
+          _item(id: 'p2', title: 'Rooftop in Koukaki', isPrivate: true),
+        ],
+      })));
       await tester.pumpAndSettle();
 
-      // 'ALL PARTIES' is the default tab, so the mock cards are on screen.
-      // They sort by sortKey, so Maria's is the first one rendered; the rest
-      // are below the 600px test viewport and have to be scrolled to.
-      expect(find.byType(PartyCard), findsWidgets);
-      expect(find.text('Maria’s Birthday'), findsOneWidget);
-      expect(find.text('HYPE NOW'), findsWidgets);
+      expect(find.byType(PartyCard), findsNWidgets(2));
+      expect(find.text('Techno Monday'), findsOneWidget);
+      expect(find.text('@vinyl_room · Psyrri'), findsOneWidget);
 
-      await tester.scrollUntilVisible(find.text('Rooftop in Koukaki'), 300);
-      expect(find.text('Rooftop in Koukaki'), findsOneWidget);
-      expect(find.text('Dimitris Papadeas'), findsOneWidget);
-      // The relative time the brief called out by name.
-      expect(find.text('Tonight 23:30'), findsWidgets);
+      // The hype bar went with mpParties -- a percentage with no column behind
+      // it. What stands in its place is the real counter it was a picture of.
+      expect(find.text('HYPE NOW'), findsNothing);
+      expect(find.textContaining('%'), findsNothing);
+      expect(find.text('12 interested'), findsOneWidget);
 
-      // And nothing Greek survived in the data behind them.
       final greek = RegExp(r'[Ͱ-Ͽἀ-῿]');
-      for (final party in mpParties.values) {
-        for (final s in [party.name, party.host, party.hostSub, party.sub,
-                         party.time, party.dist, party.crowd, party.imgLabel,
-                         party.posters, party.desc, party.note]) {
-          expect(greek.hasMatch(s), isFalse, reason: '"$s" is still Greek');
-        }
+      for (final w in tester.widgetList<Text>(find.byType(Text))) {
+        final t = w.data;
+        if (t == null) continue;
+        expect(greek.hasMatch(t), isFalse, reason: '"$t" is still Greek');
       }
     });
 
@@ -210,13 +307,10 @@ void main() {
     });
   });
 
-  // 'maria' and 'taratsa' are private in the mock data; 'vinyl' is public.
   group('actions and counts differ by privacy', () {
     testWidgets('a PUBLIC card offers both answers', (tester) async {
-      // 'vinyl' is seeded as interested, so that button carries the tick and
-      // the other does not -- both are present either way, which is the point:
-      // switching has to stay one tap.
-      await tester.pumpWidget(_card('vinyl'));
+      await tester.pumpWidget(_card(
+        _item(id: 'p1', title: 'Techno Monday', myRsvp: MpRsvp.interested)));
       await tester.pumpAndSettle();
 
       expect(find.text('Going'), findsOneWidget);
@@ -228,7 +322,7 @@ void main() {
       // The server refuses an 'interested' row on a private party
       // (20260825090050). Offering the button would be an affordance that
       // comes back 42501, so its ABSENCE is the assertion that matters.
-      await tester.pumpWidget(_card('maria'));
+      await tester.pumpWidget(_card(_item(id: 'p2', title: 'Rooftop', isPrivate: true)));
       await tester.pumpAndSettle();
 
       expect(find.text('Coming'), findsOneWidget);
@@ -236,61 +330,80 @@ void main() {
       expect(find.text('Going'), findsNothing);
     });
 
-    testWidgets('a PRIVATE card shows no hype and no attendance', (tester) async {
-      await tester.pumpWidget(_card('maria'));
+    testWidgets('a PRIVATE card shows no attendance at all', (tester) async {
+      await tester.pumpWidget(_card(_item(id: 'p2', title: 'Rooftop', isPrivate: true)));
       await tester.pumpAndSettle();
 
-      // The hype bar is removed, not blanked: a percentage that moves when
-      // people join is attendance one derivative removed.
+      // Both counters are NULL over the wire for a private row, so there is
+      // no number here to forget to hide -- and none of the three spellings
+      // the old hype bar used is on screen either.
+      expect(find.textContaining('interested'), findsNothing);
+      expect(find.textContaining('here now'), findsNothing);
       expect(find.text('HYPE NOW'), findsNothing);
-      expect(find.textContaining('%'), findsNothing);
       expect(find.byIcon(Icons.local_fire_department), findsNothing);
     });
 
-    testWidgets('a PUBLIC card still shows hype', (tester) async {
-      await tester.pumpWidget(_card('vinyl'));
+    testWidgets('a PUBLIC card shows the real counter, labelled by tense', (tester) async {
+      await tester.pumpWidget(_card(_item(id: 'p1', title: 'Techno Monday')));
       await tester.pumpAndSettle();
+      expect(find.text('12 interested'), findsOneWidget);
 
-      expect(find.text('HYPE NOW'), findsOneWidget);
-      expect(find.byIcon(Icons.local_fire_department), findsOneWidget);
+      // Live flips which counter is read AND the noun that goes with it, so
+      // the number and its label cannot disagree about which one it is.
+      await tester.pumpWidget(_card(_item(id: 'p1', title: 'Techno Monday', isLive: true)));
+      await tester.pumpAndSettle();
+      expect(find.text('4 here now'), findsOneWidget);
+      expect(find.text('12 interested'), findsNothing);
     });
 
-    testWidgets('a public party switches between the two answers', (tester) async {
-      final store = MpStore(autoDecay: false);
-      await tester.pumpWidget(_card('vinyl', store: store));
+    testWidgets('answering reports the tap up, it does not mutate a store', (tester) async {
+      final taps = <MpRsvp>[];
+      await tester.pumpWidget(_card(
+        _item(id: 'p1', title: 'Techno Monday', myRsvp: MpRsvp.interested),
+        onRsvp: taps.add,
+      ));
       await tester.pumpAndSettle();
-
-      // Seeded as interested.
-      expect(store.rsvpFor('vinyl'), MpRsvp.interested);
-      expect(find.text('Interested ✓'), findsOneWidget);
 
       await tester.tap(find.text('Going'));
       await tester.pumpAndSettle();
 
-      // Switched in place -- the mock analogue of `update rsvps set status`,
-      // which the counter trigger handles as one delta rather than a
-      // delete-then-insert.
-      expect(store.rsvpFor('vinyl'), MpRsvp.going);
-      expect(find.text('Going ✓'), findsOneWidget);
-      expect(find.text('Interested'), findsOneWidget);
+      expect(taps, [MpRsvp.going]);
     });
 
-    testWidgets('tapping the selected answer withdraws it entirely', (tester) async {
-      // Un-tap is a DELETE of the row, not a third enum value. `rsvp_status`
-      // has exactly two values and 22_private_party_counts_and_rsvp asserts
-      // it stays that way -- so "not going" can only be the absence of a row.
-      final store = MpStore(autoDecay: false);
-      await tester.pumpWidget(_card('taratsa', store: store));
+    testWidgets('tapping the selected answer reports it, which is the un-RSVP', (tester) async {
+      // Un-tap is a DELETE of the row, not a third enum value -- rsvp_status
+      // has exactly two values and 22_private asserts it stays that way. The
+      // card reports the SAME status it already holds, and the repository
+      // turns "same as current" into the delete.
+      final taps = <MpRsvp>[];
+      await tester.pumpWidget(_card(
+        _item(id: 'p2', title: 'Rooftop', isPrivate: true, myRsvp: MpRsvp.going),
+        onRsvp: taps.add,
+      ));
       await tester.pumpAndSettle();
 
-      expect(store.rsvpFor('taratsa'), MpRsvp.going);
       expect(find.text('Coming ✓'), findsOneWidget);
-
       await tester.tap(find.text('Coming ✓'));
       await tester.pumpAndSettle();
 
-      expect(store.rsvpFor('taratsa'), isNull);
-      expect(find.text('Coming'), findsOneWidget);
+      expect(taps, [MpRsvp.going]);
+    });
+
+    testWidgets('the screen turns a repeat answer into a withdrawal', (tester) async {
+      // The other half of the pair above: the card reports, the SCREEN decides
+      // what it costs. `current` is what tells the repository this is a delete.
+      final repo = _FakePartyRepository(const [], pages: {
+        PartySort.soonest: [_item(id: 'p9', title: 'Techno Monday', myRsvp: MpRsvp.going)],
+      });
+      await tester.pumpWidget(_host(repo));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Going ✓'));
+      await tester.pumpAndSettle();
+
+      expect(repo.rsvpWrites.single.partyId, 'p9');
+      expect(repo.rsvpWrites.single.status, MpRsvp.going);
+      expect(repo.rsvpWrites.single.current, MpRsvp.going);
     });
 
     testWidgets('only a PRIVATE rsvp row opens a chat', (tester) async {
@@ -320,9 +433,9 @@ void main() {
     });
 
     testWidgets('the group chat entry is absent on a public detail sheet', (tester) async {
-      await tester.pumpWidget(_card('vinyl'));
+      await tester.pumpWidget(_card(_item(id: 'p1', title: 'Techno Monday')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Techno Monday · DJ Iris'));
+      await tester.tap(find.text('Techno Monday'));
       await tester.pumpAndSettle();
 
       expect(find.byType(PartyDetailSheet), findsOneWidget);
@@ -333,14 +446,14 @@ void main() {
     });
 
     testWidgets('the group chat entry is present on a private detail sheet', (tester) async {
-      await tester.pumpWidget(_card('maria'));
+      await tester.pumpWidget(_card(_item(id: 'p2', title: 'Rooftop', isPrivate: true)));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Maria’s Birthday'));
+      await tester.tap(find.text('Rooftop'));
       await tester.pumpAndSettle();
 
-      // Scoped to the SHEET. The card underneath now carries its own 'Group
-      // chat' pill, so an unscoped find.text matches twice and the assertion
-      // would pass on a sheet that had lost its button entirely.
+      // Scoped to the SHEET. The card underneath carries its own 'Group chat'
+      // pill, so an unscoped find.text matches twice and the assertion would
+      // pass on a sheet that had lost its button entirely.
       expect(
         find.descendant(of: find.byType(PartyDetailSheet), matching: find.text('Group chat')),
         findsOneWidget,
@@ -349,58 +462,164 @@ void main() {
     });
 
     testWidgets('the card carries a group chat pill on a private party only', (tester) async {
-      await tester.pumpWidget(_card('maria'));
+      await tester.pumpWidget(_card(_item(id: 'p2', title: 'Rooftop', isPrivate: true)));
       await tester.pumpAndSettle();
 
-      // The card, before anything is tapped -- no sheet is open yet, so this
-      // is unambiguously the pill.
       expect(find.byType(PartyDetailSheet), findsNothing);
       expect(find.text('Group chat'), findsOneWidget);
       expect(find.byIcon(Icons.forum_outlined), findsOneWidget);
     });
 
-    testWidgets('a public card carries no chat pill and no comment count', (tester) async {
-      await tester.pumpWidget(_card('vinyl'));
+    testWidgets('a public card carries no chat pill', (tester) async {
+      await tester.pumpWidget(_card(_item(id: 'p1', title: 'Techno Monday')));
       await tester.pumpAndSettle();
 
       expect(find.text('Group chat'), findsNothing);
       expect(find.byIcon(Icons.forum_outlined), findsNothing);
-      // '34' was MpParty.commentCount for this party -- a counter with no
-      // parties.comment_count behind it, deleted with the pill rather than
-      // moved onto the private one. A bare number reappearing here means the
-      // mock counter came back.
-      expect(find.text('34'), findsNothing);
     });
 
-    testWidgets('the private detail sheet hides the crowd chip and offers one action', (tester) async {
-      await tester.pumpWidget(_card('maria'));
+    testWidgets('the private detail sheet hides the attendance chip and offers one action', (tester) async {
+      await tester.pumpWidget(_card(_item(id: 'p2', title: 'Rooftop', isPrivate: true)));
       await tester.pumpAndSettle();
 
-      // The cover opens the sheet. Tap the TITLE rather than the card's
-      // centre -- a public card is taller, so its centre falls below the
-      // cover's GestureDetector and the two cases would not be comparable.
-      await tester.tap(find.text('Maria’s Birthday'));
+      await tester.tap(find.text('Rooftop'));
       await tester.pumpAndSettle();
 
       expect(find.byType(PartyDetailSheet), findsOneWidget);
       expect(find.text('Coming'), findsWidgets);
       expect(find.text('Interested'), findsNothing);
-      // '31 inside' is the mock crowd string for this party.
-      expect(find.text('31 inside'), findsNothing);
+      expect(find.textContaining('interested'), findsNothing);
+      expect(find.textContaining('here now'), findsNothing);
+      // 'posters' ("11 people posting") did not survive mpParties -- no column
+      // answers it. Asserted so it cannot come back as another invented count.
       expect(find.textContaining('people posting'), findsNothing);
     });
 
-    testWidgets('the public detail sheet still shows the crowd chip and both actions', (tester) async {
-      await tester.pumpWidget(_card('vinyl'));
+    testWidgets('the public detail sheet shows the attendance chip and both actions', (tester) async {
+      await tester.pumpWidget(_card(_item(id: 'p1', title: 'Techno Monday')));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Techno Monday · DJ Iris'));
+      await tester.tap(find.text('Techno Monday'));
       await tester.pumpAndSettle();
 
       expect(find.byType(PartyDetailSheet), findsOneWidget);
-      expect(find.text('180 inside · 312 interested'), findsOneWidget);
-      expect(find.text('46 people posting'), findsOneWidget);
+      expect(find.text('12 interested'), findsWidgets);
       expect(find.text('Going'), findsWidgets);
+    });
+  });
+
+  // The feature the RPC exists for. These assert that the ORDER is the
+  // server's answer and that changing it goes back to the server -- a
+  // client-side sort over a loaded page would satisfy any assertion about
+  // what is on screen and none of these.
+  group('the ALL PARTIES sort is the servers', () {
+    testWidgets('both sort options are offered, soonest first', (tester) async {
+      final repo = _FakePartyRepository(const [], pages: {
+        PartySort.soonest: [_item(id: 'p1', title: 'A')],
+      });
+      await tester.pumpWidget(_host(repo));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Soonest'), findsOneWidget);
+      expect(find.text('Most interested'), findsOneWidget);
+      expect(repo.sortsRequested, [PartySort.soonest]);
+    });
+
+    testWidgets('picking a sort REFETCHES rather than reordering', (tester) async {
+      // The two pages hold different ROWS, not the same rows in a different
+      // order -- so a screen that sorted locally would still be showing the
+      // soonest row after the tap, and this fails.
+      final repo = _FakePartyRepository(const [], pages: {
+        PartySort.soonest: [_item(id: 'p1', title: 'Soonest row')],
+        PartySort.interested: [_item(id: 'p2', title: 'Most interested row')],
+      });
+      await tester.pumpWidget(_host(repo));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Soonest row'), findsOneWidget);
+
+      await tester.tap(find.text('Most interested'));
+      await tester.pumpAndSettle();
+
+      expect(repo.sortsRequested, [PartySort.soonest, PartySort.interested]);
+      expect(find.text('Most interested row'), findsOneWidget);
+      expect(find.text('Soonest row'), findsNothing);
+    });
+
+    testWidgets('re-picking the sort already selected does not refetch', (tester) async {
+      final repo = _FakePartyRepository(const [], pages: {
+        PartySort.soonest: [_item(id: 'p1', title: 'A')],
+      });
+      await tester.pumpWidget(_host(repo));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Soonest'));
+      await tester.pumpAndSettle();
+
+      expect(repo.sortsRequested, [PartySort.soonest]);
+    });
+
+    testWidgets('the order on screen is the order the server returned', (tester) async {
+      // Deliberately NOT sorted by any field the client could sort on: the
+      // interested counts ascend down the list while the titles descend, so a
+      // local sort on either field produces a different result.
+      final repo = _FakePartyRepository(const [], pages: {
+        // Two rows, not three: the test viewport is 600px and the cards are
+        // ~250px, so a third is never built by the lazy ListView and could not
+        // be asserted on without scrolling. Two is enough -- the counts ascend
+        // while the list descends, so a local sort by either field flips them.
+        PartySort.interested: [
+          _item(id: 'p1', title: 'Zebra', interested: 1),
+          _item(id: 'p2', title: 'Yak', interested: 5),
+        ],
+      });
+      await tester.pumpWidget(_host(repo));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Most interested'));
+      await tester.pumpAndSettle();
+
+      final titles = tester
+          .widgetList<Text>(find.byType(Text))
+          .map((t) => t.data)
+          .where((t) => t == 'Zebra' || t == 'Yak')
+          .toList();
+      expect(titles, ['Zebra', 'Yak']);
+    });
+
+    testWidgets('a private row in the interested list shows no count', (tester) async {
+      // The side channel, from the client end. The server groups private rows
+      // rather than ranking them and sends NULL for both counters; this is the
+      // assertion that the card does not invent one back.
+      final repo = _FakePartyRepository(const [], pages: {
+        PartySort.interested: [
+          _item(id: 'p2', title: 'Private one', isPrivate: true),
+          _item(id: 'p1', title: 'Public one', interested: 40),
+        ],
+      });
+      await tester.pumpWidget(_host(repo));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Most interested'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Private one'), findsOneWidget);
+      expect(find.text('40 interested'), findsOneWidget);
+      // The private card is ABOVE the public one, so a card that printed a 0
+      // would be the first attendance line on screen -- exactly the confident
+      // zero that 20260825090051 returns NULL to prevent. Asserted as exact
+      // strings rather than textContaining: the sort chip itself reads "Most
+      // interested", so a substring match finds it and passes either way.
+      expect(find.text('0 interested'), findsNothing);
+      expect(find.text('0 here now'), findsNothing);
+      expect(find.textContaining('here now'), findsNothing);
+    });
+
+    testWidgets('a failed first page is an error state with a retry', (tester) async {
+      final repo = _FakePartyRepository(const [], listFails: true);
+      await tester.pumpWidget(_host(repo));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('load the parties'), findsOneWidget);
+      expect(find.text('Try again'), findsOneWidget);
     });
   });
 }

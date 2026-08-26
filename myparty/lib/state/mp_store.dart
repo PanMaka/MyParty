@@ -1,9 +1,6 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
-
-import '../models/mp_party.dart';
 
 /// The two answers `public.rsvp_status` holds, and the only two it will hold —
 /// 22_private_party_counts_and_rsvp asserts the enum stays at two values.
@@ -21,32 +18,21 @@ enum MpRsvp { interested, going }
 /// Shared mock/interactive state for the redesigned screens, mirroring the
 /// single component state tree of the original design prototype.
 class MpStore extends ChangeNotifier {
-  MpStore({bool autoDecay = true}) {
-    if (autoDecay) {
-      _decayTimer = Timer.periodic(const Duration(milliseconds: 2600), (_) {
-        _hype['vinyl'] = math.max(22, (_hype['vinyl'] ?? 64) - 1);
-        _hype['taratsa'] = math.max(18, (_hype['taratsa'] ?? 41) - 1);
-        notifyListeners();
-      });
-    }
-  }
+  MpStore();
 
-  final Map<String, int> _hype = {'vinyl': 64, 'taratsa': 41};
-
-  /// The viewer's own answer per party, absent when they have not answered.
-  ///
-  /// A map with no entry rather than a `false`: the tri-state (none /
-  /// interested / going) is the shape `rsvps` actually has, and a bool could
-  /// not express "going" and "interested" as different answers to the same
-  /// question. Private keys hold only [MpRsvp.going].
-  final Map<String, MpRsvp> _rsvp = {
-    'vinyl': MpRsvp.interested,
-    'taratsa': MpRsvp.going, // private
-    'anodos': MpRsvp.interested,
-    'kapsimo': MpRsvp.going,
-    'nefeli': MpRsvp.going, // private
-    // 'maria' (private) is deliberately absent: no answer yet.
-  };
+  // _hype / hypeOf / bump and the mock _rsvp map lived here until Phase 18.
+  //
+  // HYPE IS GONE, not migrated. It was a percentage with no column behind it
+  // -- seeded at 64 and 41 for two hardcoded party keys, decremented by a
+  // timer and bumped by taps -- and there is no hype column in the schema and
+  // no phase that adds one. What replaced it on the card is the thing it was
+  // a picture of: the real interested_count, labelled by tense. Same call
+  // credibility_score already got, for the same reason: a number nothing
+  // computes is an invitation to display it.
+  //
+  // The rsvp map went because the buttons write to `rsvps` now. It was keyed
+  // by mpParties handles ('vinyl', 'taratsa') that no table could match, and
+  // my_rsvp_status comes back on every read RPC that carries a party.
   // _invited / invited / toggleInvited / invitedCount lived here until Phase 11
   // and were already unreachable when they were removed: the host wizard keeps
   // its own `Set<String> _invited` of real profile uuids from
@@ -61,43 +47,11 @@ class MpStore extends ChangeNotifier {
   // with the server. ProfileScreen holds the loaded value instead.
   bool _copied = false;
 
-  Timer? _decayTimer;
-
-  Map<String, MpParty> get parties => mpParties;
-
-  int hypeOf(String id) => _hype[id] ?? 0;
-
-  /// The viewer's answer, or null if they have not given one.
-  MpRsvp? rsvpFor(String id) => _rsvp[id];
   bool get copied => _copied;
 
-  void bump(String id, int amount) {
-    _hype[id] = math.min(100, (_hype[id] ?? 0) + amount);
-    notifyListeners();
-  }
-
-  /// Answers [status] for [id], or withdraws the answer if it is already the
-  /// current one.
-  ///
-  /// Tapping the selected button is the un-RSVP, and un-RSVP REMOVES the entry
-  /// — the mock analogue of `delete from rsvps`. Tapping the other button on a
-  /// public party replaces the answer in place, which is the `update rsvps set
-  /// status` the counter trigger handles as a single delta.
-  ///
-  /// The hype bump is only ever applied on a public party, by the caller:
-  /// a private party displays no hype at all, so bumping a number nothing
-  /// renders would be state that exists only to be leaked later.
-  void setRsvp(String id, MpRsvp status, {int hypeBumpOnJoin = 0}) {
-    if (_rsvp[id] == status) {
-      _rsvp.remove(id);
-    } else {
-      _rsvp[id] = status;
-      if (hypeBumpOnJoin > 0) {
-        _hype[id] = math.min(100, (_hype[id] ?? 0) + hypeBumpOnJoin);
-      }
-    }
-    notifyListeners();
-  }
+  // setRsvp lived here too, and is now PartyRepository.setRsvp -- a real
+  // upsert, with the un-RSVP as the DELETE it always described itself as
+  // being. The `hypeBumpOnJoin` parameter went with hype.
 
   void flashCopied() {
     _copied = true;
@@ -108,9 +62,4 @@ class MpStore extends ChangeNotifier {
     });
   }
 
-  @override
-  void dispose() {
-    _decayTimer?.cancel();
-    super.dispose();
-  }
 }

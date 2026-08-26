@@ -1,33 +1,65 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 
-import '../../models/mp_party.dart';
-import '../../state/mp_store.dart';
+import '../../models/party_list_item.dart';
+import '../../state/mp_store.dart' show MpRsvp;
+import '../../utils/english_date.dart';
 import '../theme/app_theme.dart';
 import 'dashed_border.dart';
 import 'diagonal_placeholder.dart';
-import 'hype_bar.dart';
 import 'party_detail_sheet.dart';
 
 /// Full party card for the "ALL PARTIES" list — cover, name/host, a
-/// public/private ring badge (solid purple = PUBLIC, dashed magenta =
-/// PRIVATE, mirroring the map pin ring), a live indicator, the shared hype
-/// bar and the interest button — same building blocks the party posts used
-/// to render inline in the feed.
+/// public/private accent (solid purple = PUBLIC, dashed red = PRIVATE,
+/// mirroring the map pin ring), a live indicator, the attendance line and the
+/// RSVP buttons.
 ///
-/// Rendered only by EventsScreen, which is why this file could be translated
-/// outright rather than growing PrivacyBadge's opt-in `english` flag.
+/// **Driven by a real `parties` row.** It read the const `mpParties` map by
+/// string key until Phase 18; every field below now comes from
+/// `get_parties_list`, which is what makes server-side sorting possible at all
+/// and what unblocked the group-chat and story entry points that had no uuid
+/// to hand anybody.
+///
+/// Three things went when `mpParties` did, and none of them is coming back as
+/// written:
+///
+///  - **The hype bar.** A percentage with no column behind it, decremented by
+///    a timer and bumped by taps. What replaced it is the thing it was a
+///    picture of: the real counter, labelled by tense — "N interested" before
+///    a party starts, "N here now" once it has. Same reason
+///    `credibility_score` ships no score.
+///  - **`hostSub` / `dist` / `posters`** ("your friend · 3rd party this year",
+///    "400 m", "11 people posting"). No column answers any of them. Distance
+///    needs a viewer location this list does not have — it is not a spatial
+///    query — and is still shown where it IS known, on `MapPinSheet`.
+///  - **The mock RSVP state.** The buttons write to `rsvps` now, so tapping
+///    one on a private party the server refuses is a visible error rather than
+///    a local lie.
 class PartyCard extends StatelessWidget {
-  final String partyId;
+  const PartyCard({
+    super.key,
+    required this.item,
+    required this.onRsvp,
+    this.coverUrl,
+  });
 
-  const PartyCard({super.key, required this.partyId});
+  final PartyListItem item;
+
+  /// The signed cover URL, or null for a party whose host uploaded none.
+  ///
+  /// Passed in rather than signed here: `post-media` and `party-covers` are
+  /// private buckets and signing is per-object, so the list signs one batch
+  /// for the whole page instead of one request per card.
+  final String? coverUrl;
+
+  /// Answers [MpRsvp] for this party, or withdraws the answer when it is
+  /// already the current one. The screen owns the write and the refresh — the
+  /// card is not the place that decides what a tap costs.
+  final ValueChanged<MpRsvp> onRsvp;
 
   @override
   Widget build(BuildContext context) {
-    final store = context.watch<MpStore>();
-    final party = mpParties[partyId]!;
-    final rsvp = store.rsvpFor(partyId);
-    final accent = party.isPrivate ? AppColors.private : AppColors.purple;
+    final accent = item.isPrivate ? AppColors.private : AppColors.purple;
+    final rsvp = item.myRsvp;
 
     final body = Container(
       clipBehavior: Clip.antiAlias,
@@ -43,18 +75,24 @@ class PartyCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           GestureDetector(
-            onTap: () => showPartyDetailSheet(context, partyId),
+            onTap: () => showPartyDetailSheet(context, item, coverUrl: coverUrl),
             child: SizedBox(
               height: 158,
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  DiagonalStripePlaceholder(
-                    colors: party.isPrivate
-                        ? const [Color(0xFF1C1622), Color(0xFF151020)]
-                        : const [Color(0xFF1D1730), Color(0xFF161126)],
-                    label: party.imgLabel,
-                  ),
+                  if (coverUrl != null)
+                    Image.network(
+                      coverUrl!,
+                      fit: BoxFit.cover,
+                      // A signed URL that 404s or expires between signing and
+                      // painting falls back to the placeholder rather than
+                      // Flutter's broken-image glyph — same policy the host
+                      // post strip applies to its thumbnails.
+                      errorBuilder: (_, _, _) => _placeholder(),
+                    )
+                  else
+                    _placeholder(),
                   DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
@@ -74,11 +112,16 @@ class PartyCard extends StatelessWidget {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          if (party.live) ...[
+                          // isLive is the SERVER's answer, not a comparison
+                          // done here — it is the same one that put this row
+                          // in the list's live group, so the badge and the
+                          // ordering cannot disagree.
+                          if (item.isLive) ...[
                             Container(width: 6, height: 6, decoration: const BoxDecoration(color: AppColors.pink, shape: BoxShape.circle)),
                             const SizedBox(width: 6),
                           ],
-                          Text(party.time, style: AppTextStyles.mono(size: 11, weight: FontWeight.w700)),
+                          Text(formatPartyStartEn(item.startsAt),
+                              style: AppTextStyles.mono(size: 11, weight: FontWeight.w700)),
                         ],
                       ),
                     ),
@@ -90,11 +133,18 @@ class PartyCard extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(party.name,
+                        Text(item.title,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, letterSpacing: -0.3, height: 1.15)),
-                        Text(party.host, style: TextStyle(fontSize: 12, color: AppColors.textAlpha(0.65))),
+                        Text(
+                          item.area == null
+                              ? '@${item.hostUsername}'
+                              : '@${item.hostUsername} · ${item.area}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 12, color: AppColors.textAlpha(0.65)),
+                        ),
                       ],
                     ),
                   ),
@@ -107,60 +157,27 @@ class PartyCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // The hype bar is PUBLIC-ONLY, and it is removed rather than
-                // blanked. A percentage derived from attendance IS attendance:
-                // it moves when people join, so a reader watching it learns the
-                // same thing the count would have told them, one derivative
-                // removed. The bump button goes with it -- there is nothing
-                // left for it to move.
-                if (!party.isPrivate)
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Expanded(
-                        child: HypeBar(
-                          percent: store.hypeOf(partyId),
-                          label: '${store.hypeOf(partyId)}%',
-                          gradient: AppColors.purpleGradient,
-                          onTap: () => store.bump(partyId, 5),
-                        ),
-                      ),
-                      const SizedBox(width: 9),
-                      _hypeBumpButton(accent: accent, onTap: () => store.bump(partyId, 5)),
-                    ],
-                  ),
-                // The like pill that used to sit here is gone. Likes are a
-                // property of a post (`post_likes`), not of a party — there
-                // is no parties.like_count in the schema and no phase that
-                // adds one, so it was a counter that could only ever stay
-                // mock. `MpStore._likes`, which backed it, went with it.
-                //
-                // The comment-count pill that replaced it is gone for the same
-                // reason and has been rebuilt as a group-chat entry point,
-                // PRIVATE-ONLY, matching PartyDetailSheet's button and the
-                // 20260825094044 rule behind it. Three things happened here at
-                // once, and only the first is product behaviour:
-                //
-                //  - A public party has no group chat, so a public card gets
-                //    no pill at all rather than a disabled one.
-                //  - The NUMBER is gone. `MpParty.commentCount` was mock in
-                //    the way the like count was — comments hang off
-                //    `post_comments`, a property of a post, and there is no
-                //    parties.comment_count for it to ever become. Printing a
-                //    message count next to a chat icon would have promised a
-                //    second unbacked counter in the place of the first.
-                //  - It still does not OPEN anything. This card is driven by
-                //    the const `mpParties` map whose keys are strings like
-                //    'taratsa', and ChatScreen needs a real parties.id — the
-                //    same blocker that leaves the detail sheet's button on
-                //    _comingSoon. It is wired to the identical placeholder so
-                //    the two doors cannot drift apart before mpParties
-                //    retires and they are both pointed at ChatScreen together.
-                if (party.isPrivate)
+                // Attendance, which is PUBLIC-ONLY and absent rather than
+                // blanked on a private row. `attendeeLabel` is null exactly
+                // when the counters are — the server sends NULL for both on a
+                // private party (20260825090051), so there is no number here
+                // to forget to hide.
+                if (item.attendeeLabel != null)
                   Padding(
-                    padding: const EdgeInsets.only(top: 12),
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: Text(
+                      item.attendeeLabel!,
+                      style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppColors.textAlpha(0.72)),
+                    ),
+                  ),
+                // Group chat, PRIVATE-ONLY (20260825094044). It was a
+                // placeholder while this card had no uuid to hand ChatScreen;
+                // it has one now.
+                if (item.isPrivate)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10),
                     child: _reactionPill(
-                      onTap: () => comingSoon(context),
+                      onTap: () => openPartyChat(context, item),
                       icon: Icons.forum_outlined,
                       label: 'Group chat',
                     ),
@@ -169,24 +186,15 @@ class PartyCard extends StatelessWidget {
                 //
                 // The private button writes 'going' and says "Coming":
                 // 20260825090050 makes the rsvps policy refuse an 'interested'
-                // row on a private party, so an Interested button here would be
-                // an affordance the server answers with a 42501.
+                // row on a private party, so an Interested button here would
+                // be an affordance the server answers with a 42501.
                 //
                 // Tapping the selected button withdraws the answer, which is a
-                // DELETE of the row rather than a third enum value -- the same
-                // already-selected pattern this card has always shown, now with
-                // two buttons to be selected between.
+                // DELETE of the row rather than a third enum value.
                 Padding(
                   padding: const EdgeInsets.only(top: 12),
-                  child: party.isPrivate
-                      ? _rsvpButton(
-                          label: 'Coming',
-                          selected: rsvp == MpRsvp.going,
-                          gradient: AppColors.privateGradient,
-                          accent: AppColors.private,
-                          onTap: () => store.setRsvp(partyId, MpRsvp.going),
-                        )
-                      : Row(
+                  child: item.acceptsInterested
+                      ? Row(
                           children: [
                             Expanded(
                               child: _rsvpButton(
@@ -194,7 +202,7 @@ class PartyCard extends StatelessWidget {
                                 selected: rsvp == MpRsvp.going,
                                 gradient: AppColors.purpleGradient,
                                 accent: AppColors.purple,
-                                onTap: () => store.setRsvp(partyId, MpRsvp.going, hypeBumpOnJoin: 6),
+                                onTap: () => onRsvp(MpRsvp.going),
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -204,10 +212,17 @@ class PartyCard extends StatelessWidget {
                                 selected: rsvp == MpRsvp.interested,
                                 gradient: AppColors.purpleGradient,
                                 accent: AppColors.purple,
-                                onTap: () => store.setRsvp(partyId, MpRsvp.interested, hypeBumpOnJoin: 3),
+                                onTap: () => onRsvp(MpRsvp.interested),
                               ),
                             ),
                           ],
+                        )
+                      : _rsvpButton(
+                          label: 'Coming',
+                          selected: rsvp == MpRsvp.going,
+                          gradient: AppColors.privateGradient,
+                          accent: AppColors.private,
+                          onTap: () => onRsvp(MpRsvp.going),
                         ),
                 ),
               ],
@@ -217,29 +232,20 @@ class PartyCard extends StatelessWidget {
       ),
     );
 
-    return party.isPrivate
+    return item.isPrivate
         ? DashedRRectBorder(color: accent, radius: 16, child: body)
         : Container(
             decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), border: Border.all(color: accent, width: 1.5)),
             child: body,
           );
   }
-}
 
-Widget _hypeBumpButton({required Color accent, required VoidCallback onTap}) {
-  return GestureDetector(
-    onTap: onTap,
-    child: Container(
-      width: 34,
-      height: 34,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(colors: [accent, AppColors.pink]),
-        shape: BoxShape.circle,
-        boxShadow: [BoxShadow(color: accent.withValues(alpha: 0.55), blurRadius: 10)],
-      ),
-      child: const Icon(Icons.local_fire_department, size: 17, color: Colors.white),
-    ),
-  );
+  Widget _placeholder() => DiagonalStripePlaceholder(
+        colors: item.isPrivate
+            ? const [Color(0xFF1C1622), Color(0xFF151020)]
+            : const [Color(0xFF1D1730), Color(0xFF161126)],
+        label: item.isPrivate ? 'private party' : 'no cover yet',
+      );
 }
 
 Widget _reactionPill({VoidCallback? onTap, required IconData icon, required String label}) {

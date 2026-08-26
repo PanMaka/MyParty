@@ -130,16 +130,78 @@ and deletes their objects over pg_net, so stopping it would let the
 tests are `skip:`ped verbatim rather than rewritten — they are the coverage that
 returns when the flag flips — and a third asserts the hidden state.
 
-**BACKLOG — retiring `mpParties` is now one blocking piece.** The const map's
-keys are strings like `'taratsa'` rather than uuids, and that single fact now
-blocks **three** features on the parties tab: host posts on the cards (they are
-rendered on the MINE tab instead, which carries real `RsvpParty.partyId`), the
-`PartyDetailSheet` group-chat button, and its story tiles. They are one job, not
-three. **It takes `hype` with it**: there is no hype column in the schema and no
-phase that adds one, so `MpStore._hype`, `HypeBar` and the bump button have
-nowhere to land — the same decision `credibility_score` already got. Doing it
-means moving ALL PARTIES onto a real list RPC and deciding what, if anything,
-replaces hype.
+**`mpParties` is RETIRED** (Phase 18, `20260826094842`). The ALL PARTIES tab
+runs on `get_parties_list`, and the three things the const map was blocking all
+landed with it: `PartyDetailSheet`'s group-chat button and its story tiles now
+open the real `ChatScreen`/`StoryViewerScreen`, because the sheet finally has a
+uuid to hand them. It was one job, not three, exactly as recorded.
+
+**Sorting is what forced it.** "Most interested first" applied to an
+already-fetched page means "most interested among whatever we happened to
+load", so the sort had to be the server's, and a server sort needs a server
+list. Two sorts, as a `party_sort` **enum** so an unknown value is a type error
+at the PostgREST boundary rather than a silent fallback to the default.
+
+**Ordering by a hidden counter is a side channel, and the fix is grouping.**
+`20260825090051` returns NULL for both counters on a private row so no client
+can render the number; ordering by that number hands most of it back. A private
+party ranked between two public rows whose counts ARE transmitted is
+**bracketed, not blurred** — between 40 and 30 means it is in [30, 40], and the
+interval tightens as the list gets denser. It is also observable over time: a
+private row climbing the list reports rsvp *events*, which is more than the
+magnitude that was withheld. So:
+
+- Private parties are a **group pinned above** the public ranking, ordered
+  among themselves by `starts_at`. Not excluded — a party you were invited to
+  must not vanish because you changed the sort; sorting is not a filter. Above
+  rather than below, because an invitation outranks a stranger's headcount.
+- **This is the same call `MpDropGeometry.private()` already made** for pin
+  size: fixed, at the ceiling, so nothing can be read off it. Ordering is that
+  leak in one dimension.
+- The group is ordered by `starts_at` and **not `going_count`**, which is NULLed
+  for the same rows — ranking by it would trade a leak of interest for a leak
+  of guest-list size.
+- The `case when p.is_private then null` in `sort_rank` is what makes this "the
+  value is never read" rather than "the leak is small". The group key alone
+  already stops a private row being compared with a public one, but without the
+  case the counter would still order private rows *among themselves* by a value
+  none of them transmits.
+- **The other sort needs none of it.** `'soonest'` ranks on `starts_at`, which
+  is public for private parties, so they interleave freely there — asserted in
+  `25_parties_list_and_sort.test.sql`, because "private is always grouped" is
+  exactly the over-generalisation a later edit makes.
+
+That test file's headline assertions are the **negative** ones: the two private
+fixtures carry counts whose order *disagrees* with their `starts_at` order, so
+"ordered by count" and "ordered by starts_at" predict opposite results. Against
+agreeing numbers every assertion in it passes on the leaking implementation.
+
+Keyset over one ascending 4-tuple — `(sort_group, sort_rank, starts_at,
+party_id)` — for **both** sorts, with descending keys negated (`interested_count
+desc` is `-interested_count asc`, which is why `sort_rank` is a bigint). One row
+comparison paginates either sort and there is no second cursor shape to keep in
+step. The cursor columns are returned so the client echoes back the last row it
+drew, and `sort_rank` is 0 on every private row, so a cursor pointing at a
+private party carries no count either.
+
+**`hype` died with the map, and what replaced it is the thing it was a picture
+of.** `MpStore._hype`, `HypeBar` and the bump button are deleted — a percentage
+seeded at 64 and 41 for two hardcoded keys, decremented by a timer, with no hype
+column in the schema and no phase that adds one. The card now shows the real
+counter labelled by tense: "N interested" before a party starts, "N here now"
+once it has. Same call `credibility_score` already got. Three `MpParty` fields
+went with no replacement because no column answers them — `hostSub`, `dist` and
+`posters`; distance is still shown on `MapPinSheet`, which is a spatial query
+and therefore knows it. `MpStore` is now only `flashCopied`; **RSVP writes are
+real** (`PartyRepository.setRsvp`, with the un-RSVP as the DELETE it always
+described itself as being).
+
+Two things the list decides for itself, neither of which changes an existing
+surface: it filters out finished parties using the leakproof
+`starts_at > now() - party_end_grace()` shape (gotcha 22), which means the
+gotcha-21 zombie is absent *here* while the map still pins it — that decision
+stays open — and the sort control lives **outside** the scroll view, so an empty
+or failed list still offers the way back to "soonest".
 
 **A private party holds no attendance, and that is enforced in three places
 because one would not hold.** Decided Phase 16b.
@@ -290,19 +352,18 @@ The social graph is **follows-only and asymmetric** — there is no
 one without an explicit product decision. A follow grants **no** private-party
 visibility; that comes from `invitations` alone.
 
-**Mock today, ships real in later phases:** everything left in
-`lib/state/mp_store.dart` (hype, interested, invited) and the
-const `mpParties` list in `lib/models/` — `PartyCard` and `PartyDetailSheet`
-still read from it instead of Supabase. Note `mpParties` keys are strings like
-`'taratsa'`, not uuids, which is why the report action is wired into
-`MapPinSheet` (a real `parties` row) and not `PartyDetailSheet`, and why
-*both* of `PartyDetailSheet`'s "Group chat" button and its story tiles are
-placeholders while `ChatScreen` and `StoryViewerScreen` are real — it has no
-uuid to hand either of them. Real chat entry points are `MessagesScreen`,
-`EventsScreen`'s RSVP rows and the host wizard's done screen; `MapPinSheet`
-deliberately has none, since a map-pin viewer is exactly the passer-by
-`can_chat_in_party` excludes. Real story entry points are the feed's story
-rail and its "+ Story" picker.
+**Mock today, ships real in later phases:** nothing on the parties tab —
+Phase 18 retired the last of it. `MpStore` holds only `flashCopied`, a
+1.8-second "copied" flash on the host wizard's invite link. `PartyCard` and
+`PartyDetailSheet` read real `parties` rows, so both of the sheet's former
+placeholders (group chat, story tiles) open the real screens; the one
+affordance still on `comingSoon` is **Directions**, and for a reason `mpParties`
+was never responsible for — `get_parties_list` is not a spatial query, so the
+row carries no coordinates. Real chat entry points are now `MessagesScreen`,
+`EventsScreen`'s RSVP rows, the host wizard's done screen, **and both
+private-party doors on the parties tab**; `MapPinSheet` deliberately still has
+none, since a map-pin viewer is exactly the passer-by `can_chat_in_party`
+excludes.
 
 Phase 7 is complete end to end, and `scripts/verify_notification_delivery.sh`
 measures it: 1s from `insert into parties` to a delivered push, one
