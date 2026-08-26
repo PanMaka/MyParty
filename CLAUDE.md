@@ -816,6 +816,17 @@ bash scripts/loadtest_map_query.sh [N_PARTIES] [N_RSVPS] [N_USERS] [ITERATIONS]
 # the map body with neither / box only / window only / both. Rolled back.
 bash scripts/explain_map_time_windows.sh [N_PARTIES]
 
+# Host posts WITH their bytes, so HostPostStrip on MY PARTIES has something to
+# draw. Not in seed.sql, and it cannot be: seed.sql cannot put a file in a
+# bucket (gotcha #7), and 20260825095311 keeps a media post invisible until
+# confirm_post_upload has checked storage.objects for the bytes -- so a seeded
+# row alone just makes the strip 404 and collapse the tile. Runs the real
+# handshake (insert as the host under RLS, PUT, confirm) rather than writing
+# media_uploaded_at directly, and re-counts as the VIEWER at the end. Six posts
+# on the three parties host@myparty.local has rsvps rows on. Idempotent; needs
+# the stack up and Pillow. Re-run after every `supabase db reset`.
+bash scripts/seed_post_media.sh
+
 cd myparty
 flutter pub get
 flutter test                 # Flutter/Dart tests
