@@ -42,6 +42,25 @@ class _FeedScreenState extends State<FeedScreen> {
 
   final List<StoryRail> _rails = [];
 
+  /// Stories are OUT OF SCOPE FOR LAUNCH and ship in a later update.
+  ///
+  /// TEMPORARY, and deliberately a constant rather than a deletion. Everything
+  /// behind it is real and staying: the `stories`/`story_views` tables and
+  /// their RLS, `get_party_stories`/`get_story_rails`, the
+  /// `story_upload_target` → `story-media` → `confirm_story_upload` handshake,
+  /// `StoryRepository`, `StoryViewerScreen`, `showStoryPickerSheet`, the
+  /// `story-cleanup` pg_cron job and `07_stories.test.sql` are all untouched
+  /// and all still exercised by the test suites.
+  ///
+  /// This hides the two UI doors into that machinery and nothing else. The
+  /// cleanup cron in particular MUST keep running while this is false: it is
+  /// what hides expired rows and deletes their objects over pg_net, and
+  /// stopping it would let the story-media bucket accumulate files that
+  /// nothing will ever collect.
+  ///
+  /// Flip to true to bring the feature back; there is no other switch.
+  static const bool _storiesEnabled = false;
+
   /// Cover URLs by story id. Signed, and only good for 60 seconds — they are
   /// re-fetched whenever the rail is, never persisted.
   Map<String, String> _railCovers = {};
@@ -53,7 +72,7 @@ class _FeedScreenState extends State<FeedScreen> {
     super.initState();
     _scroll.addListener(_onScroll);
     _load();
-    _loadRails();
+    if (_storiesEnabled) _loadRails();
   }
 
   /// Deliberately not part of [_load]: the story row and the feed fail
@@ -191,7 +210,7 @@ class _FeedScreenState extends State<FeedScreen> {
       body: SafeArea(
         bottom: false,
         child: RefreshIndicator(
-          onRefresh: () => Future.wait([_load(), _loadRails()]),
+          onRefresh: () => Future.wait([_load(), if (_storiesEnabled) _loadRails()]),
           child: ListView(
             key: const ValueKey('feed-list'),
             controller: _scroll,
@@ -199,9 +218,12 @@ class _FeedScreenState extends State<FeedScreen> {
             padding: const EdgeInsets.only(bottom: 96),
             children: [
               _header(context),
-              const SizedBox(height: 2),
-              _storyRow(context),
-              const SizedBox(height: 16),
+              if (_storiesEnabled) ...[
+                const SizedBox(height: 2),
+                _storyRow(context),
+                const SizedBox(height: 16),
+              ] else
+                const SizedBox(height: 12),
               Container(height: 1, color: Colors.white.withValues(alpha: 0.07), margin: const EdgeInsets.only(bottom: 16)),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -292,17 +314,19 @@ class _FeedScreenState extends State<FeedScreen> {
           const Text('MyParty', style: TextStyle(fontSize: 23, fontWeight: FontWeight.w800, letterSpacing: -0.6)),
           Row(
             children: [
-              OutlinedButton(
-                onPressed: _startStory,
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                  side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(99)),
-                  foregroundColor: AppColors.text,
+              if (_storiesEnabled) ...[
+                OutlinedButton(
+                  onPressed: _startStory,
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                    side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(99)),
+                    foregroundColor: AppColors.text,
+                  ),
+                  child: const Text('+ Story', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                 ),
-                child: const Text('+ Story', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-              ),
-              const SizedBox(width: 9),
+                const SizedBox(width: 9),
+              ],
               Container(
                 width: 32,
                 height: 32,
@@ -380,7 +404,7 @@ class _FeedScreenState extends State<FeedScreen> {
   /// sits on screen long enough will fall back to the striped placeholder
   /// rather than showing a broken image. Refreshing the feed re-signs it.
   Widget _storyTile(BuildContext context, StoryRail rail) {
-    final accent = rail.isPrivate ? AppColors.pink : AppColors.purple;
+    final accent = rail.isPrivate ? AppColors.private : AppColors.purple;
     final coverUrl = _railCovers[rail.coverStoryId];
 
     return GestureDetector(

@@ -379,7 +379,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _header(BuildContext context) {
-    final tint = widget.isPrivate ? AppColors.pink : AppColors.purple;
+    final tint = widget.isPrivate ? AppColors.private : AppColors.purple;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),

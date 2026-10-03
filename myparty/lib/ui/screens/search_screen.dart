@@ -135,7 +135,8 @@ class _SearchScreenState extends State<SearchScreen> {
   /// `lat`/`lon` so a hit is a [MapPartyPin], which means the report action and
   /// the live attendee count behave identically whether the party was reached
   /// from a pin or from a search result.
-  void _openParty(MapPartyPin pin) => showMapPinSheet(context, pin);
+  void _openParty(MapPartyPin pin) =>
+      showMapPinSheet(context, pin, repository: _parties);
 
   @override
   Widget build(BuildContext context) {
@@ -160,7 +161,7 @@ class _SearchScreenState extends State<SearchScreen> {
           IconButton(
             onPressed: () => Navigator.of(context).pop(),
             icon: const Icon(Icons.arrow_back, size: 20, color: AppColors.text),
-            tooltip: 'Πίσω',
+            tooltip: 'Back',
           ),
           Expanded(
             child: Container(
@@ -184,7 +185,7 @@ class _SearchScreenState extends State<SearchScreen> {
                       decoration: InputDecoration(
                         isDense: true,
                         border: InputBorder.none,
-                        hintText: 'Ψάξε πάρτι ή άτομα',
+                        hintText: 'Search parties or people',
                         hintStyle: TextStyle(fontSize: 13.5, color: AppColors.textAlpha(0.5)),
                       ),
                     ),
@@ -210,9 +211,8 @@ class _SearchScreenState extends State<SearchScreen> {
     if (_query.length < SearchScreen.minQueryLength) {
       return _hint(
         icon: Icons.keyboard_alt_outlined,
-        title: 'Γράψε κι άλλο',
-        detail: 'Χρειάζονται τουλάχιστον ${SearchScreen.minQueryLength} χαρακτήρες '
-            'για να ξεκινήσει η αναζήτηση.',
+        title: 'Keep typing',
+        detail: 'Search starts at ${SearchScreen.minQueryLength} characters.',
       );
     }
     if (_loading) {
@@ -221,16 +221,16 @@ class _SearchScreenState extends State<SearchScreen> {
     if (_error != null) {
       return _hint(
         icon: Icons.cloud_off,
-        title: 'Κάτι πήγε στραβά',
-        detail: 'Δεν μπορέσαμε να ολοκληρώσουμε την αναζήτηση. Δοκίμασε ξανά.',
+        title: 'Something went wrong',
+        detail: 'We could not finish the search. Try again.',
       );
     }
     if (_people.isEmpty && _partyHits.isEmpty) {
       return _hint(
         icon: Icons.search_off,
-        title: 'Κανένα αποτέλεσμα',
-        detail: 'Δεν βρέθηκε πάρτι ή άτομο για «$_query». '
-            'Η αναζήτηση ξεκινάει από την αρχή της λέξης.',
+        title: 'No results',
+        detail: 'Nothing found for “$_query”. '
+            'Search matches from the start of a word.',
       );
     }
 
@@ -238,18 +238,18 @@ class _SearchScreenState extends State<SearchScreen> {
       padding: const EdgeInsets.fromLTRB(14, 4, 14, 24),
       children: [
         if (_people.isNotEmpty) ...[
-          _sectionTitle('Άτομα'),
+          _sectionTitle('People'),
           for (final p in _people) _personTile(p),
         ],
         if (_partyHits.upcoming.isNotEmpty) ...[
-          _sectionTitle('Επερχόμενα'),
+          _sectionTitle('Upcoming'),
           for (final pin in _partyHits.upcoming) _partyTile(pin, past: false),
         ],
         // Past parties are shown, not hidden: "find that party from May" is a
         // real use. The split comes from the server's party_is_past(), not from
         // a second opinion computed here.
         if (_partyHits.past.isNotEmpty) ...[
-          _sectionTitle('Πέρασαν'),
+          _sectionTitle('Past'),
           for (final pin in _partyHits.past) _partyTile(pin, past: true),
         ],
       ],
@@ -292,7 +292,7 @@ class _SearchScreenState extends State<SearchScreen> {
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 2),
-                  Text('${profile.followerCount} ακόλουθοι',
+                  Text('${profile.followerCount} followers',
                       style: TextStyle(fontSize: 11.5, color: AppColors.textAlpha(0.55))),
                 ],
               ),
@@ -305,7 +305,7 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Widget _partyTile(MapPartyPin pin, {required bool past}) {
-    final accent = pin.isPrivate ? AppColors.pink : AppColors.purple;
+    final accent = pin.isPrivate ? AppColors.private : AppColors.purple;
     return GestureDetector(
       onTap: () => _openParty(pin),
       behavior: HitTestBehavior.opaque,
@@ -347,12 +347,12 @@ class _SearchScreenState extends State<SearchScreen> {
                         const SizedBox(width: 5),
                         Flexible(
                           child: Text(
-                            pin.area ?? (pin.isPrivate ? 'Ιδιωτικό' : 'Δημόσιο'),
+                            pin.area ?? (pin.isPrivate ? 'Private' : 'Public'),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: AppTextStyles.mono(
                               size: 9,
-                              color: pin.isPrivate ? AppColors.pinkLight : AppColors.purpleLight,
+                              color: pin.isPrivate ? AppColors.privateLight : AppColors.purpleLight,
                             ),
                           ),
                         ),

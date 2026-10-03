@@ -21,7 +21,7 @@
 -- stranger 4444, blocked_user 5555, second_host 6666.
 begin;
 set search_path to public, extensions;
-select plan(51);
+select plan(58);
 
 
 -- ============================================================
@@ -110,15 +110,42 @@ select is(
   true,
   'and past outside it');
 
--- The documented sequencing state. If somebody makes the map filter on this,
--- they have taken a product decision and this assertion is where they find out
--- it was one.
+-- THE SEQUENCING STATE, UPDATED BY PHASE 15. This assertion used to read "the
+-- map does not use party_is_past", and it did its job: adding the time chips
+-- turned it red, which is where the product decision got taken rather than
+-- absorbed.
+--
+-- The decision was PARTIAL, and the shape of it is why this assertion is now
+-- two. The map's DEFAULT view (Όλα) still does not filter on the grace, so
+-- gotcha 21 is still open and a null-ends_at party from twenty days ago is
+-- still pinned -- 21_map_time_windows.test.sql asserts exactly that. Only the
+-- Τώρα chip applies it, where being wrong costs a tap rather than a party.
+--
+-- And the map still does not CALL party_is_past, for a mechanical reason
+-- rather than a product one: it carries a SET clause, so it can never be
+-- inlined (gotcha 20) and stays a non-leakproof call that sinks behind the RLS
+-- barrier. Both surfaces read the NUMBER from public.party_end_grace()
+-- instead, and 21_map_time_windows.test.sql asserts the two spellings flip at
+-- the same instant. That is what keeps "one definition" true across two
+-- syntactically different call sites.
+--
+-- Comments are stripped before matching: the map's body names party_is_past in
+-- a warning that explains why it must not be called there.
 select is_empty(
   $$ select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
      where n.nspname = 'public' and p.proname = 'get_parties_near_user'
-       and p.prosrc like '%party_is_past%' $$,
-  'the MAP does not use party_is_past -- search and the map therefore disagree '
-  'about a null-ends_at party, which is expected (gotcha 21) and not a bug'
+       and regexp_replace(p.prosrc, '--[^
+]*', '', 'g') like '%party_is_past%' $$,
+  'the MAP still does not CALL party_is_past -- it is uninlinable and would '
+  'sink the predicate behind the RLS barrier (gotcha 20 + 22)'
+);
+
+select isnt_empty(
+  $$ select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public' and p.proname = 'party_is_past'
+       and p.prosrc like '%party_end_grace%' $$,
+  'but search and the map now share the NUMBER through party_end_grace(), so '
+  'the Τώρα chip and the past/upcoming split cannot drift apart'
 );
 
 
@@ -492,6 +519,104 @@ select is_empty(
        and grantee = 'anon' $$,
   'anon holds no EXECUTE on search_parties'
 );
+
+-- ============================================================
+-- 11. The payload the SHARED sheet needs
+--
+-- Tapping a map pin and tapping a search hit open the same widget --
+-- showMapPinSheet, from map_screen.dart and search_screen.dart. That only
+-- holds together if both RPCs can fill it. `description` and `my_rsvp_status`
+-- were in get_parties_near_user and not here, so a party reached from search
+-- rendered a blank body and an action button blind to the viewer's own RSVP.
+-- ============================================================
+
+reset role;
+
+-- Its own fixture rather than a seeded party: the seed now spreads `interested`
+-- RSVPs over the upcoming public parties, so asserting an exact my_rsvp_status
+-- against one of those would depend on which personas that spread happened to
+-- pick. 'quokka' is a token nothing else in the corpus can match.
+insert into public.parties (id, host_id, title, description, area, location,
+                            starts_at, ends_at, is_private, status)
+values ('eeeeeeee-0000-0000-0000-000000000004',
+        '11111111-1111-1111-1111-111111111111',
+        'Quokka Terrace', 'Ταράτσα με θέα, φέρτε ποτό.', 'Κουκάκι',
+        st_point(23.7349, 37.9756)::geography,
+        now() + interval '4 days', now() + interval '4 days 5 hours',
+        false, 'published');
+
+select tests.authenticate_as('44444444-4444-4444-4444-444444444444'); -- stranger
+
+select is(
+  (select description from public.search_parties('quokka')),
+  'Ταράτσα με θέα, φέρτε ποτό.',
+  'search_parties returns the description -- without it the shared sheet draws '
+  'a blank body for anything reached from search'
+);
+
+select is(
+  (select my_rsvp_status from public.search_parties('quokka')),
+  null::public.rsvp_status,
+  'my_rsvp_status is null when the viewer has not rsvpd'
+);
+
+insert into public.rsvps (party_id, user_id, status)
+values ('eeeeeeee-0000-0000-0000-000000000004',
+        '44444444-4444-4444-4444-444444444444', 'interested');
+
+select is(
+  (select my_rsvp_status from public.search_parties('quokka')),
+  'interested'::public.rsvp_status,
+  'and it reports the viewers own rsvp once made'
+);
+
+-- THE CONTROL, and the reason my_rsvp_status is a correlated subquery rather
+-- than a join: a second viewer must see the party's counter move while their
+-- OWN status stays null. A payload that reported the party's rsvp instead of
+-- the caller's would pass the two assertions above and fail here.
+select tests.authenticate_as('22222222-2222-2222-2222-222222222222');
+
+select is(
+  (select my_rsvp_status from public.search_parties('quokka')),
+  null::public.rsvp_status,
+  'my_rsvp_status is the VIEWERs, not the partys -- another users rsvp does '
+  'not leak into it'
+);
+
+select cmp_ok(
+  (select interested_count from public.search_parties('quokka')), '>', 0,
+  'while interested_count -- which IS the partys number -- does show it'
+);
+
+-- Structural, so the two payloads cannot drift apart again. Every column the
+-- sheet renders has to exist in BOTH functions; one that exists in only one of
+-- them is a blank section for whoever arrived from the other screen.
+select is_empty(
+  $$ with needed(col) as (
+       values ('title'), ('description'), ('area'), ('starts_at'), ('ends_at'),
+              ('cover_path'), ('host_id'), ('host_username'), ('is_private'),
+              ('going_count'), ('interested_count'), ('my_rsvp_status'),
+              ('lat'), ('lon')
+     ),
+     fns(name) as (values ('search_parties'), ('get_parties_near_user')),
+     have as (
+       select p.proname, unnest(p.proargnames) as col
+       from pg_proc p
+       join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'public'
+         and p.proname in ('search_parties', 'get_parties_near_user')
+     )
+     select fns.name || '.' || needed.col
+     from fns cross join needed
+     where not exists (
+       select 1 from have
+       where have.proname = fns.name and have.col = needed.col
+     ) $$,
+  'every column MapPinSheet renders exists in BOTH payloads -- the map and '
+  'search open the same sheet, so a column in only one of them is a blank '
+  'section depending on which screen you came from'
+);
+
 
 select * from finish();
 rollback;

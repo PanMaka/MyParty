@@ -74,9 +74,14 @@ select results_eq(
 );
 
 -- Tied to the trigger rather than to the literal 1 above: flipping the same
--- rsvp to 'going' must move the number from one column to the other, which is
--- the only thing that proves the map is reading sync_party_rsvp_counters and
--- not a coincidence.
+-- rsvp to 'going' must move going_count, which is the only thing that proves
+-- the map is reading sync_party_rsvp_counters and not a coincidence.
+--
+-- It used to say the number moved BETWEEN the columns, and that stopped being
+-- true at 20260826093437: interested_count is now a superset of going_count,
+-- so the flip lifts going_count to 1 and leaves interested_count where it was.
+-- The assertion still does its job -- one of the two numbers changes in
+-- response to a write, and it is the payload that reports it.
 select tests.authenticate_as('33333333-3333-3333-3333-333333333333');
 update public.rsvps set status = 'going'
 where party_id = 'dddddddd-1111-0000-0000-000000000001'
@@ -87,7 +92,7 @@ select results_eq(
   $$ select interested_count, going_count
      from public.get_parties_near_user(23.7348, 37.9755, 500, 500)
      where party_id = 'dddddddd-1111-0000-0000-000000000001' $$,
-  $$ values (0, 1) $$,
+  $$ values (1, 1) $$,
   'both counters track the rsvp counter trigger, not a snapshot'
 );
 
@@ -192,19 +197,27 @@ select tests.clear_authentication();
 -- removes service_role's, because the default PUBLIC grant is where that came
 -- from.
 --
+-- Phase 15 added p_window/p_tz, which meant DROP + CREATE rather than `create
+-- or replace` -- and a dropped function's ACL does not survive. These two
+-- assertions are what caught it: the recreated function came back holding the
+-- default EXECUTE TO PUBLIC, so anon had the grant again and `revoke ... from
+-- anon` would not have removed it (the privilege came from PUBLIC). The
+-- migration re-states the revoke from PUBLIC and the gotcha-13 grant back to
+-- service_role. Any future signature change has the same trap.
+--
 -- What this does NOT assert, because it is not true: that the map is closed to
 -- anonymous clients. `anon` still reads every public party off
 -- `public.parties` directly -- see 20260821175831. This is an assertion about
 -- one door, not about the building.
 -- ============================================================
 select is(
-  has_function_privilege('anon', 'public.get_parties_near_user(double precision, double precision, double precision, int)', 'execute'),
+  has_function_privilege('anon', 'public.get_parties_near_user(double precision, double precision, double precision, int, text, text)', 'execute'),
   false,
   'anon cannot call the map RPC -- the grant it used to hold could only ever return 42501'
 );
 
 select is(
-  (select bool_and(has_function_privilege(r, 'public.get_parties_near_user(double precision, double precision, double precision, int)', 'execute'))
+  (select bool_and(has_function_privilege(r, 'public.get_parties_near_user(double precision, double precision, double precision, int, text, text)', 'execute'))
    from unnest(array['authenticated', 'service_role']) r),
   true,
   'but authenticated and service_role can -- the explicit grant survived the revoke'

@@ -108,7 +108,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
   }
 
   Widget _chatRow(PartyChatSummary chat) {
-    final tint = chat.isPrivate ? AppColors.pink : AppColors.purple;
+    final tint = chat.isPrivate ? AppColors.private : AppColors.purple;
     final unread = chat.unreadCount > 0;
 
     final preview = chat.lastMessageBody == null

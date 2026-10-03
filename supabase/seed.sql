@@ -214,6 +214,75 @@ insert into public.rsvps (party_id, user_id, status) values
   ('aaaaaaaa-0000-0000-0000-000000000033', '0c0c0c0c-0000-0000-0000-000000000002', 'going'),
   ('aaaaaaaa-0000-0000-0000-000000000033', '0c0c0c0c-0000-0000-0000-000000000004', 'going');
 
+-- ============================================================
+-- Interest on the UPCOMING public parties.
+--
+-- Without this every pin on the map draws at minimum radius, because the map
+-- sizes a public pin by interested_count and every `interested` row in this
+-- file used to sit on 'aaaa...0031' -- a party that ended 14 days ago and is
+-- therefore filtered out of get_parties_near_user by `ends_at > now()` before
+-- it can become a pin at all. The counters were right; the fixtures had
+-- nothing for them to count.
+--
+-- Three deliberate exclusions:
+--
+--   * 'aaaa...0001' and 'aaaa...0002' get NOTHING. 03_rsvps.test.sql asserts
+--     absolute interested_count values on both (1, then 0 after a delete), so
+--     a seeded row here turns a passing counter test into a failing one. Same
+--     reason the host's own attendance was seeded onto new parties rather than
+--     these.
+--   * stranger (4444) and blocked_user (5555) are not in the pool. An RSVP is
+--     not just a number -- can_chat_in_party counts it as participation -- so
+--     giving either of them one would quietly hand a chat seat to the two
+--     personas whose whole job is to be excluded.
+--   * A host never appears on their own party, which the `uid <> p.host_id`
+--     term enforces per row rather than per list.
+--
+-- Matched on title because these parties use gen_random_uuid(): only the six
+-- ids the pgTAP suite names are fixed.
+--
+-- NOTE ON RANGE: the counts below top out at 6, because the seed has ten real
+-- users and three of them are excluded above. The pin's scale saturates at
+-- 100, so this exercises roughly the bottom third of the radius range -- the
+-- pins differ visibly from each other but none of them reaches a saturated
+-- bubble. Showing the full range needs a bigger pool of warm bodies, which is
+-- a bigger change to this file than the map rework should make on its own.
+-- ============================================================
+
+insert into public.rsvps (party_id, user_id, status)
+select p.id, u.uid, 'interested'
+from public.parties p
+join (values
+  ('Constitution Square Meetup', 6),
+  ('Psiri Warehouse Rave', 5),
+  ('Kolonaki Rooftop', 4),
+  ('Monastiraki Terrace', 4),
+  ('Nea Smyrni Block Party', 3),
+  ('Kifisia Estate Bash', 3),
+  ('Pangrati Garden Party', 2),
+  ('Piraeus Port Party', 2),
+  ('Glyfada Beach Party', 2),
+  ('Petralona Garage Gig', 1),
+  ('Megara Town Square Fiesta', 1)
+) as w(title, n) on w.title = p.title
+join lateral (
+  select t.uid
+  from unnest(array[
+    '0c0c0c0c-0000-0000-0000-000000000001',
+    '0c0c0c0c-0000-0000-0000-000000000002',
+    '0c0c0c0c-0000-0000-0000-000000000003',
+    '0c0c0c0c-0000-0000-0000-000000000004',
+    '22222222-2222-2222-2222-222222222222',
+    '66666666-6666-6666-6666-666666666666',
+    '11111111-1111-1111-1111-111111111111'
+  ]::uuid[]) with ordinality as t(uid, rn)
+  where t.uid <> p.host_id
+  order by t.rn
+  limit w.n
+) u on true
+on conflict do nothing;
+
+
 -- The private past party needs its guest list, or the host is alone in it.
 insert into public.invitations (party_id, guest_id) values
   ('aaaaaaaa-0000-0000-0000-000000000032', '22222222-2222-2222-2222-222222222222'),

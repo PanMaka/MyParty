@@ -1,6 +1,10 @@
+import 'dart:typed_data';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
 
 import '../models/feed_post.dart';
+import '../models/host_post.dart';
 
 /// Raised when a report is filed twice against the same target by the same
 /// user. `reports_one_per_target_idx` enforces that server-side, so this is
@@ -23,6 +27,12 @@ class FeedRepository {
   FeedRepository({SupabaseClient? client}) : _clientOverride = client;
 
   final SupabaseClient? _clientOverride;
+
+  /// Client-generated post ids, for the same reason [StoryRepository] needs
+  /// them: the upload handshake has to name the row it is filling before the
+  /// server has told us anything about it, and RETURNING cannot answer because
+  /// the row is hidden until the bytes land.
+  static const _uuid = Uuid();
 
   /// Resolved lazily for the same reason [SocialRepository] does it: a test
   /// double subclasses this and overrides every method, and constructing a
@@ -81,13 +91,19 @@ class FeedRepository {
         .toList();
   }
 
-  /// Throws if the party is not accessible — the `party_posts` INSERT policy
-  /// rejects it, which is what makes "you cannot post to a party you cannot
-  /// see" a server-side rule rather than a UI one.
+  /// A text-only post.
+  ///
+  /// Throws if the caller does not HOST the party — the `party_posts` INSERT
+  /// policy rejects it (20260825095311), which is what makes "only the host
+  /// posts" a server-side rule rather than a UI one.
+  ///
+  /// `mediaPath` is gone from the signature, and could not be honoured if it
+  /// came back: the column carries no insert grant any more. Media goes
+  /// through [createPostWithMedia], which is the only path that can produce a
+  /// post whose bytes actually exist.
   Future<void> createPost({
     required String partyId,
-    String? body,
-    String? mediaPath,
+    required String body,
   }) async {
     final id = _uid;
     if (id == null) throw StateError('Not signed in');
@@ -96,8 +112,127 @@ class FeedRepository {
       'party_id': partyId,
       'author_id': id,
       'body': body,
-      'media_path': mediaPath,
     });
+  }
+
+  /// A post with a photo, as the four-step handshake stories use.
+  ///
+  /// insert → `post_upload_target` (via the edge function, which holds the
+  /// service key) → PUT to the signed URL → `confirm_post_upload`. The post is
+  /// INVISIBLE between step one and step four, to its author included, which
+  /// is what makes abandoning it safe: a client that dies mid-flight leaves a
+  /// row nobody can see rather than a broken frame on every phone in the
+  /// party.
+  ///
+  /// The path is never chosen here. It is derived server-side from
+  /// `{party_id}/{post_id}.{ext}` by a before-insert trigger and handed back by
+  /// the RPC — a client that cannot name the path cannot aim an upload at
+  /// another party's folder.
+  ///
+  /// Returns the new post's id.
+  Future<String> createPostWithMedia({
+    required String partyId,
+    required Uint8List bytes,
+    required String contentType,
+    String? body,
+  }) async {
+    final userId = _uid;
+    if (userId == null) throw StateError('Not signed in');
+
+    final postId = _uuid.v4();
+
+    // No `.select()` on the insert: RETURNING is a read (gotcha 6), and the
+    // SELECT policy hides a media post until its bytes are confirmed, so
+    // asking for the row back here returns nothing and looks like a failure.
+    await _client.from('party_posts').insert({
+      'id': postId,
+      'party_id': partyId,
+      'author_id': userId,
+      'body': body,
+      'media_type': contentType,
+    });
+
+    final signed = await _client.functions.invoke(
+      'post-media/upload-url',
+      body: {'post_id': postId},
+    );
+
+    final data = signed.data as Map?;
+    final path = data?['path'] as String?;
+    final token = data?['token'] as String?;
+    if (path == null || token == null) {
+      throw StateError('Could not get an upload URL for the post');
+    }
+
+    // uploadBinaryToSignedUrl, not uploadToSignedUrl: the latter takes a
+    // dart:io File, which does not exist on web and would tie this repository
+    // to a platform for no reason — the picker already hands us bytes.
+    await _client.storage.from('post-media').uploadBinaryToSignedUrl(
+          path,
+          token,
+          bytes,
+          FileOptions(contentType: contentType),
+        );
+
+    await _client.rpc('confirm_post_upload', params: {'p_post_id': postId});
+
+    return postId;
+  }
+
+  /// Signed read URLs for post media, keyed by the path that was asked for.
+  ///
+  /// Signed straight from the client, with no edge function in the way — and
+  /// that is not a shortcut. The `post-media` bucket HAS a select policy
+  /// ("Post media follows party visibility"), so RLS decides what signs and
+  /// what does not, exactly as it does for `party-covers`. Only the UPLOAD
+  /// side needs the service key, because the bucket has no insert policy for
+  /// any role.
+  ///
+  /// One request for the whole list. Failures are dropped rather than thrown:
+  /// a photo that will not sign is a tile the card omits, which is the same
+  /// thing it does for a post that never had one.
+  Future<Map<String, String>> signedPostMediaUrls(
+    List<String> mediaPaths, {
+    int expiresIn = 3600,
+  }) async {
+    if (mediaPaths.isEmpty) return {};
+
+    final results = await _client.storage
+        .from('post-media')
+        .createSignedUrlsResult(mediaPaths, expiresIn);
+
+    return {
+      for (final result in results)
+        if (result is SignedUrlSuccess) result.path: result.signedUrl,
+    };
+  }
+
+  /// The host's own posts on one party, newest first.
+  ///
+  /// A plain select rather than an RPC: `party_posts` grants SELECT to
+  /// `authenticated` and its policy already answers the visibility question,
+  /// and `party_posts_party_created_idx` is a partial index on
+  /// `(party_id, created_at desc, id desc) where hidden_at is null` — exactly
+  /// this scan.
+  ///
+  /// There is deliberately NO `author_id = <host>` filter. Since
+  /// 20260825095311 only the host can write a post at all, so the rule is
+  /// already true of every row; restating it here would be a second place
+  /// expressing one rule, and the two would drift the moment the policy
+  /// changed.
+  Future<List<HostPost>> fetchPartyPosts(String partyId, {int limit = 12}) async {
+    final rows = await _client
+        .from('party_posts')
+        .select('id, party_id, author_id, body, media_path, like_count, '
+            'comment_count, created_at')
+        .eq('party_id', partyId)
+        .order('created_at', ascending: false)
+        .order('id', ascending: false)
+        .limit(limit);
+
+    return (rows as List)
+        .map((row) => HostPost.fromRow(row as Map<String, dynamic>))
+        .toList();
   }
 
   Future<void> like(String postId) async {

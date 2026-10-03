@@ -8,12 +8,11 @@ import 'package:latlong2/latlong.dart';
 import '../../data/party_repository.dart';
 import '../../data/social_repository.dart';
 import '../../models/map_party_pin.dart';
+import '../../models/map_time_window.dart';
 import '../theme/app_theme.dart';
 import '../widgets/map_pin_sheet.dart';
 import '../widgets/mp_map_pin.dart';
 import 'search_screen.dart';
-
-enum _MapFilter { live, later, weekend }
 
 /// The real device fix, and the default for [MapScreen.locate].
 ///
@@ -81,7 +80,11 @@ class _MapScreenState extends State<MapScreen> {
   LatLng? _currentPosition;
   List<MapPartyPin> _pins = [];
   bool _isLoading = true;
-  _MapFilter _filter = _MapFilter.live;
+  /// The active time chip. [MapTimeWindow.all] rather than "now": the map's
+  /// job on open is to show what exists, and a default that hides most of it
+  /// is a filter the user never chose. It is also what makes this change
+  /// incapable of removing a pin from anyone's map until they tap something.
+  MapTimeWindow _filter = MapTimeWindow.all;
 
   @override
   void initState() {
@@ -105,6 +108,7 @@ class _MapScreenState extends State<MapScreen> {
         lon: center.longitude,
         lat: center.latitude,
         radiusMeters: radiusInMeters,
+        window: _filter,
       );
       if (mounted) setState(() => _pins = pins);
     } catch (e) {
@@ -112,7 +116,8 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  void _onPinTap(MapPartyPin pin) => showMapPinSheet(context, pin);
+  void _onPinTap(MapPartyPin pin) =>
+      showMapPinSheet(context, pin, repository: _repository);
 
   void _openSearch() {
     Navigator.of(context).push(MaterialPageRoute(
@@ -123,20 +128,60 @@ class _MapScreenState extends State<MapScreen> {
   /// One pin's marker, sized from the same [now] the pin itself is drawn for.
   ///
   /// The size has to be computed twice — a `Marker` declares its own box and
-  /// the pill inside it declares its own extent — but it must not be *derived*
-  /// twice: a pin whose tier came from a later clock reading than its box
-  /// would be clipped by it. So [MpPinMetrics] answers once here and the same
-  /// instant goes down to [MpMapPin], which re-derives from it rather than
-  /// from a second `DateTime.now()`.
+  /// the bubble inside it declares its own extent — but it must not be
+  /// *derived* twice: a pin whose size came from a later clock reading than
+  /// its box would be clipped by it. So [MpPinMetrics] answers once here and
+  /// the same instant goes down to [MpMapPin], which re-derives from it rather
+  /// than from a second `DateTime.now()`.
   Marker _marker(MapPartyPin pin, DateTime now) {
     final metrics = MpPinMetrics.forPin(pin, now);
     return Marker(
       point: LatLng(pin.lat, pin.lng),
       width: metrics.width,
       height: metrics.boxHeight,
-      alignment: Alignment.topCenter,
+      // A constant again — `Alignment(0, -1)` — now that the label chip is
+      // gone and the box is the bubble exactly. Still read from MpPinMetrics
+      // rather than written down here: it is derived from the same geometry
+      // the widget paints, so a future shape whose apex is not at the bottom
+      // centre moves the anchor with it instead of quietly lying about where
+      // the party is.
+      alignment: metrics.anchor,
       child: MpMapPin(pin: pin, now: now, onTap: () => _onPinTap(pin)),
     );
+  }
+
+  /// The pins in PAINT order: largest first, so the smallest end up on top.
+  ///
+  /// Bubbles collide at low zoom and something has to give. Stripping the
+  /// label took the pin from 112px wide to `2r` — 34px empty, 68px saturated —
+  /// so the ~42m Syntagma cluster now separates around z17 instead of z19, and
+  /// what is left for this sort to handle is the genuinely dense case. The two
+  /// alternatives are still both worse:
+  ///
+  /// - **Collision offset** moves a drop off its coordinate, which is the one
+  ///   thing the teardrop exists to promise. A pin that lies about where the
+  ///   party is fails at the only job a map pin has.
+  /// - **Clustering** would count a *distance-truncated* set: the RPC returns
+  ///   at most 200 rows ordered by distance, so a cluster badge reading "37"
+  ///   would be confidently wrong whenever the cap bit. It also collapses the
+  ///   ~50m Syntagma-style clusters this map is built to show.
+  ///
+  /// Z-order costs one sort and lies about nothing, and the narrower pin makes
+  /// it stronger rather than redundant: two overlapping bubbles now differ
+  /// only in diameter, so the smaller one always shows as a whole disc inside
+  /// the gap the larger cannot cover, and it — the harder one to hit — wins
+  /// the hit test.
+  ///
+  /// Sorted for PAINTING only. The server's `is_sponsored desc, distance asc`
+  /// ordering decides which 200 rows arrive, which is a different question and
+  /// is not disturbed by re-ordering them here.
+  List<MapPartyPin> _painted(DateTime now) {
+    final ordered = [..._pins];
+    ordered.sort((a, b) => MpPinMetrics.forPin(b, now)
+        .drop
+        .radius
+        .compareTo(MpPinMetrics.forPin(a, now).drop.radius));
+    return ordered;
   }
 
   void _recenter() {
@@ -194,7 +239,7 @@ class _MapScreenState extends State<MapScreen> {
               ),
               MarkerLayer(
                 markers: [
-                  for (final pin in _pins) _marker(pin, now),
+                  for (final pin in _painted(now)) _marker(pin, now),
                   if (_currentPosition != null)
                     Marker(
                       point: _currentPosition!,
@@ -229,58 +274,43 @@ class _MapScreenState extends State<MapScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Expanded(
-                // Search is deliberately NOT bounded by the viewport: it opens
-                // its own screen and queries every party the viewer may see,
-                // wherever it is. Passing the map's centre and radius in here
-                // would make "search" mean "search what is on screen", which is
-                // a different feature.
-                child: GestureDetector(
-                  onTap: _openSearch,
-                  behavior: HitTestBehavior.opaque,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
-                    decoration: BoxDecoration(
-                      color: AppColors.chipFill,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: AppColors.hairline),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.search, size: 16, color: AppColors.textAlpha(0.5)),
-                        const SizedBox(width: 8),
-                        Text('Ψάξε πάρτι ή άτομα',
-                            style: TextStyle(fontSize: 13.5, color: AppColors.textAlpha(0.5))),
-                      ],
-                    ),
-                  ),
-                ),
+          // Search is deliberately NOT bounded by the viewport: it opens its
+          // own screen and queries every party the viewer may see, wherever it
+          // is. Passing the map's centre and radius in here would make "search"
+          // mean "search what is on screen", which is a different feature.
+          GestureDetector(
+            onTap: _openSearch,
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
+              decoration: BoxDecoration(
+                color: AppColors.chipFill,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.hairline),
               ),
-              const SizedBox(width: 8),
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: AppColors.chipFill,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppColors.hairline),
-                ),
-                child: const Icon(Icons.chat_bubble_outline, size: 18, color: AppColors.text),
+              child: Row(
+                children: [
+                  Icon(Icons.search, size: 16, color: AppColors.textAlpha(0.5)),
+                  const SizedBox(width: 8),
+                  Text('Search parties or people',
+                      style: TextStyle(fontSize: 13.5, color: AppColors.textAlpha(0.5))),
+                ],
               ),
-            ],
+            ),
           ),
           const SizedBox(height: 10),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [
-                _filterPill('Τώρα', _MapFilter.live),
+                _filterPill('All', MapTimeWindow.all),
                 const SizedBox(width: 7),
-                _filterPill('Αργότερα απόψε', _MapFilter.later),
+                _filterPill('Live', MapTimeWindow.now),
                 const SizedBox(width: 7),
-                _filterPill('Το ΣΚ', _MapFilter.weekend),
+                _filterPill('Later tonight', MapTimeWindow.tonight),
+                const SizedBox(width: 7),
+                _filterPill('Weekend', MapTimeWindow.weekend),
               ],
             ),
           ),
@@ -289,10 +319,28 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-  Widget _filterPill(String label, _MapFilter value) {
+  /// Switches the active chip and refetches.
+  ///
+  /// The refetch is the whole feature: the window is a parameter to
+  /// `get_parties_near_user`, so a new chip is a new query and not a filter
+  /// over `_pins`. Narrowing the list in Dart would make "Live" mean "whatever
+  /// happened to be in the last viewport fetch" — indistinguishable on a
+  /// six-pin test map and wrong everywhere else, because the previous fetch was
+  /// capped at 200 rows chosen by distance with no regard for time.
+  ///
+  /// Re-tapping the active chip is a no-op rather than a toggle back to All:
+  /// All is a chip of its own, so a toggle would give two ways to reach one
+  /// state and make the pill row's single-selection invariant untrue.
+  void _selectFilter(MapTimeWindow value) {
+    if (_filter == value) return;
+    setState(() => _filter = value);
+    _fetchEventsInBounds();
+  }
+
+  Widget _filterPill(String label, MapTimeWindow value) {
     final active = _filter == value;
     return GestureDetector(
-      onTap: () => setState(() => _filter = value),
+      onTap: () => _selectFilter(value),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
         decoration: BoxDecoration(
@@ -305,7 +353,7 @@ class _MapScreenState extends State<MapScreen> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (value == _MapFilter.live) ...[
+            if (value == MapTimeWindow.now) ...[
               Container(width: 6, height: 6, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle)),
               const SizedBox(width: 6),
             ],
@@ -335,9 +383,9 @@ class _MapScreenState extends State<MapScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _legendRow(AppColors.purple, dashed: false, label: 'Δημόσιο · το βλέπουν όλοι'),
+            _legendRow(AppColors.purple, dashed: false, label: 'Public · anyone can see it'),
             const SizedBox(height: 7),
-            _legendRow(AppColors.pink, dashed: true, label: 'Ιδιωτικό · μόνο καλεσμένοι'),
+            _legendRow(AppColors.pink, dashed: true, label: 'Private · invited only'),
           ],
         ),
       ),

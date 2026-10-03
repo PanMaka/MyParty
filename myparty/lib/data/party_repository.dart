@@ -2,8 +2,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/hosted_parties.dart';
 import '../models/map_party_pin.dart';
+import '../models/map_time_window.dart';
+import '../models/party_list_item.dart';
 import '../models/party_summary.dart';
 import '../models/rsvp_party.dart';
+import '../state/mp_store.dart' show MpRsvp;
 
 /// Which end of the calendar a party list is asking for.
 enum PartyWindow {
@@ -178,8 +181,53 @@ class PartyRepository {
     final withCovers = parties.where((p) => p.hasCover).toList();
     if (withCovers.isEmpty) return {};
 
-    final byPath = {for (final p in withCovers) p.coverPath!: p.id};
+    return _signCovers(
+      {for (final p in withCovers) p.coverPath!: p.id},
+      expiresIn,
+    );
+  }
 
+  /// The same, for the ALL PARTIES list.
+  ///
+  /// A third entry point rather than a generic one: [PartySummary] and
+  /// [PartyListItem] are different rows from different RPCs, and the shared
+  /// body below is what actually needs to stay single -- the bucket name, the
+  /// RLS argument and the drop-on-failure policy all live in [_signCovers], so
+  /// none of the three can come to disagree about any of them. Keyed by party
+  /// id, like its sibling.
+  Future<Map<String, String>> signedListCoverUrls(
+    List<PartyListItem> items, {
+    int expiresIn = 3600,
+  }) async {
+    final withCovers = items.where((i) => i.coverPath != null).toList();
+    if (withCovers.isEmpty) return {};
+
+    return _signCovers(
+      {for (final i in withCovers) i.coverPath!: i.partyId},
+      expiresIn,
+    );
+  }
+
+  /// One cover, for a surface that holds a single party rather than a list —
+  /// [MapPinSheet], which opens on one pin.
+  ///
+  /// Separate entry point, shared body: the bucket name, the RLS argument
+  /// above and the drop-on-failure policy all stay in [_signCovers], so this
+  /// cannot come to disagree with the list form about any of them. Returns
+  /// null for a party with no cover, which is the same answer the sheet acts
+  /// on as a cover that would not sign — both draw the placeholder.
+  Future<String?> signedCoverUrl(String? coverPath, {int expiresIn = 3600}) async {
+    if (coverPath == null) return null;
+    final signed = await _signCovers({coverPath: coverPath}, expiresIn);
+    return signed[coverPath];
+  }
+
+  /// Signs [byPath] — storage key to caller's chosen result key — in ONE
+  /// request, dropping anything that fails.
+  Future<Map<String, String>> _signCovers(
+    Map<String, String> byPath,
+    int expiresIn,
+  ) async {
     final results = await _client.storage
         .from('party-covers')
         .createSignedUrlsResult(byPath.keys.toList(), expiresIn);
@@ -211,17 +259,34 @@ class PartyRepository {
   /// come from `st_y`/`st_x` on a non-null geography column so this should not
   /// happen, but a pin at (0, 0) in the Gulf of Guinea is a worse outcome than
   /// a pin that is absent.
+  ///
+  /// [window] is the map's time chip and is applied **in the query**, never to
+  /// the returned list — see [MapTimeWindow]. It defaults to
+  /// [MapTimeWindow.all], which is an unbounded range on the server and
+  /// therefore byte-identical to the pre-chip behaviour.
+  ///
+  /// `p_tz` is deliberately NOT sent. The server defaults it to
+  /// `Europe/Athens`, and Dart has no IANA zone name to offer without a
+  /// plugin — `DateTime.now().timeZoneName` gives `"EEST"`, an abbreviation
+  /// that is ambiguous across zones and useless to Postgres. Sending a raw UTC
+  /// offset instead would be worse than the default: the boundaries this
+  /// parameter positions are 04:00 local, which is exactly where Greece's DST
+  /// transitions land, so an offset would be wrong on the two nights it
+  /// matters most. The parameter exists as the seam for when a real zone is
+  /// available.
   Future<List<MapPartyPin>> fetchPartiesNearUser({
     required double lon,
     required double lat,
     required double radiusMeters,
     int limit = 200,
+    MapTimeWindow window = MapTimeWindow.all,
   }) async {
     final rows = await _client.rpc('get_parties_near_user', params: {
       'map_center_lon': lon,
       'map_center_lat': lat,
       'radius_meters': radiusMeters,
       'p_limit': limit,
+      'p_window': window.wire,
     });
 
     final pins = <MapPartyPin>[];
@@ -278,6 +343,87 @@ class PartyRepository {
       ((row['is_past'] as bool?) ?? false ? past : upcoming).add(pin);
     }
     return PartySearchResults(upcoming: upcoming, past: past);
+  }
+
+  /// One page of the ALL PARTIES browse list.
+  ///
+  /// **The sort is the server's, and that is the whole point of the RPC.**
+  /// Sorting an already-fetched page by interest would mean "most interested
+  /// among whatever we happened to load", which is a different feature that
+  /// happens to look the same on a short list.
+  ///
+  /// Nothing here re-implements visibility: `get_parties_list` is SECURITY
+  /// INVOKER, so the `parties` SELECT policy has already filtered the rows.
+  /// Nothing here re-sorts either — reordering the page client-side would
+  /// silently break keyset pagination, since the cursor is the LAST row in
+  /// server order and a local sort moves which row that is.
+  ///
+  /// [cursor] null fetches the first page. The returned [PartyListPage.cursor]
+  /// is null when the server returned a short page, which is the end of the
+  /// list; callers page until it is null rather than counting rows.
+  Future<PartyListPage> fetchPartiesList({
+    PartySort sort = PartySort.soonest,
+    int limit = 30,
+    PartyListCursor? cursor,
+  }) async {
+    final rows = await _client.rpc('get_parties_list', params: {
+      'p_sort': sort.wireName,
+      'p_limit': limit,
+      'p_cursor_group': cursor?.sortGroup,
+      'p_cursor_rank': cursor?.sortRank,
+      'p_cursor_starts_at': cursor?.startsAt.toUtc().toIso8601String(),
+      'p_cursor_id': cursor?.partyId,
+    });
+
+    final items = (rows as List)
+        .map((row) => PartyListItem.fromRow(row as Map<String, dynamic>))
+        .toList();
+
+    return PartyListPage(
+      items: items,
+      cursor: items.length < limit ? null : PartyListCursor.fromItem(items.last),
+    );
+  }
+
+  /// Writes the viewer's RSVP, or withdraws it.
+  ///
+  /// Passing the status the viewer already holds is the un-RSVP and DELETEs
+  /// the row — there is no third enum value for "not going", because the
+  /// absence of a row already records it (22_private asserts the enum stays at
+  /// two). The counter trigger's DELETE branch has handled this since the
+  /// table was created.
+  ///
+  /// A private party refuses 'interested' at the policy (20260825090050), so
+  /// asking for it there comes back as a 42501 rather than being filtered out
+  /// here. That is deliberate: a second copy of the rule in the client is one
+  /// that can drift, and the UI already offers only "Coming" on a private
+  /// party, so reaching this with [MpRsvp.interested] means something upstream
+  /// is already wrong and should be loud.
+  ///
+  /// Upsert rather than insert-or-update: the primary key is
+  /// (party_id, user_id), so a viewer changing their mind is one round trip
+  /// and the trigger sees it as the single status delta it is built for.
+  Future<void> setRsvp({
+    required String partyId,
+    required MpRsvp status,
+    required MpRsvp? current,
+  }) async {
+    final userId = currentUserId;
+    if (userId == null) throw StateError('setRsvp needs a signed-in user');
+
+    if (current == status) {
+      await _client.from('rsvps').delete().match({
+        'party_id': partyId,
+        'user_id': userId,
+      });
+      return;
+    }
+
+    await _client.from('rsvps').upsert({
+      'party_id': partyId,
+      'user_id': userId,
+      'status': status == MpRsvp.going ? 'going' : 'interested',
+    });
   }
 }
 

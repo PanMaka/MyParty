@@ -12,8 +12,11 @@ Session-by-session task scripts: `docs/MyParty-ClaudeCode-Prompts.md`.
 `notification_jobs` tables with RLS;
 `get_parties_near_user` RPC
 (tier/zoom-filtered map query, `p_limit` defaulting to 200 and clamped to
-[1, 500], `authenticated`-only since `20260821175831`), called live from
+[1, 500], `authenticated`-only since `20260821175831`, and time-windowed by
+`p_window` since `20260823091942`), called live from
 `MapScreen` through `PartyRepository.fetchPartiesNearUser`;
+`party_time_window` and `party_end_grace` (the map's Όλα/Τώρα/Αργότερα απόψε/
+Το ΣΚ chips, filtered server-side — see `docs/phase-15-map-time-filters.md`);
 `create_party_with_invites`; `get_feed`, `get_post_comments`, `get_messages`,
 `get_party_chats` and `get_party_stories`/`get_story_rails` (all
 keyset-paginated or time-bounded, all invoker-rights so RLS does the
@@ -61,6 +64,253 @@ and also unbuildable under `flutter test`); `PushService`, `LocationReporter`
 and the `Notifications` app-scoped wiring; `showLocationConsentSheet`,
 `NotificationSettingsScreen` and `AccountDeletionScreen`.
 
+**Group chat belongs to private parties only** (Phase 16c). `can_chat_in_party`
+is now `can_access_party AND party_is_private`. The participation disjunction
+(host/invited/rsvp'd) was **deleted, not lost**: it existed solely to stop a
+public party's chat being world-writable, and on a private party it is a
+tautology — `can_access_party` already means host-or-invited there, and an
+`rsvps` row can only exist where `can_access_party` passed, so "rsvp'd" implies
+"invited". **A revert must restore that clause in the same migration**, or
+public chat comes back writable by the entire user base. Existing public-party
+messages were hidden with `hidden_reason` naming the migration rather than left
+to fall out of the policy silently — a moderator asking "what was taken down"
+has to find them. Guarded at all three client entry points; `MessagesScreen`
+needs none because `get_party_chats` already filters on the helper.
+
+**Party posts are HOST-ONLY, and the rule lives in the INSERT policy** —
+`is_party_host` in the `party_posts` INSERT policy, with **no** matching
+`author_id = host_id` filter on the read side. Two places expressing one rule
+drift; the policy is what makes it true, a read filter would only make it look
+true while non-host rows accumulated. Three consequences worth knowing:
+
+- **`get_feed` becomes a host broadcast.** It shows posts from every accessible
+  party by any author; with host-only writing it can only ever show host posts.
+  `post_likes`/`post_comments` are untouched, so guests still react and reply —
+  the feed keeps its conversation and loses guest authorship. Reversing is one
+  migration and the read side needs no change either way.
+- **`can_moderate_post`'s two arms now name the same person on every row.** A
+  post's author is always the party's host, so host-arm and author-arm cannot
+  be told apart by a test. Both stay in the helper: unlike the chat clause this
+  one is not costless to remove, and there is no second statement of the rule
+  for it to drift against.
+- **Gotcha 2 no longer bites `party_posts`.** The author-side `is_blocked` term
+  was there because a blocked user could post on a third party's public party;
+  now the author IS the host, so `can_access_party`'s host block already covers
+  every case. The term stays — it is one widening away from mattering again —
+  but `05_feed_posts_and_reports.test.sql` can no longer demonstrate it failing
+  on its own, and says so. Gotcha 2 is still live for `post_comments`,
+  `messages` and `stories`, whose authors are still anybody.
+
+**Post media got the handshake it never had.** `media_path` is derived by a
+before-insert trigger from `{party_id}/{post_id}.{ext}` and carries **no insert
+grant** — closing an edge where the client could write a storage key while the
+`post-media` bucket has no INSERT policy for any role, making every media post
+a dangling reference by construction. The flow mirrors stories exactly: insert
+with `media_type` → `post_upload_target` → signed PUT via the **`post-media`
+edge function** → `confirm_post_upload`, which checks `storage.objects` for the
+bytes before making the row visible. A media post is invisible until confirmed,
+to its author included, which is what makes an abandoned handshake safe.
+
+**The `post-media` edge function has ONE route, and the asymmetry is
+deliberate.** Unlike `story-media`, whose bucket ships zero policies in either
+direction, `post-media` HAS a select policy following party visibility — so
+reads are signed client-side under RLS (`FeedRepository.signedPostMediaUrls`,
+same shape as `PartyRepository.signedCoverUrls`) and only the upload side needs
+the service key. Adding a view route would mean holding the service key while
+re-deciding a question the storage policy already answers correctly.
+
+**Stories are hidden for launch and ship in a later update.** `FeedScreen.
+_storiesEnabled = false` hides the two UI doors — the header's "+ Story" button
+and the rail — **and nothing else**. Every table, RPC, policy, the upload
+handshake, `StoryRepository`, `StoryViewerScreen`, `showStoryPickerSheet` and
+`07_stories.test.sql` are untouched and still exercised. The **`story-cleanup`
+pg_cron job must keep running** (`*/5`, verified active): it hides expired rows
+and deletes their objects over pg_net, so stopping it would let the
+`story-media` bucket accumulate files nothing will ever collect. Two widget
+tests are `skip:`ped verbatim rather than rewritten — they are the coverage that
+returns when the flag flips — and a third asserts the hidden state.
+
+**`mpParties` is RETIRED** (Phase 18, `20260826094842`). The ALL PARTIES tab
+runs on `get_parties_list`, and the three things the const map was blocking all
+landed with it: `PartyDetailSheet`'s group-chat button and its story tiles now
+open the real `ChatScreen`/`StoryViewerScreen`, because the sheet finally has a
+uuid to hand them. It was one job, not three, exactly as recorded.
+
+**Sorting is what forced it.** "Most interested first" applied to an
+already-fetched page means "most interested among whatever we happened to
+load", so the sort had to be the server's, and a server sort needs a server
+list. Two sorts, as a `party_sort` **enum** so an unknown value is a type error
+at the PostgREST boundary rather than a silent fallback to the default.
+
+**Ordering by a hidden counter is a side channel, and the fix is grouping.**
+`20260825090051` returns NULL for both counters on a private row so no client
+can render the number; ordering by that number hands most of it back. A private
+party ranked between two public rows whose counts ARE transmitted is
+**bracketed, not blurred** — between 40 and 30 means it is in [30, 40], and the
+interval tightens as the list gets denser. It is also observable over time: a
+private row climbing the list reports rsvp *events*, which is more than the
+magnitude that was withheld. So:
+
+- Private parties are a **group pinned above** the public ranking, ordered
+  among themselves by `starts_at`. Not excluded — a party you were invited to
+  must not vanish because you changed the sort; sorting is not a filter. Above
+  rather than below, because an invitation outranks a stranger's headcount.
+- **This is the same call `MpDropGeometry.private()` already made** for pin
+  size: fixed, at the ceiling, so nothing can be read off it. Ordering is that
+  leak in one dimension.
+- The group is ordered by `starts_at` and **not `going_count`**, which is NULLed
+  for the same rows — ranking by it would trade a leak of interest for a leak
+  of guest-list size.
+- The `case when p.is_private then null` in `sort_rank` is what makes this "the
+  value is never read" rather than "the leak is small". The group key alone
+  already stops a private row being compared with a public one, but without the
+  case the counter would still order private rows *among themselves* by a value
+  none of them transmits.
+- **The other sort needs none of it.** `'soonest'` ranks on `starts_at`, which
+  is public for private parties, so they interleave freely there — asserted in
+  `25_parties_list_and_sort.test.sql`, because "private is always grouped" is
+  exactly the over-generalisation a later edit makes.
+
+That test file's headline assertions are the **negative** ones: the two private
+fixtures carry counts whose order *disagrees* with their `starts_at` order, so
+"ordered by count" and "ordered by starts_at" predict opposite results. Against
+agreeing numbers every assertion in it passes on the leaking implementation.
+
+Keyset over one ascending 4-tuple — `(sort_group, sort_rank, starts_at,
+party_id)` — for **both** sorts, with descending keys negated (`interested_count
+desc` is `-interested_count asc`, which is why `sort_rank` is a bigint). One row
+comparison paginates either sort and there is no second cursor shape to keep in
+step. The cursor columns are returned so the client echoes back the last row it
+drew, and `sort_rank` is 0 on every private row, so a cursor pointing at a
+private party carries no count either.
+
+**`hype` died with the map, and what replaced it is the thing it was a picture
+of.** `MpStore._hype`, `HypeBar` and the bump button are deleted — a percentage
+seeded at 64 and 41 for two hardcoded keys, decremented by a timer, with no hype
+column in the schema and no phase that adds one. The card now shows the real
+counter labelled by tense: "N interested" before a party starts, "N here now"
+once it has. Same call `credibility_score` already got. Three `MpParty` fields
+went with no replacement because no column answers them — `hostSub`, `dist` and
+`posters`; distance is still shown on `MapPinSheet`, which is a spatial query
+and therefore knows it. `MpStore` is now only `flashCopied`; **RSVP writes are
+real** (`PartyRepository.setRsvp`, with the un-RSVP as the DELETE it always
+described itself as being).
+
+Two things the list decides for itself, neither of which changes an existing
+surface: it filters out finished parties using the leakproof
+`starts_at > now() - party_end_grace()` shape (gotcha 22), which means the
+gotcha-21 zombie is absent *here* while the map still pins it — that decision
+stays open — and the sort control lives **outside** the scroll view, so an empty
+or failed list still offers the way back to "soonest".
+
+**A private party holds no attendance, and that is enforced in three places
+because one would not hold.** Decided Phase 16b.
+
+- **The write policy.** `rsvps` INSERT and UPDATE both call
+  `rsvp_status_allowed(party_id, status)`, which is false for `'interested'`
+  on a private party, so no private row carries an interested *status*.
+  This used to imply that `interested_count` on a private row could never be
+  non-zero; **Phase 17 retired that** (see below) and the read RPCs are now the
+  only thing protecting the number.
+  The term is in the UPDATE's **`with check`**, not its `using`: `using` sees
+  the OLD row, so spelled there it would test the status being replaced and
+  wave through exactly the write it forbids (`going` → `interested`).
+- **The read RPCs.** `get_parties_near_user` and `search_parties` both return
+  **NULL**, not 0, for `going_count`/`interested_count` on a private row. Zero
+  is a legible, wrong answer indistinguishable from a real empty party; NULL is
+  "not answered for this row", and it forces `int?` on the client so a surface
+  that forgets fails to compile rather than rendering a confident 0. Both RPCs,
+  because `MapPinSheet` is fed by either one — fixing one would leave the
+  identical widget printing the number when reached from search.
+- **The client.** No count, no hype bar, no "N people posting" on a private
+  party, and one action ("Coming") instead of two.
+
+`party_is_private` is `security definer` for gotcha 1's reason: privacy is a
+property of the PARTY, not of the viewer, so answered through the caller's
+filtered view of `public.parties` an invisible row reads as *not private* and
+the write is permitted. Unlike `can_user_access_party` (gotcha 11) there is no
+per-user variant to parameterise.
+
+**The ceiling, so nobody mistakes this for more:** an RLS policy binds callers
+that go through RLS. A future `security definer` RPC inserting rsvps bypasses
+all three policies and must call `rsvp_status_allowed` itself. Nothing writes
+`rsvps` server-side today — `create_party_with_invites` writes `invitations` —
+so the policy is currently the complete enforcement surface. If that changes,
+the rule moves to a `before insert or update` row trigger.
+
+**`rsvp_status` has exactly two values and un-RSVPing is a `DELETE`.** There is
+deliberately no `'declined'`: "not going" is the absence of a row, which the
+DELETE policy and the counter trigger's DELETE branch have supported since the
+table was created. A third value would record an absence the absent row already
+records, and would widen `my_rsvp_status` on three read RPCs to do it.
+`22_private_party_counts_and_rsvp.test.sql` asserts the enum stays at two, so
+adding one is a red test rather than a silent widening.
+
+`my_rsvp_status` is deliberately **still transmitted** for private parties: it
+is a property of the CALLER, not of the party, so suppressing it would break
+the button label while protecting nothing — the viewer already knows their own
+answer. `parties.going_count` is likewise untouched and still maintained; the
+host has a guest list. (`party_tier` does **not** read it, contrary to what
+this said before Phase 17 — `party_tier` is a plain column set by the host in
+`create_party_with_invites` and only ever read back as a zoom filter. Nothing
+in the schema derives a number from either counter.)
+
+**`interested_count` INCLUDES everyone going — it is a superset, not a
+sibling.** Phase 17 (`20260826093437`). Going implies interested: a party with
+30 going and 0 interested was reporting zero interest in a full room. The
+change is entirely in `sync_party_rsvp_counters` plus a backfill
+(`interested_count += going_count`); `going_count` is untouched in meaning and
+value, and `rsvp_status` is untouched — a row is still exactly one of the two,
+and anything reading `r.status` is unaffected, `get_profile_stats` included
+(it counts `rsvps` rows, not these columns).
+
+Three things about it that look wrong without the argument:
+
+- **A status flip moves `going_count` alone.** Not "both counters move" —
+  interested membership does not change in *either* direction, because the
+  person was already counted before the flip and still is after it. The
+  UPDATE branch therefore touches one column. A partial revert that increments
+  both on insert but still decrements interested on the flip passes every
+  insert assertion and drifts the counter down on every commit;
+  `24_going_implies_interested.test.sql` asserts both directions separately
+  for that reason.
+- **Private parties are included, and that retired an invariant on purpose.**
+  A private party with one going now has `interested_count = 1`, where
+  20260825090050 previously made 0 the only reachable value. Nothing transmits
+  it — 20260825090051 nulls **both** counters on a private row and is
+  untouched — so the suppression that actually protects the number is intact.
+  The alternative, incrementing interested only on public parties, buys the
+  invariant back for a `parties.is_private` lookup on every rsvp write and a
+  rule with two shapes. `22_private` asserts the new value directly so nobody
+  "restores" the old one.
+- **The backfill is a blind delta, not a recount.** A recount from `rsvps`
+  would be self-healing, which is worse here: it would paper over any
+  pre-existing drift at the one moment that drift is worth finding. The
+  migration ends with a `going_count > interested_count` check that fails the
+  apply.
+
+**Nothing sums the two, and nothing may start.** Surveyed at Phase 17: all five
+readers (`get_parties_near_user`, `search_parties`, `get_hosted_parties`,
+`get_party_chats`, `export_account_data`) pass the columns through untouched,
+and no Dart surface adds them. Two client consequences were accepted rather
+than fixed: the **map pin grows before a party starts**, since
+`MpDropGeometry.forPin` sizes on `attendeeCountAt` which is `interested_count`
+pre-live (saturates at 100, so only parties under that move), and
+**`MapPinSheet` prints both side by side**, which now shows overlapping sets —
+"12 here now" beside "46 interested" means 46 of whom 12 arrived, not 58. The
+doc comments on both were corrected; the UI was not.
+
+**Red means private; `AppColors.destructive` means destructive.** Private moved
+pink → `AppColors.private` (#F23557) across the map bubble, `PrivacyBadge` and
+every card accent, so one colour means private app-wide. It is a *separate
+token* from the #E5484D that account deletion uses — a private party is
+exclusive, not dangerous. Red **joins** the dashed outline rather than replacing
+it: red-vs-purple is exactly the pair red-green colour blindness collapses, so
+the dash has to carry the distinction on its own for those readers. The private
+bubble draws a **lock**, not a number — that label was the last place a private
+party's attendance was still on screen, since the radius has been fixed since
+the map rework but the label printed the count regardless.
+
 Story visibility uses the **wide** `can_access_party`, not
 `can_chat_in_party` — deliberately the opposite call from chat. A story is
 read-only content attached to a party, so anyone who may look at the party may
@@ -102,19 +352,18 @@ The social graph is **follows-only and asymmetric** — there is no
 one without an explicit product decision. A follow grants **no** private-party
 visibility; that comes from `invitations` alone.
 
-**Mock today, ships real in later phases:** everything left in
-`lib/state/mp_store.dart` (hype, interested, invited) and the
-const `mpParties` list in `lib/models/` — `PartyCard` and `PartyDetailSheet`
-still read from it instead of Supabase. Note `mpParties` keys are strings like
-`'taratsa'`, not uuids, which is why the report action is wired into
-`MapPinSheet` (a real `parties` row) and not `PartyDetailSheet`, and why
-*both* of `PartyDetailSheet`'s "Group chat" button and its story tiles are
-placeholders while `ChatScreen` and `StoryViewerScreen` are real — it has no
-uuid to hand either of them. Real chat entry points are `MessagesScreen`,
-`EventsScreen`'s RSVP rows and the host wizard's done screen; `MapPinSheet`
-deliberately has none, since a map-pin viewer is exactly the passer-by
-`can_chat_in_party` excludes. Real story entry points are the feed's story
-rail and its "+ Story" picker.
+**Mock today, ships real in later phases:** nothing on the parties tab —
+Phase 18 retired the last of it. `MpStore` holds only `flashCopied`, a
+1.8-second "copied" flash on the host wizard's invite link. `PartyCard` and
+`PartyDetailSheet` read real `parties` rows, so both of the sheet's former
+placeholders (group chat, story tiles) open the real screens; the one
+affordance still on `comingSoon` is **Directions**, and for a reason `mpParties`
+was never responsible for — `get_parties_list` is not a spatial query, so the
+row carries no coordinates. Real chat entry points are now `MessagesScreen`,
+`EventsScreen`'s RSVP rows, the host wizard's done screen, **and both
+private-party doors on the parties tab**; `MapPinSheet` deliberately still has
+none, since a map-pin viewer is exactly the passer-by `can_chat_in_party`
+excludes.
 
 Phase 7 is complete end to end, and `scripts/verify_notification_delivery.sh`
 measures it: 1s from `insert into parties` to a delivered push, one
@@ -518,6 +767,17 @@ is therefore still blocked.
     The failure is silent and cumulative — nothing errors, the map just slowly
     fills with parties that are over.
 
+    **Phase 15 adopted the grace in ONE window and left this open.** The Τώρα
+    chip drops a null-`ends_at` party once it is older than
+    `party_end_grace()` — the same six hours `party_is_past` groups by — and
+    nothing else changed: the base filter is untouched, Όλα is the default, so
+    **the default map still pins a finished party forever.** That is not
+    timidity, it is the asymmetry above: on the base filter, being wrong
+    *removes a live party*; inside a chip, being wrong costs a tap, because
+    Όλα is one tap away. `21_map_time_windows.test.sql` asserts the default
+    view still shows it, so closing this stays a decision somebody takes
+    rather than a side effect somebody causes.
+
 22. **Leakproofness decides which of your filters run before the policy, and
     it is the single fact that prices every new predicate on `parties`.**
     Gotcha 19 is the special case; this is the rule. A non-leakproof operator
@@ -552,13 +812,32 @@ is therefore still blocked.
 
     Two consequences, both load-bearing for the map rework:
 
-    - **Time filtering is free, and better than free.** The Τώρα / Αργότερα /
-      Το ΣΚ chips can push `starts_at`/`ends_at` predicates into
-      `get_parties_near_user` and they will cut the row count *before*
-      `can_access_party` is called on each row — measured at 35× on the map
-      query body, and the same mechanism that makes the 500km tier (208ms,
-      leakproof `party_tier` filter first) six times faster than the 5km tier
-      (995ms, no pre-filter at all).
+    - **Time filtering is free, and better than free. Phase 15 shipped it.**
+      The Τώρα / Αργότερα / Το ΣΚ chips push `starts_at` bounds into
+      `get_parties_near_user` and they cut the row count *before*
+      `can_access_party` is called — the same mechanism that makes the 500km
+      tier (leakproof `party_tier` filter first) faster than the 5km tier.
+      `scripts/explain_map_time_windows.sh` measures the shipped body: at 5km
+      with a tonight window, **210ms with neither pre-filter, 12.0ms with the
+      bbox alone, 2.1ms with both** — the spatial and time pre-filters compose
+      rather than one shadowing the other.
+
+      **Two shapes of the same predicate are ~20× apart, and the slow one is
+      what anyone writes first.** `coalesce(ends_at, starts_at + grace) >
+      now()` puts a Var under `timestamptz_pl_interval`, which is not
+      leakproof, so the whole term sinks behind the barrier;
+      `starts_at > now() - grace` leaves `timestamptz_gt(Var, Const)` and is
+      promoted. Same rows (170), 120.7ms vs 6.2ms. `party_is_past()` is doubly
+      unusable — not leakproof *and* it carries a SET clause, so it can never
+      be inlined (gotcha 20). Hence `party_end_grace()`: the **number** has one
+      definition while the two call sites use the two shapes leakproofness
+      forces on them. **When a new predicate has a constant and a column on
+      opposite sides, check which side the leaky operator ends up on.**
+
+      A bound coming from a `stable` plpgsql function still lands as an
+      InitPlan constant and is still promoted — measured, because the failure
+      mode (it silently becomes a correlated expression) has no symptom other
+      than the old timing.
     - **Search must wait for the policy rewrite.** An `ilike` on
       `parties.title` or `parties.area` has exactly `st_dwithin`'s failure
       mode: it sits behind the barrier, seq-scans, and cannot reach an index —
@@ -644,6 +923,24 @@ bash scripts/explain_profile_stats.sh [N_USERS] [N_PARTIES] [RSVPS_PER_USER]
 # the row policy costs ~99% of p95 and defeats the GiST index entirely.
 # Rolled back; the seeded fixtures are untouched.
 bash scripts/loadtest_map_query.sh [N_PARTIES] [N_RSVPS] [N_USERS] [ITERATIONS]
+
+# Phase 15: do the time chips actually pre-filter, and do they compose with the
+# spatial one? Prints (1) whether a bound from party_time_window() reaches the
+# plan as an InitPlan constant ahead of the policy, (2) the two spellings of the
+# grace period against a control that all three return the same rows, and (3)
+# the map body with neither / box only / window only / both. Rolled back.
+bash scripts/explain_map_time_windows.sh [N_PARTIES]
+
+# Host posts WITH their bytes, so HostPostStrip on MY PARTIES has something to
+# draw. Not in seed.sql, and it cannot be: seed.sql cannot put a file in a
+# bucket (gotcha #7), and 20260825095311 keeps a media post invisible until
+# confirm_post_upload has checked storage.objects for the bytes -- so a seeded
+# row alone just makes the strip 404 and collapse the tile. Runs the real
+# handshake (insert as the host under RLS, PUT, confirm) rather than writing
+# media_uploaded_at directly, and re-counts as the VIEWER at the end. Six posts
+# on the three parties host@myparty.local has rsvps rows on. Idempotent; needs
+# the stack up and Pillow. Re-run after every `supabase db reset`.
+bash scripts/seed_post_media.sh
 
 cd myparty
 flutter pub get

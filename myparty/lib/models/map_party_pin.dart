@@ -21,8 +21,18 @@ class MapPartyPin {
   /// Both RSVP counters, kept separate rather than pre-collapsed into one
   /// number — which of the two a surface shows depends on whether the party is
   /// live, and that answer changes while the pin is on screen.
-  final int goingCount;
-  final int interestedCount;
+  ///
+  /// NULL for a private party, and nullable in the type for that reason.
+  /// 20260825090051 stops both read RPCs transmitting attendance for private
+  /// rows, so this is not "unknown" — it is "not answered for this row", and
+  /// there is no default that would be honest. `0` in particular is a legible
+  /// lie: it reads as "nobody is going" and is indistinguishable from a real
+  /// empty party.
+  ///
+  /// The nullability is the point. A surface that forgets a private party has
+  /// no count does not render a confident zero, it fails to compile.
+  final int? goingCount;
+  final int? interestedCount;
 
   /// `endsAt` is nullable in the schema and the host wizard does not require
   /// it, so "no stated end" is a real state and not a parse failure. See the
@@ -33,6 +43,26 @@ class MapPartyPin {
 
   /// Neighbourhood label written by the host; null means they did not say.
   final String? area;
+
+  /// The host's blurb. Null means they wrote none — an empty body, not a
+  /// missing one — so the sheet omits the section rather than showing a gap.
+  final String? description;
+
+  /// The host, as both payloads report them. `hostUsername` comes from an
+  /// INNER JOIN on `profiles` in both RPCs, so it is null only if the column
+  /// itself is (see the tombstone rule in CLAUDE.md — a deleted host still
+  /// has a scrubbed handle and still renders).
+  final String? hostId;
+  final String? hostUsername;
+
+  /// The VIEWER's own RSVP — `'interested'`, `'going'`, or null for neither.
+  ///
+  /// A property of who is asking, unlike [goingCount] and [interestedCount]
+  /// which are properties of the party. Kept as a string for the same reason
+  /// [RsvpParty.rsvpStatus] is: nothing in the client branches on it yet
+  /// beyond rendering, and an enum would be a wire contract to maintain for a
+  /// value that currently only gets compared.
+  final String? myRsvpStatus;
 
   /// A storage key into the private `party-covers` bucket, never a URL —
   /// resolving it needs a signed URL from the repository layer, the same
@@ -45,11 +75,15 @@ class MapPartyPin {
     required this.lng,
     required this.title,
     required this.isPrivate,
-    this.goingCount = 0,
-    this.interestedCount = 0,
+    this.goingCount,
+    this.interestedCount,
     this.startsAt,
     this.endsAt,
     this.area,
+    this.description,
+    this.hostId,
+    this.hostUsername,
+    this.myRsvpStatus,
     this.coverPath,
   });
 
@@ -60,14 +94,24 @@ class MapPartyPin {
       lng: (row['lon'] as num).toDouble(),
       title: (row['title'] as String?) ?? 'Πάρτι',
       isPrivate: (row['is_private'] as bool?) ?? false,
-      // `?? 0` is the true value here: zero really is "nobody yet". The
-      // nullable fields below get no such default, because there is no true
-      // value for an unstated end time, neighbourhood or cover.
-      goingCount: (row['going_count'] as int?) ?? 0,
-      interestedCount: (row['interested_count'] as int?) ?? 0,
+      // No `?? 0` any more. On a PUBLIC row zero really is "nobody yet" and
+      // the server sends it; on a private row the server sends null and that
+      // is a different fact. Coalescing here would erase the distinction the
+      // migration exists to create, one line below the comment explaining it.
+      goingCount: row['going_count'] as int?,
+      interestedCount: row['interested_count'] as int?,
       startsAt: _parseTimestamp(row['starts_at']),
       endsAt: _parseTimestamp(row['ends_at']),
       area: row['area'] as String?,
+      // All four were in the payload and unread until the sheet needed them.
+      // `description` and `my_rsvp_status` were map-only until
+      // 20260824094606 added them to search_parties, so that both screens can
+      // fill the same sheet — see the parity assertion in
+      // 20_party_search.test.sql.
+      description: row['description'] as String?,
+      hostId: row['host_id'] as String?,
+      hostUsername: row['host_username'] as String?,
+      myRsvpStatus: row['my_rsvp_status'] as String?,
       coverPath: row['cover_path'] as String?,
     );
   }
@@ -99,14 +143,31 @@ class MapPartyPin {
 
   bool get live => liveAt(DateTime.now());
 
-  /// The number a pin prints, and it is a different number depending on the
-  /// tense: a live party reports who is *inside* it ("N μέσα"), one that has
-  /// not started reports who is *interested* ("N ενδ."). Both surfaces —
-  /// [MpMapPin] and [MapPinSheet] — pair this with [live], so the count and
-  /// its label can never disagree about which of the two it is.
-  int attendeeCountAt(DateTime now) => liveAt(now) ? goingCount : interestedCount;
+  /// Whether this pin reports attendance at all.
+  ///
+  /// True exactly when the party is public. Derived from the payload rather
+  /// than from [isPrivate] so that the client's rule and the server's rule are
+  /// the same rule: if a future migration suppressed counts for some other
+  /// reason, every surface would follow without being edited.
+  bool get hasCounts => goingCount != null && interestedCount != null;
 
-  int get attendeeCount => attendeeCountAt(DateTime.now());
+  /// The number a pin prints, and it is a different number depending on the
+  /// tense: a live party reports who is *inside* it ("N here now"), one that
+  /// has not started reports who is *interested* ("N interested").
+  ///
+  /// Since 20260826093437 the second of those is a SUPERSET of the first —
+  /// `interested_count` counts every rsvp, going included — so the pre-live
+  /// number is now the larger one and the pin shrinks when the party starts.
+  /// That is the intended reading (interest before, presence during), but it
+  /// means the two are no longer disjoint sets and must never be summed. Both
+  /// surfaces — [MpMapPin] and [MapPinSheet] — pair this with [live], so the
+  /// count and its label can never disagree about which of the two it is.
+  ///
+  /// Null for a private party, all the way through: there is no count to
+  /// print, so callers branch on null rather than being handed a zero.
+  int? attendeeCountAt(DateTime now) => liveAt(now) ? goingCount : interestedCount;
+
+  int? get attendeeCount => attendeeCountAt(DateTime.now());
 
   /// True only when the host uploaded a cover, mirroring [PartySummary].
   bool get hasCover => coverPath != null;

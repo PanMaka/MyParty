@@ -19,7 +19,7 @@
 -- seeing exactly the fixture they were written against.
 begin;
 set search_path to public, extensions;
-select plan(33);
+select plan(35);
 
 -- ============================================================
 -- Posting, and party visibility inherited from can_access_party
@@ -68,13 +68,34 @@ select throws_ok(
   'a non-invitee cannot post to a private party'
 );
 
+-- The host-only rule, on a party this user CAN see. Until 20260825095311 this
+-- insert succeeded; the only thing refusing it now is that they do not host
+-- the party. Separate from the private-party case above, which is refused by
+-- can_access_party and would go on being refused if posting were widened
+-- again.
+select throws_ok(
+  $$ insert into public.party_posts (party_id, author_id, body) values
+     ('aaaaaaaa-0000-0000-0000-000000000002',
+      '44444444-4444-4444-4444-444444444444',
+      'a guest posting on a public party') $$,
+  '42501',
+  null,
+  'a non-host cannot post to a party they CAN see -- posting is host-only'
+);
+
 -- created_at is not in the INSERT grant, so a future-dated post -- which
 -- would pin itself to the top of every feed forever -- is refused by
 -- Postgres before any policy runs.
+--
+-- Runs as the HOST on their own party now. As a non-host it would still throw
+-- 42501, but from the policy rather than from the missing column grant, and
+-- would stop testing the grant at all.
+select tests.authenticate_as('11111111-1111-1111-1111-111111111111'); -- host
+
 select throws_ok(
   $$ insert into public.party_posts (party_id, author_id, body, created_at) values
      ('aaaaaaaa-0000-0000-0000-000000000002',
-      '44444444-4444-4444-4444-444444444444',
+      '11111111-1111-1111-1111-111111111111',
       'pinned to the top of the feed',
       now() + interval '10 years') $$,
   '42501',
@@ -174,26 +195,32 @@ select throws_ok(
   'someone who neither wrote the comment nor moderates its post cannot hide it'
 );
 
--- can_moderate_post's host arm: a host can clear their own party's wall
--- without waiting on manual triage.
-select tests.authenticate_as('66666666-6666-6666-6666-666666666666'); -- second_host
+-- can_moderate_post's host arm.
+--
+-- WHAT THIS SECTION CAN NO LONGER ASSERT. It used to show a host clearing
+-- SOMEBODY ELSE'S post off their wall. Since 20260825095311 a post's author is
+-- always the party's host, so the host arm and the author arm of
+-- can_moderate_post name the same person on every row and cannot be told
+-- apart by a test.
+--
+-- Both arms stay in the helper. Unlike the participation clause deleted from
+-- can_chat_in_party, this one is not costless to remove and not safe to: it is
+-- one widening of the INSERT policy away from mattering again, and there is no
+-- second place stating the same rule for it to drift against.
+select tests.authenticate_as('11111111-1111-1111-1111-111111111111'); -- host
 
 insert into public.party_posts (id, party_id, author_id, body) values
   ('bbbbbbbb-0000-0000-0000-000000000003',
    'aaaaaaaa-0000-0000-0000-000000000002',
-   '66666666-6666-6666-6666-666666666666',
-   'Someone else post on the host public party');
-
-select tests.authenticate_as('11111111-1111-1111-1111-111111111111'); -- host
+   '11111111-1111-1111-1111-111111111111',
+   'a post the host will take down again');
 
 select public.hide_post('bbbbbbbb-0000-0000-0000-000000000003', 'off topic');
-
-select tests.authenticate_as('66666666-6666-6666-6666-666666666666'); -- second_host
 
 select is_empty(
   $$ select 1 from public.party_posts
      where id = 'bbbbbbbb-0000-0000-0000-000000000003' $$,
-  'a party host can hide a post someone else made on their party'
+  'a host can hide a post on their own party, and it vanishes for them too'
 );
 
 -- The negative half of the same rule.
@@ -266,19 +293,51 @@ select results_eq(
 );
 
 -- ============================================================
--- Blocked authors. can_access_party only knows about the party HOST, so
--- this is the check it cannot make for us: blocked_user posts on a third
--- party's public party, and the block still has to erase it.
+-- Blocked authors.
+--
+-- WHAT CHANGED HERE, AND WHY THE POLICY DID NOT. This used to isolate the
+-- AUTHOR-side is_blocked term on party_posts -- the one can_access_party
+-- cannot make for us (gotcha 2), demonstrated by having blocked_user post on a
+-- THIRD party's public party. That arrangement is unreachable now: host-only
+-- posting means a post's author IS the party's host on every row, so
+-- can_access_party's host block already covers every case the author term was
+-- written for, and the two can no longer be told apart.
+--
+-- The author term stays in the SELECT policy. It is one widening of the INSERT
+-- policy away from mattering again, and gotcha 2 is still live for
+-- post_comments, messages and stories, whose authors are still anybody. What
+-- is gone is the ability to show it failing ON ITS OWN, which is why this
+-- section now asserts the outcome rather than the mechanism.
+--
+-- blocked_user posts on the party they HOST, because that is the only place
+-- they can post at all.
 -- ============================================================
 select tests.authenticate_as('55555555-5555-5555-5555-555555555555'); -- blocked_user
 
 insert into public.party_posts (id, party_id, author_id, body) values
   ('bbbbbbbb-0000-0000-0000-000000000006',
-   'aaaaaaaa-0000-0000-0000-000000000002',
+   'aaaaaaaa-0000-0000-0000-000000000021',
    '55555555-5555-5555-5555-555555555555',
    'Post by the soon to be blocked user');
 
 select tests.authenticate_as('11111111-1111-1111-1111-111111111111'); -- host
+
+-- The rsvp is what puts party 0021 in the host's feed at all, and it has to
+-- be written BEFORE the block: afterwards can_access_party fails and the rsvps
+-- INSERT policy refuses it.
+--
+-- Without this the is_empty below would pass because the party was never in
+-- the feed, not because the block removed the post -- the control-that-is-not
+-- -a-control failure mode of gotcha 17, in a file that would never have
+-- reported it.
+insert into public.rsvps (party_id, user_id, status) values
+  ('aaaaaaaa-0000-0000-0000-000000000021', '11111111-1111-1111-1111-111111111111', 'interested');
+
+select isnt_empty(
+  $$ select 1 from public.get_feed()
+     where post_id = 'bbbbbbbb-0000-0000-0000-000000000006' $$,
+  'before the block, the post IS in the feed -- so the assertion below is a difference'
+);
 
 insert into public.blocks (blocker_id, blocked_id) values
   ('11111111-1111-1111-1111-111111111111', '55555555-5555-5555-5555-555555555555');
@@ -296,6 +355,12 @@ select is_empty(
 );
 
 select tests.authenticate_as('44444444-4444-4444-4444-444444444444'); -- stranger
+
+-- Same reason as the host's rsvp above: get_feed is scoped to parties the
+-- viewer has a relationship with, so without this the isnt_empty could only
+-- ever fail.
+insert into public.rsvps (party_id, user_id, status) values
+  ('aaaaaaaa-0000-0000-0000-000000000021', '44444444-4444-4444-4444-444444444444', 'interested');
 
 select isnt_empty(
   $$ select 1 from public.get_feed()

@@ -33,20 +33,30 @@
 # from get_parties_near_user(...)` prints one line, `Function Scan` (gotcha 20).
 #
 #
-# WHAT IT FOUND, 2026-08-21, at 10k parties
+# WHAT IT FOUND, at 10k parties. TWO columns, because the floor moved.
 #
-#   variant                          exec       buffers    filter order
-#   A  policy only (baseline)        954 ms      62018     policy
-#   B  starts_at > <const>           4.1 ms        433     TIME, then policy
-#   C  title like '%zzzzzz%'         890 ms      61799     policy, then like
-#   D  st_dwithin(..., 1m)           947 ms      61872     policy, then dwithin
+# The 2026-08-21 run predates 20260821185216 (the Phase 12 policy hoist), which
+# made the policy itself ~5x cheaper without changing what is promoted past it.
+# Re-run on 2026-08-23 the RATIOS reproduce and the absolute numbers do not, so
+# both are kept: the ratio is the finding, the floor is the date.
 #
-#   RPC body at 5km, no window     1483 ms      64617
-#   RPC body + "tonight" window      42 ms       1736      35x, and the time
-#                                                          terms print first
+#   variant                        2026-08-21        2026-08-23    filter order
+#   A  policy only (baseline)      954 ms /62018    182 ms /40518  policy
+#   B  starts_at > <const>         4.1 ms /  433    1.8 ms /  367  TIME, then policy
+#   C  title like '%zzzzzz%'       890 ms /61799    172 ms /40359  policy, then like
+#   D  st_dwithin(..., 1m)         947 ms /61872    214 ms /40428  policy, then dwithin
+#
+#   RPC body at 5km, no window    1483 ms /64617    208 ms /43502
+#   RPC body + "tonight" window     42 ms / 1736    6.4 ms / 1096  35x -> 33x
 #
 # B and C match ~the same number of rows (31 and 0). The 216x between them is
 # entirely qual ordering.
+#
+# NOTE: Part 2's inlined body is the PRE-PHASE-13 shape -- it has no bbox
+# pre-filter and no p_window -- and is deliberately left that way, because it is
+# the control the 35x was originally measured against. For the shipped body, and
+# for whether the two pre-filters compose, see
+# scripts/explain_map_time_windows.sh (Phase 15).
 #
 # The bonus finding is in the Part 2 filter order: `status = 'published'`
 # prints AFTER can_access_party, because `enum_eq` is not leakproof, while

@@ -804,35 +804,43 @@ class _HostDoneScreen extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Text(
-                    'Στάλθηκε σε $invitedCount φίλους και μπήκε στον χάρτη τους. Το group chat άνοιξε.',
+                    isPrivate
+                        ? 'Στάλθηκε σε $invitedCount φίλους και μπήκε στον χάρτη τους. Το group chat άνοιξε.'
+                        : 'Μπήκε στον χάρτη. Όποιος είναι κοντά μπορεί να το δει.',
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 13, height: 1.55, color: AppColors.textAlpha(0.6)),
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.only(top: 22),
-                  child: GestureDetector(
-                    onTap: () {
-                      Navigator.of(context).popUntil((route) => route.isFirst);
-                      Navigator.of(context).push(MaterialPageRoute(
-                        builder: (_) => ChatScreen(
-                          partyId: partyId,
-                          partyTitle: partyTitle,
-                          isPrivate: isPrivate,
+                // The wizard creates BOTH kinds, which makes this the entry
+                // point most likely to strand someone: a public party has no
+                // chat since 20260825094044, so offering to open one would
+                // hand the host a screen that can never load a message and
+                // whose composer the messages policy refuses.
+                if (isPrivate)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 22),
+                    child: GestureDetector(
+                      onTap: () {
+                        Navigator.of(context).popUntil((route) => route.isFirst);
+                        Navigator.of(context).push(MaterialPageRoute(
+                          builder: (_) => ChatScreen(
+                            partyId: partyId,
+                            partyTitle: partyTitle,
+                            isPrivate: isPrivate,
+                          ),
+                        ));
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 13),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.1),
+                          border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+                          borderRadius: BorderRadius.circular(13),
                         ),
-                      ));
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 13),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.1),
-                        border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
-                        borderRadius: BorderRadius.circular(13),
+                        child: const Text('Άνοιξε το group chat', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
                       ),
-                      child: const Text('Άνοιξε το group chat', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
                     ),
                   ),
-                ),
                 Padding(
                   padding: const EdgeInsets.only(top: 12),
                   child: GestureDetector(

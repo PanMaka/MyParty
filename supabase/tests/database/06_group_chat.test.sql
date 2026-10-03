@@ -31,7 +31,7 @@
 -- against.
 begin;
 set search_path to public, extensions;
-select plan(48);
+select plan(49);
 
 -- ============================================================
 -- Membership on a PRIVATE party. This half is inherited from
@@ -93,35 +93,61 @@ select throws_ok(
 
 
 -- ============================================================
--- Membership on a PUBLIC party -- the half can_access_party gets WRONG for
--- chat, and the reason can_chat_in_party exists. can_access_party is true
--- here for every signed-in user on the platform; chat additionally demands
--- actual participation.
+-- A PUBLIC party has no chat at all -- 20260825094044.
+--
+-- This section used to demonstrate the participation narrowing, because a
+-- public party was the only place that clause ever did any work. The rule is
+-- gone along with the chat it protected, and the strongest form of what
+-- replaced it is the first pair below: the HOST of a public party cannot chat
+-- in their own party.
 -- ============================================================
 select tests.authenticate_as('11111111-1111-1111-1111-111111111111'); -- host
 
-insert into public.messages (id, party_id, author_id, body) values
-  ('dddddddd-0000-0000-0000-000000000010',
-   'aaaaaaaa-0000-0000-0000-000000000002',
-   '11111111-1111-1111-1111-111111111111',
-   'public party chat opener');
+select ok(
+  public.can_access_party('aaaaaaaa-0000-0000-0000-000000000002'),
+  'the host can still ACCESS their public party -- visibility is untouched'
+);
+
+select ok(
+  not public.can_chat_in_party('aaaaaaaa-0000-0000-0000-000000000002'),
+  'but not even the HOST can chat in a public party -- the narrowing is total'
+);
+
+-- The point of enforcing this in the helper rather than by hiding a button:
+-- a hand-rolled insert is refused by the policy, not by the client.
+select throws_ok(
+  $$ insert into public.messages (party_id, author_id, body) values
+     ('aaaaaaaa-0000-0000-0000-000000000002',
+      '11111111-1111-1111-1111-111111111111',
+      'opening my own public party chat') $$,
+  '42501',
+  null,
+  'and the host cannot write into it -- the messages policy refuses, not the UI'
+);
 
 select tests.authenticate_as('44444444-4444-4444-4444-444444444444'); -- stranger
 
 select ok(
   public.can_access_party('aaaaaaaa-0000-0000-0000-000000000002'),
-  'a stranger CAN access a public party -- can_access_party is true here'
+  'a stranger CAN still access a public party -- can_access_party is unchanged'
 );
 
 select ok(
   not public.can_chat_in_party('aaaaaaaa-0000-0000-0000-000000000002'),
-  'but they cannot CHAT in it without participating -- can_chat_in_party is narrower'
+  'and cannot chat in it either'
 );
 
-select is_empty(
-  $$ select 1 from public.messages
-     where id = 'dddddddd-0000-0000-0000-000000000010' $$,
-  'so a public party chat is not readable by a passer-by'
+-- An rsvp used to be exactly the thing that opened a public party's chat.
+-- That it now opens nothing is the assertion that catches a PARTIAL revert:
+-- restoring public chat by deleting only the party_is_private term would make
+-- this pass again and hand every public chat to the whole user base, which is
+-- what the deleted participation clause existed to prevent.
+insert into public.rsvps (party_id, user_id, status) values
+  ('aaaaaaaa-0000-0000-0000-000000000002', '44444444-4444-4444-4444-444444444444', 'interested');
+
+select ok(
+  not public.can_chat_in_party('aaaaaaaa-0000-0000-0000-000000000002'),
+  'rsvping to a public party no longer joins a chat, because there is not one'
 );
 
 select throws_ok(
@@ -131,41 +157,20 @@ select throws_ok(
       'drive-by') $$,
   '42501',
   null,
-  'and a passer-by cannot post into it either'
+  'nor can an rsvper write into it'
 );
 
--- An rsvp is participation. 'interested' counts as well as 'going', the same
--- call get_feed makes.
-insert into public.rsvps (party_id, user_id, status) values
-  ('aaaaaaaa-0000-0000-0000-000000000002', '44444444-4444-4444-4444-444444444444', 'interested');
-
-select ok(
-  public.can_chat_in_party('aaaaaaaa-0000-0000-0000-000000000002'),
-  'rsvping to a public party joins its chat (an ''interested'' rsvp counts)'
-);
-
-select isnt_empty(
-  $$ select 1 from public.messages
-     where id = 'dddddddd-0000-0000-0000-000000000010' $$,
-  'and the history opens up -- the rule does not over-reach'
-);
-
-insert into public.messages (id, party_id, author_id, body) values
-  ('dddddddd-0000-0000-0000-000000000011',
-   'aaaaaaaa-0000-0000-0000-000000000002',
-   '44444444-4444-4444-4444-444444444444',
-   'hello from a stranger');
-
--- A follow is NOT participation. The social graph is follows-only and
--- asymmetric, and it grants no private visibility anywhere else either.
+-- A follow is NOT participation, and never was, anywhere. Asserted on the
+-- PRIVATE party now -- on a public one it would pass for the new reason and
+-- stop testing the follow graph at all.
 select tests.authenticate_as('33333333-3333-3333-3333-333333333333'); -- friend_not_invited
 
 insert into public.follows (follower_id, followee_id) values
   ('33333333-3333-3333-3333-333333333333', '11111111-1111-1111-1111-111111111111');
 
 select ok(
-  not public.can_chat_in_party('aaaaaaaa-0000-0000-0000-000000000002'),
-  'following the host does not put you in their party chat'
+  not public.can_chat_in_party('aaaaaaaa-0000-0000-0000-000000000001'),
+  'following the host does not put you in their private party chat'
 );
 
 
@@ -210,11 +215,17 @@ select is_empty(
 -- absence of an INSERT policy. If this ever passes, a participant can put a
 -- line in front of the whole party that never passed through public.messages
 -- -- no rate limit, nothing to report, nothing hide_message could take down.
-select set_config('realtime.topic', 'party:aaaaaaaa-0000-0000-0000-000000000002', true);
+--
+-- Run as a PARTICIPANT on the private topic, deliberately. On a public topic
+-- this would now be refused for the boring reason (there is no chat there at
+-- all), and would stop testing the thing it is here to test: that even
+-- somebody who legitimately belongs in the topic cannot write to it directly.
+select tests.authenticate_as('22222222-2222-2222-2222-222222222222'); -- invitee
+select set_config('realtime.topic', 'party:aaaaaaaa-0000-0000-0000-000000000001', true);
 
 select throws_ok(
   $$ insert into realtime.messages (topic, extension, event, private, payload)
-     values ('party:aaaaaaaa-0000-0000-0000-000000000002', 'broadcast', 'new_message', true,
+     values ('party:aaaaaaaa-0000-0000-0000-000000000001', 'broadcast', 'new_message', true,
              '{"body":"forged"}'::jsonb) $$,
   '42501',
   null,
@@ -367,15 +378,38 @@ select throws_ok(
   'a sent message is immutable -- there is no update grant on messages'
 );
 
+-- The two fixtures this section moderates. They used to live on the PUBLIC
+-- party, which can no longer hold a message at all, so they moved here --
+-- and they are inserted at this point rather than earlier so the unread-count
+-- assertions above keep counting what they were written to count.
+insert into public.messages (id, party_id, author_id, body) values
+  ('dddddddd-0000-0000-0000-000000000010',
+   'aaaaaaaa-0000-0000-0000-000000000001',
+   '11111111-1111-1111-1111-111111111111',
+   'private party chat opener');
+
+select tests.authenticate_as('66666666-6666-6666-6666-666666666666'); -- second_host, invited
+
+insert into public.messages (id, party_id, author_id, body) values
+  ('dddddddd-0000-0000-0000-000000000011',
+   'aaaaaaaa-0000-0000-0000-000000000001',
+   '66666666-6666-6666-6666-666666666666',
+   'hello from another guest');
+
+select tests.authenticate_as('11111111-1111-1111-1111-111111111111'); -- host
+
 -- can_moderate_message's host arm: a host can clear their own party's chat.
 select public.hide_message('dddddddd-0000-0000-0000-000000000011', 'off topic');
 
-select tests.authenticate_as('44444444-4444-4444-4444-444444444444'); -- stranger
+-- As the message's OWN AUTHOR, who is neither the host nor a moderator. A
+-- stranger would have served the old assertion for the wrong reason here --
+-- they cannot see a private party's chat whether the row is hidden or not.
+select tests.authenticate_as('66666666-6666-6666-6666-666666666666'); -- second_host
 
 select is_empty(
   $$ select 1 from public.messages
      where id = 'dddddddd-0000-0000-0000-000000000011' $$,
-  'a party host can hide a message someone else sent in their party'
+  'a party host can hide a message someone else sent, and it vanishes for its author too'
 );
 
 select throws_ok(
@@ -401,18 +435,26 @@ select isnt_empty(
 
 -- Hidden means hidden everywhere, including in the derived numbers -- the
 -- Phase 4 lesson about a counter that keeps counting a moderated row.
+--
+-- Compared against the visible row count rather than a literal. The viewer
+-- has no party_reads row, so with everything unread the badge IS the visible
+-- count -- and `public.messages` here is already filtered by the SELECT
+-- policy, so a badge that counted the hidden row would exceed it. A literal
+-- would have to be re-derived every time a fixture moves, which is how a
+-- number stops describing anything.
 select is(
   (select unread_count from public.get_party_chats()
-   where party_id = 'aaaaaaaa-0000-0000-0000-000000000002'),
-  1,
+   where party_id = 'aaaaaaaa-0000-0000-0000-000000000001'),
+  (select count(*)::int from public.messages
+   where party_id = 'aaaaaaaa-0000-0000-0000-000000000001'),
   'a hidden message does not count toward the unread badge'
 );
 
 select is(
   (select last_message_body from public.get_party_chats()
-   where party_id = 'aaaaaaaa-0000-0000-0000-000000000002'),
-  'public party chat opener',
-  'nor does it linger as the chat list preview'
+   where party_id = 'aaaaaaaa-0000-0000-0000-000000000001'),
+  'private party chat opener',
+  'nor does it linger as the chat list preview -- the newest VISIBLE message wins'
 );
 
 -- Author arm of can_moderate_message.
@@ -431,27 +473,38 @@ select is_empty(
 -- Blocks. can_access_party covers the HOST only, so the author-side check is
 -- the one it cannot make for us -- and both directions are exercised here.
 -- ============================================================
+-- Both fixtures had to move onto PRIVATE parties, because a public one can no
+-- longer hold a message at all. The seed already carries the pair this needs:
+-- party 0022 ("Blocked User Private Loft") is private, hosted by blocked_user,
+-- and host is invited to it -- so the two personas share a chat in each
+-- direction without inventing fixtures.
+--
+-- The author-side term needs the opposite arrangement: a party the HOST owns,
+-- with blocked_user able to speak in it. That takes an invitation, which the
+-- host issues here rather than the seed carrying it, because it exists only
+-- for this assertion.
+select tests.authenticate_as('11111111-1111-1111-1111-111111111111'); -- host
+
+insert into public.invitations (party_id, guest_id) values
+  ('aaaaaaaa-0000-0000-0000-000000000001', '55555555-5555-5555-5555-555555555555');
+
 select tests.authenticate_as('55555555-5555-5555-5555-555555555555'); -- blocked_user
 
-insert into public.rsvps (party_id, user_id, status) values
-  ('aaaaaaaa-0000-0000-0000-000000000002', '55555555-5555-5555-5555-555555555555', 'going');
-
 insert into public.messages (id, party_id, author_id, body) values
+  -- In a party the HOST owns: party visibility is untouched here, so only the
+  -- AUTHOR-side block can remove this row.
   ('dddddddd-0000-0000-0000-000000000012',
-   'aaaaaaaa-0000-0000-0000-000000000002',
+   'aaaaaaaa-0000-0000-0000-000000000001',
    '55555555-5555-5555-5555-555555555555',
    'from the soon to be blocked user'),
   -- …and a message in a party blocked_user HOSTS, so the host-side term gets
   -- its own row rather than sharing one.
   ('dddddddd-0000-0000-0000-000000000020',
-   'aaaaaaaa-0000-0000-0000-000000000021',
+   'aaaaaaaa-0000-0000-0000-000000000022',
    '55555555-5555-5555-5555-555555555555',
    'hosted by blocked_user');
 
 select tests.authenticate_as('11111111-1111-1111-1111-111111111111'); -- host
-
-insert into public.rsvps (party_id, user_id, status) values
-  ('aaaaaaaa-0000-0000-0000-000000000021', '11111111-1111-1111-1111-111111111111', 'interested');
 
 select isnt_empty(
   $$ select 1 from public.messages
@@ -480,27 +533,31 @@ select is_empty(
 -- The host-side term, inherited from can_access_party for free.
 select is_empty(
   $$ select 1 from public.messages
-     where party_id = 'aaaaaaaa-0000-0000-0000-000000000021' $$,
+     where party_id = 'aaaaaaaa-0000-0000-0000-000000000022' $$,
   'and the whole chat of a party hosted by a blocked user disappears'
 );
 
 select is_empty(
   $$ select 1 from public.get_party_chats()
-     where party_id = 'aaaaaaaa-0000-0000-0000-000000000021' $$,
+     where party_id = 'aaaaaaaa-0000-0000-0000-000000000022' $$,
   'that party stops being listed as a chat at all'
 );
 
 -- Layer 2 has to honour the block too, or the history goes away while the
 -- live feed keeps arriving.
-select set_config('realtime.topic', 'party:aaaaaaaa-0000-0000-0000-000000000021', true);
+select set_config('realtime.topic', 'party:aaaaaaaa-0000-0000-0000-000000000022', true);
 
 select is_empty(
   $$ select 1 from realtime.messages
-     where topic = 'party:aaaaaaaa-0000-0000-0000-000000000021' $$,
+     where topic = 'party:aaaaaaaa-0000-0000-0000-000000000022' $$,
   'and the block reaches the broadcast topic as well, not just the history'
 );
 
-select tests.authenticate_as('44444444-4444-4444-4444-444444444444'); -- stranger
+-- The third party has to be someone who can see the party at all, so it is
+-- the invitee rather than a stranger now that the message lives in a private
+-- chat. A stranger would satisfy is_empty for the wrong reason and satisfy
+-- isnt_empty never.
+select tests.authenticate_as('22222222-2222-2222-2222-222222222222'); -- invitee
 
 select isnt_empty(
   $$ select 1 from public.messages
@@ -510,8 +567,15 @@ select isnt_empty(
 
 
 -- ============================================================
--- Server-side rate limit (CLAUDE.md #7). second_host is invited to party
--- 0001 and has said nothing yet, so the window starts clean here.
+-- Server-side rate limit (CLAUDE.md #7): 20 per 10s per author+party.
+--
+-- NINETEEN, not twenty. second_host no longer starts this section from zero --
+-- they authored message …011 in the moderation section above, which the limit
+-- counts: enforce_message_rate_limit counts rows by author+party in the
+-- window and does NOT exclude hidden ones, so being moderated does not refund
+-- the quota. 1 + 19 puts the window exactly on the cap, and the single insert
+-- below is still the 21st. The boundary being asserted is unchanged; only the
+-- arithmetic in front of it moved.
 -- ============================================================
 select tests.authenticate_as('66666666-6666-6666-6666-666666666666'); -- second_host
 
@@ -519,7 +583,7 @@ insert into public.messages (party_id, author_id, body)
 select 'aaaaaaaa-0000-0000-0000-000000000001',
        '66666666-6666-6666-6666-666666666666',
        'flood ' || g
-from generate_series(1, 20) g;
+from generate_series(1, 19) g;
 
 select throws_ok(
   $$ insert into public.messages (party_id, author_id, body) values

@@ -1,12 +1,16 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 
 import 'package:myparty/data/party_repository.dart';
 import 'package:myparty/models/map_party_pin.dart';
+import 'package:myparty/models/map_time_window.dart';
 import 'package:myparty/ui/screens/map_screen.dart';
 import 'package:myparty/ui/screens/search_screen.dart';
+import 'package:myparty/ui/widgets/map_pin_sheet.dart';
+import 'package:myparty/ui/widgets/mp_drop_shape.dart';
 import 'package:myparty/ui/widgets/mp_map_pin.dart';
 
 /// Stands in for the real repository. Subclasses rather than implements so it
@@ -26,14 +30,41 @@ class _FakePartyRepository extends PartyRepository {
   /// the viewport it is actually showing rather than just that pins appeared.
   final List<Map<String, double>> calls = [];
 
+  /// Cover paths the sheet asked to sign, and what to answer with.
+  ///
+  /// Overridden rather than left to the real implementation because that one
+  /// reaches `_client.storage`, which under `flutter test` has no Supabase
+  /// client behind it. A pin with no cover never gets here at all —
+  /// `signedCoverUrl` short-circuits on null — which is why the sheet tests
+  /// that do not care about covers need no setup.
+  final List<String?> signRequests = [];
+  String? signedCover;
+
+  @override
+  Future<String?> signedCoverUrl(String? coverPath, {int expiresIn = 3600}) async {
+    signRequests.add(coverPath);
+    if (coverPath == null) return null;
+    return signedCover;
+  }
+
+  /// The window each of those calls carried, one entry per [calls] entry.
+  ///
+  /// Kept in a second list rather than added to [calls] because that one is
+  /// typed to doubles, and because the assertions it exists for are about the
+  /// *sequence* of windows the screen asked for — a chip tap must produce a new
+  /// REQUEST, not a narrowing of the rows the last one returned.
+  final List<MapTimeWindow> windows = [];
+
   @override
   Future<List<MapPartyPin>> fetchPartiesNearUser({
     required double lon,
     required double lat,
     required double radiusMeters,
     int limit = 200,
+    MapTimeWindow window = MapTimeWindow.all,
   }) async {
     calls.add({'lon': lon, 'lat': lat, 'radiusMeters': radiusMeters, 'limit': limit.toDouble()});
+    windows.add(window);
     return pins;
   }
 }
@@ -48,8 +79,8 @@ MapPartyPin _pin({
   required String title,
   required DateTime? startsAt,
   DateTime? endsAt,
-  int goingCount = 0,
-  int interestedCount = 0,
+  int? goingCount = 0,
+  int? interestedCount = 0,
   double latOffset = 0,
   bool isPrivate = false,
 }) {
@@ -118,9 +149,6 @@ Future<void> _pumpPin(WidgetTester tester, MapPartyPin pin, DateTime now) {
 /// animates. Measured, not assumed: a non-live pin reports 0 and a live one
 /// reports 1.
 int _runningTickers(WidgetTester tester) => tester.binding.transientCallbackCount;
-
-RenderParagraph _paragraph(WidgetTester tester, String text) =>
-    tester.renderObject<RenderParagraph>(find.text(text));
 
 void main() {
   group('MapPartyPin.fromRpcRow', () {
@@ -226,21 +254,27 @@ void main() {
   });
 
   group('MpPinMetrics', () {
-    test('both tier boundaries, from either side', () {
-      expect(MpPinMetrics.forCount(0).tier, MpPinTier.small);
-      expect(MpPinMetrics.forCount(mpPinMediumFrom - 1).tier, MpPinTier.small);
-      expect(MpPinMetrics.forCount(mpPinMediumFrom).tier, MpPinTier.medium);
-      expect(MpPinMetrics.forCount(mpPinLargeFrom - 1).tier, MpPinTier.medium);
-      expect(MpPinMetrics.forCount(mpPinLargeFrom).tier, MpPinTier.large);
-      expect(MpPinMetrics.forCount(10000).tier, MpPinTier.large);
+    test('the box is the bubble exactly, with nothing overhanging it', () {
+      // The teardrop's box had a `topPad` term because its chip could stand
+      // taller than its circle and overhang the top — and since the tip is
+      // measured from the box's BOTTOM, forgetting that term moved the anchor
+      // on precisely the smallest and most numerous pins. With the chip gone
+      // there is no overhang to account for, and this is the assertion that
+      // keeps it that way.
+      for (final count in [0, 25, 100, 400]) {
+        final m = MpPinMetrics.forCount(count);
+        expect(m.width, m.drop.width);
+        expect(m.height, m.drop.height);
+        expect(m.boxHeight, m.drop.height);
+      }
     });
 
-    test('width never goes backwards, least of all across a boundary', () {
-      // Each tier's width grows on a sqrt that saturates, so a tier ceiling
-      // and the next tier's floor are the one place the ladder could invert:
+    test('width never goes backwards, least of all near saturation', () {
+      // Width is now `2r` on a sqrt that saturates, so it is monotonic by
+      // construction — which is worth a sweep rather than an argument, because
       // a 25-person party drawing narrower than a 24-person one would read as
-      // a smaller party. Swept rather than spot-checked, because the failure
-      // is a single step in a range nobody looks at.
+      // a smaller party and the failure would be one step in a range nobody
+      // looks at.
       var previous = 0.0;
       for (var count = 0; count <= 500; count++) {
         final width = MpPinMetrics.forCount(count).width;
@@ -251,26 +285,30 @@ void main() {
     });
 
     test('a negative count is drawn as an empty party, not as an error', () {
-      expect(MpPinMetrics.forCount(-5).tier, MpPinTier.small);
       expect(MpPinMetrics.forCount(-5).width, MpPinMetrics.forCount(0).width);
     });
 
-    test('the small tier has the least room for a label', () {
-      // The invariant behind the truncation test below: whatever the tiers'
-      // dimensions become, the tightest label row is the one at the bottom, so
-      // that is where the ellipsis has to be proved.
-      final small = MpPinMetrics.forCount(0);
-      final medium = MpPinMetrics.forCount(mpPinMediumFrom);
-      final large = MpPinMetrics.forCount(mpPinLargeFrom);
-
-      expect(small.labelWidth, lessThan(medium.labelWidth));
-      expect(medium.labelWidth, lessThan(large.labelWidth));
+    test('the anchor is the bottom centre of the box at every size', () {
+      // Constant now that the box is symmetric, but asserted through the
+      // geometry rather than against `Alignment.topCenter` — the property that
+      // matters is that inverting flutter_map's placement lands on the apex,
+      // not that the value happens to be (0, -1) today.
+      for (final m in [
+        MpPinMetrics.forCount(0),
+        MpPinMetrics.forCount(100),
+        MpPinMetrics.private(),
+      ]) {
+        expect(m.tip.dx, closeTo(m.width / 2, 0.001));
+        expect(m.tip.dy, closeTo(m.height, 0.001));
+        expect(m.anchor.x, closeTo(0, 0.001));
+        expect(m.anchor.y, closeTo(-1, 0.001));
+      }
     });
 
-    test('the tier follows the tense, not a number frozen at fetch time', () {
+    test('the size follows the tense, not a number frozen at fetch time', () {
       // The same pin, the same fetch, two clocks. A party four people are
-      // interested in and two hundred turn up to is a small pin before it
-      // starts and a large one after — with no refetch, and with no
+      // interested in and two hundred turn up to is a small bubble before it
+      // starts and a saturated one after — with no refetch, and with no
       // server-computed `live` flag involved.
       final start = DateTime.parse('2026-08-21T20:00:00Z');
       final pin = _pin(
@@ -282,10 +320,48 @@ void main() {
         goingCount: 200,
       );
 
-      expect(MpPinMetrics.forPin(pin, start.subtract(const Duration(hours: 1))).tier, MpPinTier.small);
-      expect(MpPinMetrics.forPin(pin, start.add(const Duration(hours: 1))).tier, MpPinTier.large);
+      final before = MpPinMetrics.forPin(pin, start.subtract(const Duration(hours: 1)));
+      final during = MpPinMetrics.forPin(pin, start.add(const Duration(hours: 1)));
+      final after = MpPinMetrics.forPin(pin, start.add(const Duration(hours: 9)));
+
+      expect(during.width, greaterThan(before.width));
+      expect(during.drop.radius, MpDropGeometry.maxRadius);
       // And back down once it is over, because the count reverts to interest.
-      expect(MpPinMetrics.forPin(pin, start.add(const Duration(hours: 9))).tier, MpPinTier.small);
+      expect(after.width, before.width);
+    });
+
+    test('a label wide enough to be a problem only lands on a saturated bubble', () {
+      // THE INVARIANT THAT REPLACED THE TRUNCATION TEST. The chip needed an
+      // ellipsis because its width stepped by tier while the count it drew had
+      // no upper bound. Inside the bubble that cannot happen: three digits
+      // means a count >= 100, and 100 is exactly where the radius saturates.
+      // So every bubble below maximum radius is drawing at most two glyphs,
+      // and there is no case left to clip.
+      for (var count = 0; count < MpDropGeometry.saturatesAt; count++) {
+        expect('$count'.length, lessThanOrEqualTo(2),
+            reason: 'a sub-saturation count needs more than two digits');
+      }
+      for (final count in [100, 999, 4237]) {
+        expect(MpPinMetrics.forCount(count).drop.radius, MpDropGeometry.maxRadius,
+            reason: 'count $count draws a three- or four-digit label');
+      }
+    });
+
+    test('the label steps down as it gets wider, so it always fits its circle', () {
+      // Measured against the chord available at the text's own height, not
+      // against the inscribed square: the number is a single centred line, so
+      // the width it actually has is the circle's width at +/- half a line.
+      for (final (count, digits) in [(8, 1), (42, 2), (340, 3), (4237, 4)]) {
+        final m = MpPinMetrics.forCount(count);
+        final r = m.drop.radius;
+        final size = MpPinMetrics.labelSizeFor(r, digits);
+        // Roboto Mono advances ~0.60em, plus the 0.08em letter-spacing
+        // AppTextStyles.mono applies to every glyph.
+        final drawn = digits * size * 0.68;
+        final available = 2 * math.sqrt(r * r - (size / 2) * (size / 2));
+        expect(drawn, lessThan(available),
+            reason: 'a $digits-digit label overflows the r=$r bubble');
+      }
     });
   });
 
@@ -361,55 +437,118 @@ void main() {
     });
   });
 
-  group('MpMapPin label row', () {
+  group('MpMapPin label', () {
     final start = DateTime.parse('2026-08-21T20:00:00Z');
 
-    testWidgets('the count truncates at the smallest tier rather than overflowing', (tester) async {
-      // Asserted at the SMALL tier deliberately. It has the least labelWidth
-      // of the three, so it is the tier that overflows first — and it is also
-      // the one nobody looks at, because a small party is the boring case.
-      // The row overflowed for real once already, at counts the payload fix
-      // made reachable for the first time; a shape whose width now varies per
-      // tier reopens that at every step of the ladder.
-      //
-      // `didExceedMaxLines` is the assertion, not the absence of a red box: a
-      // RenderFlex overflow fails the test by itself, but so would a layout
-      // that merely happened to fit, and that would stop testing anything the
-      // moment a font changed.
+    testWidgets('the pin draws the count and nothing else', (tester) async {
+      // The whole label, asserted as an absence as much as a presence: the
+      // title, the area and the unit suffix are the three things that were on
+      // the pin and are now only in MapPinSheet, one tap away.
       final pin = _pin(
         id: 'p',
         title: 'Ταράτσα στο Κουκάκι',
         startsAt: start,
-        interestedCount: mpPinMediumFrom - 1,
+        interestedCount: 24,
       );
 
       await _pumpPin(tester, pin, start.subtract(const Duration(hours: 1)));
 
-      expect(MpPinMetrics.forPin(pin, start.subtract(const Duration(hours: 1))).tier, MpPinTier.small);
-
-      final meta = _paragraph(tester, '${mpPinMediumFrom - 1} ενδ.');
-      expect(meta.didExceedMaxLines, isTrue);
-      expect(meta.size.width, lessThanOrEqualTo(MpPinMetrics.forCount(mpPinMediumFrom - 1).labelWidth));
-
-      final title = _paragraph(tester, 'Ταράτσα στο Κουκάκι');
-      expect(title.didExceedMaxLines, isTrue);
+      expect(find.text('24'), findsOneWidget);
+      expect(find.text('Ταράτσα στο Κουκάκι'), findsNothing);
+      expect(find.text('24 interested'), findsNothing);
+      expect(find.textContaining('interested'), findsNothing);
 
       await _teardown(tester);
     });
 
-    testWidgets('a four-digit live count still fits its pin at every tier', (tester) async {
-      // The width formula saturates ~26px into a tier, so the label is not
-      // rescued by a bigger pin however big the party gets. Each of these
-      // would throw a RenderFlex overflow if the Flexible were dropped.
-      for (final count in [0, 7, mpPinMediumFrom, 99, mpPinLargeFrom, 4237]) {
-        final pin = _pin(id: 'p', title: 'Techno Noir Warehouse', startsAt: start, goingCount: count);
+    testWidgets('a private pin draws a lock and never a number', (tester) async {
+      // The last place attendance was still visible on a private pin. The
+      // radius has been fixed since the map rework, but the LABEL printed the
+      // count regardless, so the figure was on screen whatever the geometry
+      // did. With the server no longer sending it there is nothing to print.
+      final pin = _pin(
+        id: 'p',
+        title: 'Rooftop in Koukaki',
+        startsAt: start,
+        isPrivate: true,
+        goingCount: null,
+        interestedCount: null,
+      );
+
+      await _pumpPin(tester, pin, start.subtract(const Duration(hours: 1)));
+
+      expect(find.byIcon(Icons.lock), findsOneWidget);
+      // No digit anywhere in the marker.
+      expect(
+        find.byWidgetPredicate((w) => w is Text && RegExp(r'\d').hasMatch(w.data ?? '')),
+        findsNothing,
+      );
+
+      await _teardown(tester);
+    });
+
+    testWidgets('a live pin draws the going count, still bare', (tester) async {
+      final pin = _pin(
+        id: 'p',
+        title: 'Τώρα',
+        startsAt: start,
+        endsAt: start.add(const Duration(hours: 8)),
+        goingCount: 12,
+        interestedCount: 99,
+      );
+
+      await _pumpPin(tester, pin, start.add(const Duration(hours: 1)));
+
+      expect(find.text('12'), findsOneWidget);
+      expect(find.text('99'), findsNothing);
+      expect(find.textContaining('here now'), findsNothing);
+
+      await _teardown(tester);
+    });
+
+    testWidgets('every count from empty to four digits fits without overflowing', (tester) async {
+      // Each of these would throw a RenderFlex overflow or clip visibly if the
+      // step-down in labelSizeFor were dropped. 4237 is only reachable as a
+      // live going_count, and only on a saturated bubble.
+      for (final count in [0, 7, 25, 99, 100, 4237]) {
+        final pin = _pin(id: 'p', title: 'Techno Noir', startsAt: start, goingCount: count);
 
         await _pumpPin(tester, pin, start.add(const Duration(hours: 1)));
 
-        expect(find.text('$count μέσα'), findsOneWidget, reason: 'count $count');
+        expect(find.text('$count'), findsOneWidget, reason: 'count $count');
         expect(tester.takeException(), isNull, reason: 'count $count overflowed its pin');
+
+        // And it is inside the bubble, not merely rendered somewhere: the text
+        // has to fit within the body circle it is centred in.
+        final m = MpPinMetrics.forCount(count);
+        final drawn = tester.getSize(find.text('$count'));
+        expect(drawn.width, lessThanOrEqualTo(2 * m.drop.radius), reason: 'count $count');
       }
 
+      await _teardown(tester);
+    });
+
+    testWidgets('a private pin is the same size whatever its count says', (tester) async {
+      // The widget-level form of the geometry control: the number changes, the
+      // silhouette does not. This is the property that keeps attendance
+      // unreadable from a private pin's shape.
+      final sizes = <Size>{};
+      for (final count in [0, 1, 99, 5000]) {
+        final pin = _pin(
+          id: 'p',
+          title: 'Ιδιωτικό',
+          startsAt: start,
+          interestedCount: count,
+          isPrivate: true,
+        );
+
+        await _pumpPin(tester, pin, start.subtract(const Duration(hours: 1)));
+
+        expect(find.text('$count'), findsOneWidget);
+        sizes.add(tester.getSize(find.byType(MpMapPin)));
+      }
+
+      expect(sizes, hasLength(1));
       await _teardown(tester);
     });
   });
@@ -443,11 +582,13 @@ void main() {
       // The counts that used to be a hardcoded 0 for every pin on the map.
       // Both pins carry both numbers, and each must print the OTHER one from
       // its neighbour — so a pin reading the wrong counter fails here rather
-      // than passing by coincidence.
-      expect(find.text('12 μέσα'), findsOneWidget);
-      expect(find.text('34 ενδ.'), findsOneWidget);
-      expect(find.text('99 ενδ.'), findsNothing);
-      expect(find.text('88 μέσα'), findsNothing);
+      // than passing by coincidence. Bare numbers now: the live one is the
+      // going count, the upcoming one the interested count, and the pulse is
+      // what distinguishes them.
+      expect(find.text('12'), findsOneWidget);
+      expect(find.text('34'), findsOneWidget);
+      expect(find.text('99'), findsNothing);
+      expect(find.text('88'), findsNothing);
 
       await _teardown(tester);
     });
@@ -475,7 +616,7 @@ void main() {
       await _teardown(tester);
     });
 
-    testWidgets('pin size steps by tier instead of being uniform', (tester) async {
+    testWidgets('pin size tracks the count continuously instead of being uniform', (tester) async {
       final now = DateTime.now();
       final repository = _FakePartyRepository([
         _pin(id: 'small', title: 'Μικρό', startsAt: now.add(const Duration(days: 1)), interestedCount: 1),
@@ -497,28 +638,43 @@ void main() {
 
       await _mount(tester, repository);
 
-      Size sizeOf(String title) => tester.getSize(find.ancestor(
-            of: find.text(title),
+      // Found by the count now, not the title — the title is not on the pin
+      // any more, which is the point of the change.
+      Size sizeOf(int count) => tester.getSize(find.ancestor(
+            of: find.text('$count'),
             matching: find.byType(MpMapPin),
           ));
 
-      final small = sizeOf('Μικρό');
-      final medium = sizeOf('Μεσαίο');
-      final large = sizeOf('Μεγάλο');
+      final small = sizeOf(1);
+      final medium = sizeOf(40);
+      final large = sizeOf(400);
 
-      // Height is the tier and nothing else — it does not vary within one —
-      // so it is the cleaner assertion that three tiers really rendered.
-      // Every pin was 112x52 before, because every count was 0.
-      expect(small.height, 38 + MpPinMetrics.pulseHeadroom);
-      expect(medium.height, 46 + MpPinMetrics.pulseHeadroom);
-      expect(large.height, 56 + MpPinMetrics.pulseHeadroom);
+      // BOTH axes move now. On the teardrop only the height varied, because
+      // width was dominated by a chip that stepped in three fixed sizes; with
+      // the chip gone width is 2r and carries the same signal the height does.
+      expect(small.height, lessThan(medium.height));
+      expect(medium.height, lessThan(large.height));
+      expect(small.width, lessThan(medium.width));
+      expect(medium.width, lessThan(large.width));
 
-      // Width additionally grows inside a tier: 96 + min(14, sqrt(1)*2.9),
-      // 112 + min(20, sqrt(40)*2.0), 132 + min(26, sqrt(400)*1.9) — the last
-      // saturated, which is the whole observable range of the top tier.
-      expect(small.width, closeTo(98.9, 0.05));
-      expect(medium.width, closeTo(124.65, 0.05));
-      expect(large.width, 132 + 26);
+      // The top is SATURATED, not merely large. 400 interested and 100
+      // interested draw the same bubble, which is what keeps 200 pins on one
+      // screen readable.
+      expect(
+        large.height,
+        closeTo(MpDropGeometry.maxRadius * (1 + MpDropGeometry.tipRatio), 0.01),
+      );
+      expect(large.width, closeTo(2 * MpDropGeometry.maxRadius, 0.01));
+
+      // Asserted against the geometry rather than three literals, because the
+      // failure that matters is the box disagreeing with what is painted
+      // inside it — nothing clips the marker child, so a box narrower than its
+      // contents does not error, it just overlaps the neighbouring pin.
+      for (final (size, count) in [(small, 1), (medium, 40), (large, 400)]) {
+        final m = MpPinMetrics.forCount(count);
+        expect(size.width, closeTo(m.drop.width, 0.01));
+        expect(size.height, closeTo(m.drop.height, 0.01));
+      }
 
       await _teardown(tester);
     });
@@ -556,11 +712,29 @@ void main() {
       expect(box.height, expected.boxHeight);
       expect(tester.getSize(find.byType(MpMapPin)), Size(expected.width, expected.boxHeight));
 
-      // And it is the live tier, not the interested one: 300 going, 2
-      // interested. Had the screen sized the box off the wrong counter, the
-      // pin would be squeezed into a 38px-tall small-tier box here.
-      expect(expected.tier, MpPinTier.large);
-      expect(box.height, 56 + MpPinMetrics.pulseHeadroom);
+      // And it is sized off the LIVE counter, not the interested one: 300
+      // going, 2 interested. Had the screen read the wrong one the pin would
+      // be squeezed into a minimum-radius box here, so the two sizes are
+      // asserted apart rather than just asserted equal to each other.
+      expect(expected.drop.radius, MpDropGeometry.maxRadius);
+      expect(box.height, closeTo(expected.drop.height, 0.01));
+      expect(MpPinMetrics.forCount(2).drop.radius, lessThan(MpDropGeometry.maxRadius * 0.6),
+          reason: 'the interested count would have drawn a far smaller bubble');
+
+      // THE ANCHOR. Inverting flutter_map's placement, the point lands at
+      // (0.5·w·(1−ax), 0.5·h·(1−ay)) inside the box — which must be the apex.
+      // Constant now that the box is symmetric, but still derived: a shape
+      // whose apex left the bottom centre would fail here rather than quietly
+      // move every party on the map.
+      final marker = tester.widget<MpMapPin>(find.byType(MpMapPin));
+      final anchored = Offset(
+        0.5 * box.width! * (1 - expected.anchor.x),
+        0.5 * box.height! * (1 - expected.anchor.y),
+      );
+      expect(anchored.dx, closeTo(expected.tip.dx, 0.01));
+      expect(anchored.dy, closeTo(expected.tip.dy, 0.01));
+      expect(marker.pin.id, 'live');
+
       expect(tester.takeException(), isNull);
 
       await _teardown(tester);
@@ -592,12 +766,12 @@ void main() {
       final repository = _FakePartyRepository(const []);
 
       await _mount(tester, repository);
-      await tester.tap(find.text('Ψάξε πάρτι ή άτομα'));
+      await tester.tap(find.text('Search parties or people'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
 
       expect(find.byType(SearchScreen), findsOneWidget);
-      expect(find.text('Γράψε κι άλλο'), findsOneWidget,
+      expect(find.text('Keep typing'), findsOneWidget,
           reason: 'it opens on the type-more state, having queried nothing');
 
       await _teardown(tester);
@@ -613,7 +787,338 @@ void main() {
 
       expect(find.byType(CircularProgressIndicator), findsNothing);
       expect(find.byType(MpMapPin), findsNothing);
-      expect(find.text('Ψάξε πάρτι ή άτομα'), findsOneWidget);
+      expect(find.text('Search parties or people'), findsOneWidget);
+
+      await _teardown(tester);
+    });
+  });
+
+  group('the time chips', () {
+    testWidgets('all four render, and All is the default', (tester) async {
+      final repository = _FakePartyRepository(const []);
+
+      await _mount(tester, repository);
+
+      expect(find.text('All'), findsOneWidget);
+      expect(find.text('Live'), findsOneWidget);
+      expect(find.text('Later tonight'), findsOneWidget);
+      expect(find.text('Weekend'), findsOneWidget);
+
+      // The default matters more than it looks. Before this phase the enum
+      // defaulted to `live` and nothing read it, so the pill row opened with
+      // "Τώρα" highlighted over an unfiltered map -- a lie that was harmless
+      // only because the filter did not work. Now that it does, a default of
+      // anything but Όλα would hide most of the map on open.
+      expect(repository.windows, [MapTimeWindow.all]);
+
+      await _teardown(tester);
+    });
+
+    testWidgets('tapping a chip issues a NEW request with that window',
+        (tester) async {
+      final repository = _FakePartyRepository(const []);
+
+      await _mount(tester, repository);
+      expect(repository.calls, hasLength(1));
+
+      await tester.tap(find.text('Live'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      // A SECOND call, not a second look at the first one's rows. This is the
+      // assertion the whole phase exists for: filtering `_pins` client-side
+      // would leave this at one call and still look right on a map with no
+      // pins on it.
+      expect(repository.calls, hasLength(2));
+      expect(repository.windows, [MapTimeWindow.all, MapTimeWindow.now]);
+
+      await _teardown(tester);
+    });
+
+    testWidgets('each chip sends its own wire value', (tester) async {
+      final repository = _FakePartyRepository(const []);
+
+      await _mount(tester, repository);
+
+      for (final label in const ['Later tonight', 'Weekend', 'All']) {
+        await tester.tap(find.text(label));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+
+      expect(repository.windows, [
+        MapTimeWindow.all,
+        MapTimeWindow.tonight,
+        MapTimeWindow.weekend,
+        MapTimeWindow.all,
+      ]);
+
+      await _teardown(tester);
+    });
+
+    testWidgets('re-tapping the active chip does not refetch', (tester) async {
+      final repository = _FakePartyRepository(const []);
+
+      await _mount(tester, repository);
+
+      await tester.tap(find.text('Live'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(repository.calls, hasLength(2));
+
+      await tester.tap(find.text('Live'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      // Not merely an optimisation: the map query is the most expensive one in
+      // the schema, and a pill row where every tap is a round trip makes an
+      // idle thumb a load generator.
+      expect(repository.calls, hasLength(2));
+      expect(repository.windows.last, MapTimeWindow.now);
+
+      await _teardown(tester);
+    });
+  });
+
+  group('MapPinSheet', () {
+    final start = DateTime.parse('2026-08-21T20:00:00Z');
+
+    MapPartyPin full({
+      String? description = 'Ταράτσα με θέα, φέρτε ποτό.',
+      String? area = 'Κουκάκι',
+      String? hostUsername = 'nikos',
+      String? myRsvpStatus,
+      String? coverPath,
+      DateTime? startsAt,
+      DateTime? endsAt,
+      int? goingCount = 12,
+      int? interestedCount = 34,
+      bool isPrivate = false,
+    }) {
+      return MapPartyPin(
+        id: 'aaaaaaaa-0000-0000-0000-000000000002',
+        lat: _athens.lat,
+        lng: _athens.lon,
+        title: 'Syntagma Afterparty',
+        isPrivate: isPrivate,
+        goingCount: goingCount,
+        interestedCount: interestedCount,
+        startsAt: startsAt ?? start,
+        endsAt: endsAt ?? start.add(const Duration(hours: 8)),
+        area: area,
+        description: description,
+        hostId: '11111111-1111-1111-1111-111111111111',
+        hostUsername: hostUsername,
+        myRsvpStatus: myRsvpStatus,
+        coverPath: coverPath,
+      );
+    }
+
+    Future<void> pumpSheet(
+      WidgetTester tester,
+      MapPartyPin pin,
+      _FakePartyRepository repository,
+    ) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(body: MapPinSheet(pin: pin, repository: repository)),
+      ));
+      await tester.pump();
+    }
+
+    testWidgets('renders everything the pin stopped showing', (tester) async {
+      // The whole point of stripping the pin: none of this is lost, it moves
+      // one tap away. Asserted as a set rather than one field at a time
+      // because the failure that matters is a section quietly missing, not a
+      // section formatted differently.
+      final repository = _FakePartyRepository(const []);
+      await pumpSheet(tester, full(), repository);
+
+      expect(find.text('Syntagma Afterparty'), findsOneWidget);
+      expect(find.text('Ταράτσα με θέα, φέρτε ποτό.'), findsOneWidget);
+      expect(find.text('Κουκάκι'), findsOneWidget);
+      expect(find.text('@nikos'), findsOneWidget);
+      expect(find.byTooltip('Report'), findsOneWidget);
+    });
+
+    testWidgets('shows BOTH counters, with the tense deciding which leads', (tester) async {
+      // The pin has room for one number; the sheet is where both can be true
+      // at once. A live party leads with who is inside and still reports
+      // interest — and must not print the interested figure as if it were
+      // attendance.
+      final repository = _FakePartyRepository(const []);
+      await pumpSheet(
+        tester,
+        full(
+          startsAt: DateTime.now().subtract(const Duration(hours: 1)),
+          endsAt: DateTime.now().add(const Duration(hours: 3)),
+        ),
+        repository,
+      );
+
+      expect(find.text('12 here now'), findsOneWidget);
+      expect(find.text('34 interested'), findsOneWidget);
+    });
+
+    testWidgets('an upcoming party leads with interest instead', (tester) async {
+      final repository = _FakePartyRepository(const []);
+      await pumpSheet(
+        tester,
+        full(
+          startsAt: DateTime.now().add(const Duration(days: 1)),
+          endsAt: DateTime.now().add(const Duration(days: 1, hours: 4)),
+        ),
+        repository,
+      );
+
+      expect(find.text('34 interested'), findsOneWidget);
+      expect(find.text('12 going'), findsOneWidget);
+      expect(find.text('12 here now'), findsNothing);
+    });
+
+    testWidgets('a missing column is omitted, never rendered as a blank row', (tester) async {
+      // area, description and host_username are all nullable, and an empty row
+      // reads as a field that failed to load rather than one nobody filled in.
+      final repository = _FakePartyRepository(const []);
+      await pumpSheet(
+        tester,
+        full(description: null, area: null, hostUsername: null),
+        repository,
+      );
+
+      expect(find.text('Syntagma Afterparty'), findsOneWidget);
+      expect(find.byIcon(Icons.place_outlined), findsNothing);
+      expect(find.byIcon(Icons.person_outline), findsNothing);
+      // The time is the one fact that is non-null in the schema, so it stays.
+      expect(find.byIcon(Icons.schedule), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a whitespace-only description is treated as absent', (tester) async {
+      // `description` is host-written free text; the schema does not stop it
+      // being blank, and a section containing only spaces is a gap with no
+      // explanation.
+      final repository = _FakePartyRepository(const []);
+      await pumpSheet(tester, full(description: '   '), repository);
+
+      expect(find.text('   '), findsNothing);
+    });
+
+    testWidgets('a public party offers both answers and lights the current one', (tester) async {
+      // Two buttons, always both present -- switching between them is an
+      // `update rsvps set status`, so the other answer has to stay reachable.
+      // The tick is what moves.
+      final repository = _FakePartyRepository(const []);
+
+      await pumpSheet(tester, full(myRsvpStatus: null), repository);
+      expect(find.text('Going'), findsOneWidget);
+      expect(find.text('Interested'), findsOneWidget);
+
+      await pumpSheet(tester, full(myRsvpStatus: 'interested'), repository);
+      expect(find.text('Interested ✓'), findsOneWidget);
+      expect(find.text('Going'), findsOneWidget);
+
+      await pumpSheet(tester, full(myRsvpStatus: 'going'), repository);
+      expect(find.text('Going ✓'), findsOneWidget);
+      expect(find.text('Interested'), findsOneWidget);
+    });
+
+    testWidgets('a private party offers ONE answer, and it is not Interested', (tester) async {
+      // The server refuses an 'interested' row on a private party
+      // (20260825090050), so offering the button would be an affordance that
+      // returns 42501. Asserted as an absence, which is the whole point.
+      final repository = _FakePartyRepository(const []);
+
+      await pumpSheet(tester, full(isPrivate: true, myRsvpStatus: null), repository);
+      expect(find.text('Coming'), findsOneWidget);
+      expect(find.text('Interested'), findsNothing);
+      expect(find.text('Going'), findsNothing);
+
+      await pumpSheet(tester, full(isPrivate: true, myRsvpStatus: 'going'), repository);
+      expect(find.text('You are coming ✓'), findsOneWidget);
+      expect(find.text('Interested'), findsNothing);
+    });
+
+    testWidgets('a private party shows no counts in the sheet at all', (tester) async {
+      // goingCount/interestedCount are null because the RPC no longer sends
+      // them for a private row. The counts row is omitted rather than blanked
+      // or zeroed -- "0 going" is a legible, wrong answer.
+      final repository = _FakePartyRepository(const []);
+      await pumpSheet(
+        tester,
+        full(isPrivate: true, goingCount: null, interestedCount: null),
+        repository,
+      );
+
+      expect(find.textContaining('interested'), findsNothing);
+      expect(find.textContaining('going'), findsNothing);
+      expect(find.textContaining('here now'), findsNothing);
+      expect(find.text('0'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a party with no cover never asks storage to sign one', (tester) async {
+      // `party-covers` is private and every signature is a round trip, so the
+      // sheet must not spend one to be told there is no object.
+      final repository = _FakePartyRepository(const []);
+      await pumpSheet(tester, full(coverPath: null), repository);
+
+      expect(repository.signRequests, isEmpty);
+    });
+
+    testWidgets('a party with a cover signs exactly its own path', (tester) async {
+      final repository = _FakePartyRepository(const [])
+        ..signedCover = 'https://example.test/signed.jpg';
+
+      await pumpSheet(
+        tester,
+        full(coverPath: 'aaaaaaaa-0000-0000-0000-000000000002/cover.jpg'),
+        repository,
+      );
+      await tester.pump();
+
+      expect(repository.signRequests,
+          ['aaaaaaaa-0000-0000-0000-000000000002/cover.jpg']);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a cover that will not sign falls back to the placeholder', (tester) async {
+      // Same rendering as a party that never had one: there is deliberately no
+      // error state for a picture.
+      final repository = _FakePartyRepository(const [])..signedCover = null;
+
+      await pumpSheet(
+        tester,
+        full(coverPath: 'aaaaaaaa-0000-0000-0000-000000000002/cover.jpg'),
+        repository,
+      );
+      await tester.pump();
+
+      expect(find.byType(Image), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('tapping a pin opens THIS sheet, not a lookalike', (tester) async {
+      // The map half of the shared-sheet rule; search_test.dart asserts the
+      // other half. Both must reach MapPinSheet itself, because that is what
+      // makes the report action and the counts identical from either screen.
+      final now = DateTime.now();
+      final repository = _FakePartyRepository([
+        _pin(
+          id: 'p',
+          title: 'Ταράτσα',
+          startsAt: now.add(const Duration(days: 1)),
+          endsAt: now.add(const Duration(days: 1, hours: 4)),
+          interestedCount: 7,
+        ),
+      ]);
+
+      await _mount(tester, repository);
+      await tester.tap(find.byType(MpMapPin));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(find.byType(MapPinSheet), findsOneWidget);
+      expect(find.text('Ταράτσα'), findsOneWidget);
 
       await _teardown(tester);
     });

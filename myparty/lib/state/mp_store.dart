@@ -1,32 +1,38 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
-import '../models/mp_party.dart';
+/// The two answers `public.rsvp_status` holds, and the only two it will hold —
+/// 22_private_party_counts_and_rsvp asserts the enum stays at two values.
+///
+/// There is deliberately no `declined`. "Not going" is the ABSENCE of a row:
+/// un-tapping deletes it, which the rsvps DELETE policy and the counter
+/// trigger's DELETE branch have supported since the table was created. A third
+/// value would record an absence the absent row already records, and would
+/// widen `my_rsvp_status` on three read RPCs to do it.
+///
+/// A PRIVATE party only ever takes [going] — the rsvps write policies refuse
+/// [interested] on one (20260825090050), so "Coming" writes 'going'.
+enum MpRsvp { interested, going }
 
 /// Shared mock/interactive state for the redesigned screens, mirroring the
 /// single component state tree of the original design prototype.
 class MpStore extends ChangeNotifier {
-  MpStore({bool autoDecay = true}) {
-    if (autoDecay) {
-      _decayTimer = Timer.periodic(const Duration(milliseconds: 2600), (_) {
-        _hype['vinyl'] = math.max(22, (_hype['vinyl'] ?? 64) - 1);
-        _hype['taratsa'] = math.max(18, (_hype['taratsa'] ?? 41) - 1);
-        notifyListeners();
-      });
-    }
-  }
+  MpStore();
 
-  final Map<String, int> _hype = {'vinyl': 64, 'taratsa': 41};
-  final Map<String, bool> _interested = {
-    'vinyl': true,
-    'taratsa': true,
-    'anodos': true,
-    'maria': false,
-    'kapsimo': false,
-    'nefeli': true,
-  };
+  // _hype / hypeOf / bump and the mock _rsvp map lived here until Phase 18.
+  //
+  // HYPE IS GONE, not migrated. It was a percentage with no column behind it
+  // -- seeded at 64 and 41 for two hardcoded party keys, decremented by a
+  // timer and bumped by taps -- and there is no hype column in the schema and
+  // no phase that adds one. What replaced it on the card is the thing it was
+  // a picture of: the real interested_count, labelled by tense. Same call
+  // credibility_score already got, for the same reason: a number nothing
+  // computes is an invitation to display it.
+  //
+  // The rsvp map went because the buttons write to `rsvps` now. It was keyed
+  // by mpParties handles ('vinyl', 'taratsa') that no table could match, and
+  // my_rsvp_status comes back on every read RPC that carries a party.
   // _invited / invited / toggleInvited / invitedCount lived here until Phase 11
   // and were already unreachable when they were removed: the host wizard keeps
   // its own `Set<String> _invited` of real profile uuids from
@@ -41,27 +47,11 @@ class MpStore extends ChangeNotifier {
   // with the server. ProfileScreen holds the loaded value instead.
   bool _copied = false;
 
-  Timer? _decayTimer;
-
-  Map<String, MpParty> get parties => mpParties;
-
-  int hypeOf(String id) => _hype[id] ?? 0;
-  bool interestedIn(String id) => _interested[id] ?? false;
   bool get copied => _copied;
 
-  void bump(String id, int amount) {
-    _hype[id] = math.min(100, (_hype[id] ?? 0) + amount);
-    notifyListeners();
-  }
-
-  void toggleInterest(String id, {int hypeBumpOnJoin = 0}) {
-    final next = !(_interested[id] ?? false);
-    _interested[id] = next;
-    if (next && hypeBumpOnJoin > 0) {
-      _hype[id] = math.min(100, (_hype[id] ?? 0) + hypeBumpOnJoin);
-    }
-    notifyListeners();
-  }
+  // setRsvp lived here too, and is now PartyRepository.setRsvp -- a real
+  // upsert, with the un-RSVP as the DELETE it always described itself as
+  // being. The `hypeBumpOnJoin` parameter went with hype.
 
   void flashCopied() {
     _copied = true;
@@ -72,9 +62,4 @@ class MpStore extends ChangeNotifier {
     });
   }
 
-  @override
-  void dispose() {
-    _decayTimer?.cancel();
-    super.dispose();
-  }
 }
