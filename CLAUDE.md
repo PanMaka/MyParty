@@ -9,7 +9,11 @@ Session-by-session task scripts: `docs/MyParty-ClaudeCode-Prompts.md`.
 **Real today:** `profiles`/`parties`/`invitations`/`rsvps`/`follows`/`blocks`/
 `party_posts`/`post_likes`/`post_comments`/`reports`/`messages`/`party_reads`/
 `stories`/`story_views`/`user_devices`/`sent_notifications`/
-`notification_jobs` tables with RLS;
+`notification_jobs`/`user_birthdates` tables with RLS;
+the **13+ age gate** — `before_user_created_age_gate`, a Supabase Auth
+`before_user_created` hook (not a trigger: raw `auth.users` inserts in seed and
+tests must keep working), with the DOB stored owner-read-only in
+`user_birthdates` because `profiles` is readable by everyone;
 `get_parties_near_user` RPC
 (tier/zoom-filtered map query, `p_limit` defaulting to 200 and clamped to
 [1, 500], `authenticated`-only since `20260821175831`, and time-windowed by

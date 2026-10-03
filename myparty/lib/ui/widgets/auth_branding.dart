@@ -89,6 +89,75 @@ class _AuthPasswordFieldState extends State<AuthPasswordField> {
   }
 }
 
+/// Date-of-birth input for registration: tap to open a calendar. When
+/// [errorText] is set, the outline, label and icon turn red and the message is
+/// shown under the field.
+class AuthDateOfBirthField extends StatelessWidget {
+  final DateTime? value;
+  final ValueChanged<DateTime> onChanged;
+  final String? errorText;
+
+  const AuthDateOfBirthField({
+    super.key,
+    required this.value,
+    required this.onChanged,
+    this.errorText,
+  });
+
+  Future<void> _pick(BuildContext context) async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: value ?? DateTime(now.year - 18, now.month, now.day),
+      firstDate: DateTime(1900),
+      lastDate: now,
+      helpText: 'Date of birth',
+      initialEntryMode: DatePickerEntryMode.calendarOnly,
+    );
+    if (picked != null) onChanged(picked);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hasError = errorText != null;
+    final accent = hasError ? AppColors.formError : Colors.white70;
+    OutlineInputBorder outline(Color color) => OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: color),
+        );
+    final v = value;
+
+    return Semantics(
+      button: true,
+      label: 'Date of birth',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () => _pick(context),
+        child: InputDecorator(
+          isEmpty: v == null,
+          decoration: InputDecoration(
+            labelText: 'Date of birth',
+            labelStyle: TextStyle(color: accent),
+            floatingLabelStyle: TextStyle(color: accent),
+            suffixIcon: Icon(Icons.calendar_today_outlined, color: accent),
+            enabledBorder: outline(Colors.white38),
+            errorText: errorText,
+            errorMaxLines: 3,
+            errorStyle: const TextStyle(color: AppColors.formError, fontSize: 12),
+            errorBorder: outline(AppColors.formError),
+          ),
+          child: Text(
+            v == null
+                ? ''
+                : '${v.day.toString().padLeft(2, '0')}/${v.month.toString().padLeft(2, '0')}/${v.year}',
+            style: const TextStyle(color: Colors.white, fontSize: 16),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// The bordered box the email and password inputs sit in.
 class AuthFieldsBox extends StatelessWidget {
   final List<Widget> children;

@@ -1,15 +1,23 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../utils/age.dart';
 import 'notifications.dart';
 
 class AuthService {
   final SupabaseClient _supabase = Supabase.instance.client;
 
   // Sign Up Logic
-  Future<AuthResponse> signUp({required String email, required String password}) async {
+  Future<AuthResponse> signUp({
+    required String email,
+    required String password,
+    required DateTime dateOfBirth,
+  }) async {
     return await _supabase.auth.signUp(
       email: email,
       password: password,
+      // Read by the before_user_created age gate (which refuses under-13s) and
+      // stored by handle_new_user into user_birthdates.
+      data: {'date_of_birth': isoDate(dateOfBirth)},
     );
   }
 

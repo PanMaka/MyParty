@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../services/auth_service.dart';
+import '../../utils/age.dart';
 import '../widgets/auth_branding.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -15,13 +16,31 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _passwordController = TextEditingController();
   final _authService = AuthService();
   bool _isLoading = false;
+  DateTime? _dateOfBirth;
+  String? _dateOfBirthError;
+
+  void _onDateOfBirthPicked(DateTime dob) {
+    setState(() {
+      _dateOfBirth = dob;
+      _dateOfBirthError = dateOfBirthError(dob);
+    });
+  }
 
   Future<void> _register() async {
+    // Checked here first so the user gets the red field rather than a
+    // round trip; the server's age gate refuses the same cases regardless.
+    final dobError = dateOfBirthError(_dateOfBirth);
+    if (dobError != null) {
+      setState(() => _dateOfBirthError = dobError);
+      return;
+    }
+
     setState(() => _isLoading = true);
     try {
       await _authService.signUp(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
+        dateOfBirth: _dateOfBirth!,
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -65,6 +84,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
                 const SizedBox(height: 16),
                 AuthPasswordField(controller: _passwordController),
+                const SizedBox(height: 24),
+                AuthDateOfBirthField(
+                  value: _dateOfBirth,
+                  onChanged: _onDateOfBirthPicked,
+                  errorText: _dateOfBirthError,
+                ),
               ],
             ),
             const SizedBox(height: 24),
