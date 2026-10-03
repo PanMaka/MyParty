@@ -45,6 +45,26 @@ void main() {
     expect(decoration.borderRadius, isNotNull);
   });
 
+  testWidgets('password eye shows and hides what was typed', (tester) async {
+    final controller = TextEditingController(text: 'secret');
+    await tester.pumpWidget(_host(AuthPasswordField(controller: controller)));
+
+    bool obscured() => tester.widget<TextField>(find.byType(TextField)).obscureText;
+
+    expect(obscured(), isTrue, reason: 'hidden by default');
+    expect(find.byTooltip('Show password'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Show password'));
+    await tester.pump();
+    expect(obscured(), isFalse);
+    expect(find.byTooltip('Hide password'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Hide password'));
+    await tester.pump();
+    expect(obscured(), isTrue);
+    expect(controller.text, 'secret', reason: 'toggling never touches the value');
+  });
+
   testWidgets('header and box fit a narrow phone without overflow', (tester) async {
     await tester.pumpWidget(_host(
       const Column(children: [

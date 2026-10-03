@@ -50,6 +50,45 @@ class AuthHeader extends StatelessWidget {
   }
 }
 
+/// Password input with an eye toggle to show/hide what was typed.
+class AuthPasswordField extends StatefulWidget {
+  final TextEditingController controller;
+
+  const AuthPasswordField({super.key, required this.controller});
+
+  @override
+  State<AuthPasswordField> createState() => _AuthPasswordFieldState();
+}
+
+class _AuthPasswordFieldState extends State<AuthPasswordField> {
+  bool _obscured = true;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: widget.controller,
+      style: const TextStyle(color: Colors.white),
+      cursorColor: Colors.white,
+      obscureText: _obscured,
+      decoration: InputDecoration(
+        labelText: 'Password',
+        labelStyle: const TextStyle(color: Colors.white70),
+        focusedBorder: const UnderlineInputBorder(
+          borderSide: BorderSide(color: Colors.white),
+        ),
+        suffixIcon: IconButton(
+          icon: Icon(
+            _obscured ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+            color: Colors.white70,
+          ),
+          tooltip: _obscured ? 'Show password' : 'Hide password',
+          onPressed: () => setState(() => _obscured = !_obscured),
+        ),
+      ),
+    );
+  }
+}
+
 /// The bordered box the email and password inputs sit in.
 class AuthFieldsBox extends StatelessWidget {
   final List<Widget> children;
