@@ -34,6 +34,8 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
       }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
