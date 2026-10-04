@@ -4,9 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:myparty/ui/theme/app_theme.dart';
 import 'package:myparty/ui/widgets/auth_branding.dart';
 
-/// The login and register screens themselves construct `AuthService`, which
-/// reaches for `Supabase.instance` and so cannot be built here. Everything the
-/// two screens share visually lives in these widgets, which can.
+/// The shared auth widgets in isolation. The screens that compose them are
+/// covered in auth_screens_test.dart.
 Widget _host(Widget child, {double width = 400}) => MaterialApp(
       home: Scaffold(
         body: Center(

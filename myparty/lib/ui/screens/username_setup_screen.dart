@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../data/profile_repository.dart';
+import '../widgets/auth_branding.dart';
 import 'home_screen.dart';
 
 class UsernameSetupScreen extends StatefulWidget {
-  const UsernameSetupScreen({super.key});
+  const UsernameSetupScreen({super.key, this.repository});
+
+  /// Injectable so the screen builds under `flutter test`; null means the real
+  /// [ProfileRepository].
+  final ProfileRepository? repository;
 
   @override
   State<UsernameSetupScreen> createState() => _UsernameSetupScreenState();
@@ -11,7 +17,7 @@ class UsernameSetupScreen extends StatefulWidget {
 
 class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
   final _usernameController = TextEditingController();
-  final _supabase = Supabase.instance.client;
+  late final ProfileRepository _profiles = widget.repository ?? ProfileRepository();
   bool _isLoading = false;
   String? _errorText;
 
@@ -28,21 +34,14 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
     });
 
     try {
-      final available = await _supabase.rpc(
-        'check_username_available',
-        params: {'p_username': username},
-      ) as bool;
+      final available = await _profiles.isUsernameAvailable(username);
 
       if (!available) {
         setState(() => _errorText = 'That username is already taken');
         return;
       }
 
-      final userId = _supabase.auth.currentUser!.id;
-      await _supabase.from('profiles').update({
-        'username': username,
-        'onboarding_completed_at': DateTime.now().toUtc().toIso8601String(),
-      }).eq('id', userId);
+      await _profiles.completeOnboarding(username);
 
       if (mounted) {
         Navigator.pushReplacement(
@@ -67,30 +66,34 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('MyParty - Choose a username')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(16, 40, 16, 16),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Text(
-              'Pick a username so your friends can find you.',
-              style: TextStyle(color: Colors.white70),
-              textAlign: TextAlign.center,
+            const AuthHeader(
+              asset: 'assets/images/username_party.png',
+              imageScale: 1.0,
+              semanticLabel: 'Friends at a party',
+              caption: "What's your name? People need it to find you in the party!",
             ),
-            const SizedBox(height: 24),
-            TextField(
-              controller: _usernameController,
-              style: const TextStyle(color: Colors.white),
-              cursorColor: Colors.white,
-              decoration: InputDecoration(
-                labelText: 'Username',
-                labelStyle: const TextStyle(color: Colors.white70),
-                errorText: _errorText,
-                focusedBorder: const UnderlineInputBorder(
-                  borderSide: BorderSide(color: Colors.white),
+            const SizedBox(height: 32),
+            AuthFieldsBox(
+              children: [
+                TextField(
+                  controller: _usernameController,
+                  style: const TextStyle(color: Colors.white),
+                  cursorColor: Colors.white,
+                  decoration: InputDecoration(
+                    labelText: 'Username',
+                    labelStyle: const TextStyle(color: Colors.white70),
+                    errorText: _errorText,
+                    focusedBorder: const UnderlineInputBorder(
+                      borderSide: BorderSide(color: Colors.white),
+                    ),
+                  ),
+                  autocorrect: false,
                 ),
-              ),
-              autocorrect: false,
+              ],
             ),
             const SizedBox(height: 24),
             _isLoading

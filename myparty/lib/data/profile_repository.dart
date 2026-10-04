@@ -159,6 +159,31 @@ class ProfileRepository {
     await _client.from('profiles').update({'bio': bio}).eq('id', userId);
   }
 
+  /// Whether [username] is free across ALL profiles. The RPC is security
+  /// definer because the `profiles` SELECT policy is block-filtered, so a plain
+  /// select would answer from the caller's filtered view (gotcha 1).
+  Future<bool> isUsernameAvailable(String username) async {
+    return await _client.rpc(
+      'check_username_available',
+      params: {'p_username': username},
+    ) as bool;
+  }
+
+  /// Onboarding's last step: sets the signed-in user's username and stamps
+  /// `onboarding_completed_at`, which is what routes them past
+  /// [UsernameSetupScreen] from then on. The unique constraint on `username`
+  /// is the real arbiter; [isUsernameAvailable] only gives a friendlier error
+  /// for the common case.
+  Future<void> completeOnboarding(String username) async {
+    final userId = currentUserId;
+    if (userId == null) throw StateError('No signed-in user to onboard');
+
+    await _client.from('profiles').update({
+      'username': username,
+      'onboarding_completed_at': DateTime.now().toUtc().toIso8601String(),
+    }).eq('id', userId);
+  }
+
   /// Uploads a new avatar and points `profiles.avatar_path` at it, removing the
   /// object it replaces.
   ///

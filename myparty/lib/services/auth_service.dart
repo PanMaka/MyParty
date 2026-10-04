@@ -4,7 +4,14 @@ import '../utils/age.dart';
 import 'notifications.dart';
 
 class AuthService {
-  final SupabaseClient _supabase = Supabase.instance.client;
+  AuthService({SupabaseClient? client}) : _clientOverride = client;
+
+  final SupabaseClient? _clientOverride;
+
+  /// Resolved lazily so a test double can subclass this without an initialized
+  /// Supabase, which does not exist under `flutter test` — same as
+  /// [ProfileRepository].
+  SupabaseClient get _supabase => _clientOverride ?? Supabase.instance.client;
 
   // Sign Up Logic
   Future<AuthResponse> signUp({

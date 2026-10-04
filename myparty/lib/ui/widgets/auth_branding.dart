@@ -2,11 +2,25 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 
-/// The logo-in-a-circle and caption shared by the login and register screens.
+/// The image-in-a-circle and caption at the top of the auth screens. Defaults
+/// to the logo and login/register caption; onboarding steps pass their own.
 class AuthHeader extends StatelessWidget {
   final double logoSize;
+  final String asset;
+  final double imageScale;
+  final String semanticLabel;
+  final String caption;
 
-  const AuthHeader({super.key, this.logoSize = 112});
+  const AuthHeader({
+    super.key,
+    this.logoSize = 112,
+    this.asset = 'assets/images/content.png',
+    // The logo asset is a full square with the M in its middle ~45%, so it
+    // is scaled up to let the M fill the circle rather than float in it.
+    this.imageScale = 1.4,
+    this.semanticLabel = 'MyParty',
+    this.caption = 'Are you ready to party?',
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -23,22 +37,20 @@ class AuthHeader extends StatelessWidget {
             ],
           ),
           child: ClipOval(
-            // The asset is a full square with the M in its middle ~45%, so it
-            // is scaled up to let the M fill the circle rather than float in it.
             child: Transform.scale(
-              scale: 1.4,
+              scale: imageScale,
               child: Image.asset(
-                'assets/images/content.png',
+                asset,
                 fit: BoxFit.cover,
                 filterQuality: FilterQuality.medium,
-                semanticLabel: 'MyParty',
+                semanticLabel: semanticLabel,
               ),
             ),
           ),
         ),
         const SizedBox(height: 20),
         Text(
-          'Are you ready to party?',
+          caption,
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                 color: AppColors.text,

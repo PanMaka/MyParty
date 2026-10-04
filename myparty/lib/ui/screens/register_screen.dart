@@ -5,7 +5,11 @@ import '../../utils/age.dart';
 import '../widgets/auth_branding.dart';
 
 class RegisterScreen extends StatefulWidget {
-  const RegisterScreen({super.key});
+  const RegisterScreen({super.key, this.authService});
+
+  /// Injectable so the screen builds under `flutter test`; null means the real
+  /// [AuthService].
+  final AuthService? authService;
 
   @override
   State<RegisterScreen> createState() => _RegisterScreenState();
@@ -14,7 +18,7 @@ class RegisterScreen extends StatefulWidget {
 class _RegisterScreenState extends State<RegisterScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _authService = AuthService();
+  late final AuthService _authService = widget.authService ?? AuthService();
   bool _isLoading = false;
   DateTime? _dateOfBirth;
   String? _dateOfBirthError;
