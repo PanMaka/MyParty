@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
@@ -233,7 +234,10 @@ class _MapScreenState extends State<MapScreen> {
             ),
             children: [
               TileLayer(
-                urlTemplate: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+                // CARTO serves an "API KEY REQUIRED" placeholder for every tile
+                // without `key`. Read guarded: widget tests never load .env.
+                urlTemplate: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
+                    '?key=${dotenv.isInitialized ? dotenv.maybeGet('CARTO_API_KEY') ?? '' : ''}',
                 subdomains: const ['a', 'b', 'c', 'd'],
                 userAgentPackageName: 'com.myparty.app',
               ),
