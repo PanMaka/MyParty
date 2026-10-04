@@ -14,6 +14,10 @@ import 'package:myparty/ui/widgets/auth_branding.dart';
 /// Records sign-ins instead of reaching GoTrue.
 class _FakeAuthService extends AuthService {
   final List<String> signIns = [];
+  int signOuts = 0;
+
+  @override
+  Future<void> signOut() async => signOuts++;
 
   @override
   Future<AuthResponse> signIn({required String email, required String password}) async {
@@ -172,6 +176,32 @@ void main() {
 
       expect(repo.onboarded, ['maria']);
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    });
+
+    testWidgets('the back arrow signs out and opens register', (tester) async {
+      final auth = _FakeAuthService();
+      await tester.pumpWidget(_app(
+        UsernameSetupScreen(repository: _FakeProfileRepository(), authService: auth),
+      ));
+
+      await tester.tap(find.byTooltip('Back to sign up'));
+      await tester.pumpAndSettle();
+
+      expect(auth.signOuts, 1, reason: 'with the session alive AuthGate would only rebuild this screen');
+      expect(find.byType(RegisterScreen), findsOneWidget);
+    });
+
+    testWidgets('the system back button does the same, and never pops a bare route', (tester) async {
+      final auth = _FakeAuthService();
+      await tester.pumpWidget(_app(
+        UsernameSetupScreen(repository: _FakeProfileRepository(), authService: auth),
+      ));
+
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+
+      expect(auth.signOuts, 1);
+      expect(find.byType(RegisterScreen), findsOneWidget);
     });
 
     testWidgets('fits a narrow phone without overflow', (tester) async {
