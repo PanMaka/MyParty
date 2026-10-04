@@ -29,6 +29,19 @@ class AuthGate extends StatelessWidget {
           // username yet before deciding where to send them.
           return _ProfileGate(userId: session.user.id);
         } else {
+          // Sign-out is triggered from Settings and the account-deletion
+          // screen, which are pushed ON TOP of this route. Swapping this route
+          // to LoginScreen happens underneath them, so without the pop the
+          // session is gone and the user is still looking at Settings.
+          // Only on signedOut: other session-less events (e.g. a sign-up
+          // awaiting email confirmation) must not pop RegisterScreen.
+          if (snapshot.data?.event == AuthChangeEvent.signedOut) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (context.mounted) {
+                Navigator.of(context).popUntil((route) => route.isFirst);
+              }
+            });
+          }
           // User is NOT logged in, send them to the Login Screen
           return const LoginScreen();
         }
