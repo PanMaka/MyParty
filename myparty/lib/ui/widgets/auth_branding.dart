@@ -78,7 +78,7 @@ class _AuthPasswordFieldState extends State<AuthPasswordField> {
         ),
         suffixIcon: IconButton(
           icon: Icon(
-            _obscured ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+            _obscured ? Icons.visibility_off_outlined : Icons.visibility_outlined,
             color: Colors.white70,
           ),
           tooltip: _obscured ? 'Show password' : 'Hide password',

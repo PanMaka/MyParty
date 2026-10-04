@@ -53,11 +53,15 @@ void main() {
 
     expect(obscured(), isTrue, reason: 'hidden by default');
     expect(find.byTooltip('Show password'), findsOneWidget);
+    expect(find.byIcon(Icons.visibility_off_outlined), findsOneWidget,
+        reason: 'the icon shows the current state: closed eye while hidden');
 
     await tester.tap(find.byTooltip('Show password'));
     await tester.pump();
     expect(obscured(), isFalse);
     expect(find.byTooltip('Hide password'), findsOneWidget);
+    expect(find.byIcon(Icons.visibility_outlined), findsOneWidget,
+        reason: 'open eye while the password is readable');
 
     await tester.tap(find.byTooltip('Hide password'));
     await tester.pump();
