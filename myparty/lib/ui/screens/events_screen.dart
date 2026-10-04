@@ -18,7 +18,13 @@ import 'chat_screen.dart';
 import 'host_wizard_screen.dart';
 
 class EventsScreen extends StatefulWidget {
-  const EventsScreen({super.key, this.onNavigate, this.repository, this.feed});
+  const EventsScreen({
+    super.key,
+    this.onNavigate,
+    this.repository,
+    this.feed,
+    this.clock = DateTime.now,
+  });
 
   final ValueChanged<MpTab>? onNavigate;
 
@@ -32,6 +38,12 @@ class EventsScreen extends StatefulWidget {
   /// in [State.initState], which is why it was untested — the translation
   /// below is the first thing here worth asserting.
   final PartyRepository? repository;
+
+  /// What "now" is when the RSVP rows are bucketed into TONIGHT / THIS WEEK /
+  /// LATER. Injectable because TONIGHT ends at local midnight, so a test that
+  /// reads the real clock files "two hours from now" under THIS WEEK whenever
+  /// it runs after 22:00.
+  final DateTime Function() clock;
 
   @override
   State<EventsScreen> createState() => _EventsScreenState();
@@ -299,7 +311,7 @@ class _EventsScreenState extends State<EventsScreen> {
                           return _errorState();
                         }
 
-                        final now = DateTime.now();
+                        final now = widget.clock();
                         final todayEnd = DateTime(now.year, now.month, now.day + 1);
                         final weekEnd = now.add(const Duration(days: 7));
                         final upcoming = snapshot.data!.where((r) => r.startsAt.isAfter(now)).toList()
@@ -588,7 +600,7 @@ class _EventsScreenState extends State<EventsScreen> {
                       Text(rsvp.title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: -0.2)),
                       Padding(
                         padding: const EdgeInsets.only(top: 2),
-                        child: Text(formatPartyStartEn(rsvp.startsAt),
+                        child: Text(formatPartyStartEn(rsvp.startsAt, now: widget.clock()),
                             maxLines: 1, overflow: TextOverflow.ellipsis,
                             style: TextStyle(fontSize: 11.5, color: AppColors.textAlpha(0.55))),
                       ),

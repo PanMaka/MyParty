@@ -22,8 +22,11 @@ String _twoDigits(int n) => n.toString().padLeft(2, '0');
 ///
 /// 24-hour, like its Greek twin: the app's other times are, and one screen
 /// switching to am/pm would make two stamps of the same party disagree.
-String formatPartyStartEn(DateTime startsAt) {
-  final now = DateTime.now();
+///
+/// [now] defaults to the real clock; a screen that buckets by an injected
+/// clock passes the same one, so the label and the section always agree.
+String formatPartyStartEn(DateTime startsAt, {DateTime? now}) {
+  now ??= DateTime.now();
   final time = '${_twoDigits(startsAt.hour)}:${_twoDigits(startsAt.minute)}';
   if (startsAt.year == now.year && startsAt.month == now.month && startsAt.day == now.day) {
     return 'Tonight $time';

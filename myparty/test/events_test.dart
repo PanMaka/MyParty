@@ -151,10 +151,12 @@ Widget _card(PartyListItem item, {void Function(MpRsvp)? onRsvp}) {
   );
 }
 
-Widget _host(PartyRepository repository) {
+Widget _host(PartyRepository repository, {DateTime Function()? clock}) {
   return ChangeNotifierProvider(
     create: (_) => MpStore(),
-    child: MaterialApp(home: EventsScreen(repository: repository)),
+    child: MaterialApp(
+      home: EventsScreen(repository: repository, clock: clock ?? DateTime.now),
+    ),
   );
 }
 
@@ -238,7 +240,11 @@ void main() {
     });
 
     testWidgets('rsvp sections, badges and stamps are translated', (tester) async {
-      final now = DateTime.now();
+      // A fixed evening, not the real clock: TONIGHT ends at local midnight,
+      // so "now + 2h" read off DateTime.now() lands in THIS WEEK after 22:00.
+      // In the future so nothing comparing against the real clock sees these
+      // parties as past.
+      final now = DateTime(2030, 6, 14, 20);
       await tester.pumpWidget(_host(_FakePartyRepository([
         _rsvp(title: 'Tonight one', startsAt: now.add(const Duration(hours: 2))),
         // 'going', not 'interested': a private party cannot hold an
@@ -253,7 +259,7 @@ void main() {
           interested: 0,
         ),
         _rsvp(title: 'Much later', startsAt: now.add(const Duration(days: 20))),
-      ])));
+      ]), clock: () => now));
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('MY PARTIES'));
@@ -283,6 +289,25 @@ void main() {
       // formatPartyStartEn, not its Greek twin.
       expect(find.textContaining('Tonight '), findsWidgets);
       expect(find.textContaining('Απόψε'), findsNothing);
+    });
+
+    testWidgets('late at night, "two hours from now" is tomorrow, not tonight', (tester) async {
+      // The case the real clock used to hit after 22:00. TONIGHT ends at local
+      // midnight, so at 23:00 a party at 23:30 is tonight and one at 01:00 is
+      // not -- and its label must not call it "Tonight" either.
+      final now = DateTime(2030, 6, 14, 23);
+      await tester.pumpWidget(_host(_FakePartyRepository([
+        _rsvp(title: 'Before midnight', startsAt: now.add(const Duration(minutes: 30))),
+        _rsvp(title: 'After midnight', startsAt: now.add(const Duration(hours: 2))),
+      ]), clock: () => now));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('MY PARTIES'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('TONIGHT'), findsOneWidget);
+      expect(find.text('THIS WEEK'), findsOneWidget);
+      expect(find.text('Tonight 23:30'), findsOneWidget);
+      expect(find.text('Sat 15 Jun, 01:00'), findsOneWidget);
     });
 
     testWidgets('the empty state is translated', (tester) async {
