@@ -125,6 +125,34 @@ can set it.
 *What it costs to leave:* known-breached passwords are accepted at signup. Worth
 doing before launch.
 
+### 1.9 The 13+ age gate is not enabled on the hosted project
+
+`before_user_created_age_gate` (`20261003143423_date_of_birth.sql`) only refuses
+sign-ups when the Auth **`before_user_created` hook** points at it. Local has it
+in `supabase/config.toml`; hosted needs it set in the dashboard (Authentication →
+Hooks) or via `supabase config push`. Like 1.8, no migration can do it.
+
+*Why it is still open:* a dashboard setting, applied when this ships to hosted.
+
+*What it costs to leave:* the hosted project accepts any sign-up, including
+under-13s and accounts with no date of birth; the app's own check is the only
+thing stopping them, and it is skippable by calling `/auth/v1/signup` directly.
+
+### 1.10 GDPR Art. 8: 13–14 year-olds in Greece and consent-based processing
+
+The minimum age is 13 (decided 2026-10-03). Greece sets the age of digital
+consent at **15** (Law 4624/2019, Art. 21). Location and push processing here is
+**consent-based** (`location_consent`, `push_consent`), and under Art. 8 a
+13–14-year-old's consent to an information society service is only valid with
+parental authorisation.
+
+*Why it is still open:* a legal/product decision, not a code one — raise the
+minimum to 15, add a parental-consent flow, or keep consent-based features off
+for under-15s (the DOB is now stored, so the last is implementable).
+
+*What it costs to leave:* location and push consent given by Greek users aged
+13–14 may not be valid consent.
+
 ---
 
 ## 2. Costed: should the map adopt `party_is_past()`?

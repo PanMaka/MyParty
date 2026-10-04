@@ -5,7 +5,11 @@ import '../widgets/auth_branding.dart';
 import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  const LoginScreen({super.key, this.authService});
+
+  /// Injectable so the screen builds under `flutter test`; null means the real
+  /// [AuthService].
+  final AuthService? authService;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -14,7 +18,7 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _authService = AuthService();
+  late final AuthService _authService = widget.authService ?? AuthService();
   bool _isLoading = false;
 
   Future<void> _login() async {
@@ -79,7 +83,9 @@ class _LoginScreenState extends State<LoginScreen> {
               onPressed: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => const RegisterScreen()),
+                  MaterialPageRoute(
+                    builder: (context) => RegisterScreen(authService: widget.authService),
+                  ),
                 );
               },
               child: const Text('Need an account? Register here'),

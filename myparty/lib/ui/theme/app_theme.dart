@@ -40,6 +40,13 @@ class AppColors {
   /// account_deletion_screen.dart.
   static const destructive = Color(0xFFE5484D);
 
+  /// Form validation: a field's outline and message when its value is not
+  /// acceptable (e.g. a date of birth under the minimum age). Not
+  /// [destructive] (nothing is being deleted) and not [private] (a concept
+  /// colour); the dark theme's default error is a muted pink that does not
+  /// read as "wrong".
+  static const formError = Color(0xFFFF4D4F);
+
   static const purpleGradient = LinearGradient(
     colors: [purpleDeep, purple],
   );

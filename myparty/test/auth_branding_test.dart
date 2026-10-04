@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:myparty/ui/theme/app_theme.dart';
 import 'package:myparty/ui/widgets/auth_branding.dart';
 
-/// The login and register screens themselves construct `AuthService`, which
-/// reaches for `Supabase.instance` and so cannot be built here. Everything the
-/// two screens share visually lives in these widgets, which can.
+/// The shared auth widgets in isolation. The screens that compose them are
+/// covered in auth_screens_test.dart.
 Widget _host(Widget child, {double width = 400}) => MaterialApp(
       home: Scaffold(
         body: Center(
@@ -67,6 +67,42 @@ void main() {
     await tester.pump();
     expect(obscured(), isTrue);
     expect(controller.text, 'secret', reason: 'toggling never touches the value');
+  });
+
+  testWidgets('date of birth: tapping opens a calendar, and a pick is reported', (tester) async {
+    DateTime? picked;
+    await tester.pumpWidget(_host(AuthDateOfBirthField(value: null, onChanged: (d) => picked = d)));
+
+    await tester.tap(find.byType(AuthDateOfBirthField));
+    await tester.pumpAndSettle();
+    expect(find.byType(DatePickerDialog), findsOneWidget);
+
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    expect(picked, isNotNull);
+  });
+
+  testWidgets('date of birth: shows dd/MM/yyyy, and no error by default', (tester) async {
+    await tester.pumpWidget(_host(AuthDateOfBirthField(value: DateTime(2001, 3, 9), onChanged: (_) {})));
+
+    expect(find.text('09/03/2001'), findsOneWidget);
+    final decoration = tester.widget<InputDecorator>(find.byType(InputDecorator)).decoration;
+    expect(decoration.errorText, isNull);
+  });
+
+  testWidgets('date of birth: an error turns the outline red and shows the message', (tester) async {
+    const message =
+        'The Date Of Birth is not on par with the guidelines. You need to be 13+ to own a MyParty Account.';
+    await tester.pumpWidget(_host(AuthDateOfBirthField(
+      value: DateTime(2020, 1, 1),
+      onChanged: (_) {},
+      errorText: message,
+    )));
+
+    expect(find.text(message), findsOneWidget);
+    final decoration = tester.widget<InputDecorator>(find.byType(InputDecorator)).decoration;
+    expect((decoration.errorBorder! as OutlineInputBorder).borderSide.color, AppColors.formError);
+    expect(decoration.errorStyle!.color, AppColors.formError);
   });
 
   testWidgets('header and box fit a narrow phone without overflow', (tester) async {
