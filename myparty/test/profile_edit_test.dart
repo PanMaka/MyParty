@@ -377,14 +377,14 @@ void main() {
 
       expect(find.byType(TextField), findsOneWidget);
       expect(find.text('BIO'), findsOneWidget);
-      expect(find.text('Άλλαξε φωτογραφία'), findsOneWidget);
+      expect(find.text('Change photo'), findsOneWidget);
 
       // There is no display_name, school or department column, and a form is
       // exactly where that decision would quietly be reversed.
-      expect(find.textContaining('Όνομα'), findsNothing);
-      expect(find.textContaining('Σχολή'), findsNothing);
-      expect(find.textContaining('Τμήμα'), findsNothing);
-      expect(find.textContaining('Πανεπιστήμιο'), findsNothing);
+      expect(find.textContaining('Name'), findsNothing);
+      expect(find.textContaining('School'), findsNothing);
+      expect(find.textContaining('Department'), findsNothing);
+      expect(find.textContaining('University'), findsNothing);
     });
 
     testWidgets('seeds the field from the stored bio', (tester) async {
@@ -404,12 +404,12 @@ void main() {
         ),
       );
 
-      expect(find.text('Μία γραμμή για σένα.'), findsOneWidget);
+      expect(find.text('One line about you.'), findsOneWidget);
       expect(find.text('0/160'), findsOneWidget);
 
       // Nothing to save yet, so the button is inert rather than writing a
       // no-op PATCH.
-      expect(find.text('Άλλαξε φωτογραφία'), findsOneWidget);
+      expect(find.text('Change photo'), findsOneWidget);
     });
 
     testWidgets('a failed load offers a retry rather than an empty form', (tester) async {
@@ -419,8 +419,8 @@ void main() {
       final repo = _FakeProfileRepository(failLoad: true);
       await _pumpEditor(tester, repo);
 
-      expect(find.text('Δεν φόρτωσε το προφίλ'), findsOneWidget);
-      expect(find.text('Δοκίμασε ξανά'), findsOneWidget);
+      expect(find.text('Could not load your profile'), findsOneWidget);
+      expect(find.text('Try again'), findsOneWidget);
       expect(find.byType(TextField), findsNothing);
       expect(repo.bioWrites, isEmpty);
     });
@@ -431,7 +431,7 @@ void main() {
 
       await tester.enterText(find.byType(TextField), '  Ψυρρή, κάθε Πέμπτη  ');
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Αποθήκευση'));
+      await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
       expect(repo.bioWrites, ['Ψυρρή, κάθε Πέμπτη']);
@@ -447,7 +447,7 @@ void main() {
 
       await tester.enterText(find.byType(TextField), '   ');
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Αποθήκευση'));
+      await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
       expect(repo.bioWrites, [null]);
@@ -463,7 +463,7 @@ void main() {
       // Normalizes to what is already stored, so the form is not dirty and the
       // save button does not arm — a PATCH storing an identical value is a
       // write that can fail for nothing.
-      await tester.tap(find.text('Αποθήκευση'));
+      await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
       expect(repo.bioWrites, isEmpty);
@@ -475,10 +475,10 @@ void main() {
 
       await tester.enterText(find.byType(TextField), 'α' * 161);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Αποθήκευση'));
+      await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Μέχρι 160 χαρακτήρες.'), findsOneWidget);
+      expect(find.text('Up to 160 characters.'), findsOneWidget);
       expect(repo.bioWrites, isEmpty);
     });
 
@@ -499,25 +499,25 @@ void main() {
       final repo = _FakeProfileRepository();
       await _pumpEditor(tester, repo, picker: _FakePicker());
 
-      await tester.tap(find.text('Άλλαξε φωτογραφία'));
+      await tester.tap(find.text('Change photo'));
       await tester.pumpAndSettle();
 
       // Not an error and not a state. Nothing happened, so nothing is said.
       expect(repo.calls, isEmpty);
-      expect(find.text('Θα ανέβει όταν αποθηκεύσεις.'), findsNothing);
+      expect(find.text('It will upload when you save.'), findsNothing);
     });
 
     testWidgets('a picked photo is held until save, not uploaded on pick', (tester) async {
       final repo = _FakeProfileRepository();
       await _pumpEditor(tester, repo);
 
-      await tester.tap(find.text('Άλλαξε φωτογραφία'));
+      await tester.tap(find.text('Change photo'));
       await tester.pumpAndSettle();
 
       expect(repo.calls, isEmpty);
-      expect(find.text('Θα ανέβει όταν αποθηκεύσεις.'), findsOneWidget);
+      expect(find.text('It will upload when you save.'), findsOneWidget);
 
-      await tester.tap(find.text('Αποθήκευση'));
+      await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
       expect(repo.calls.first, startsWith('upload:'));
@@ -528,26 +528,26 @@ void main() {
       final repo = _FakeProfileRepository(failCommit: true);
       await _pumpEditor(tester, repo);
 
-      await tester.tap(find.text('Άλλαξε φωτογραφία'));
+      await tester.tap(find.text('Change photo'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Αποθήκευση'));
+      await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Η φωτογραφία δεν αποθηκεύτηκε. Δοκίμασε ξανά.'), findsOneWidget);
-      expect(find.text('Αποθήκευση'), findsOneWidget);
+      expect(find.text('Your photo was not saved. Try again.'), findsOneWidget);
+      expect(find.text('Save'), findsOneWidget);
     });
 
     testWidgets('an orphaned object is reported as one, not as a plain retry', (tester) async {
       final repo = _FakeProfileRepository(failCommit: true, failRemove: true);
       await _pumpEditor(tester, repo);
 
-      await tester.tap(find.text('Άλλαξε φωτογραφία'));
+      await tester.tap(find.text('Change photo'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Αποθήκευση'));
+      await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
       expect(
-        find.text('Η φωτογραφία δεν αποθηκεύτηκε και δεν καθαρίστηκε πλήρως. Δοκίμασε ξανά.'),
+        find.text('Your photo was not saved and was not fully cleaned up. Try again.'),
         findsOneWidget,
       );
     });
@@ -556,13 +556,13 @@ void main() {
       final repo = _FakeProfileRepository(failUpload: true);
       await _pumpEditor(tester, repo);
 
-      await tester.tap(find.text('Άλλαξε φωτογραφία'));
+      await tester.tap(find.text('Change photo'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Αποθήκευση'));
+      await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
       // Nothing reached the bucket in this one, which is a different sentence.
-      expect(find.text('Η φωτογραφία δεν ανέβηκε. Δοκίμασε ξανά.'), findsOneWidget);
+      expect(find.text('Your photo did not upload. Try again.'), findsOneWidget);
     });
 
     testWidgets('a failed bio save stops before anything is uploaded', (tester) async {
@@ -571,16 +571,16 @@ void main() {
 
       await tester.enterText(find.byType(TextField), 'Νέο bio');
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Άλλαξε φωτογραφία'));
+      await tester.tap(find.text('Change photo'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Αποθήκευση'));
+      await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
       // Bio first is what makes this possible: the cheap atomic write goes
       // first, so its failure leaves the bucket untouched rather than stranding
       // a committed avatar next to an unsaved bio.
       expect(repo.calls, isEmpty);
-      expect(find.text('Το bio δεν έγινε δεκτό.'), findsOneWidget);
+      expect(find.text('Your bio was not accepted.'), findsOneWidget);
     });
 
     testWidgets('the cancel button removes the uploaded object and commits nothing', (tester) async {
@@ -589,16 +589,16 @@ void main() {
       repo.uploadGate = gate;
       await _pumpEditor(tester, repo);
 
-      await tester.tap(find.text('Άλλαξε φωτογραφία'));
+      await tester.tap(find.text('Change photo'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Αποθήκευση'));
+      await tester.tap(find.text('Save'));
       await tester.pump();
 
       // The upload is genuinely in flight, which is the only state in which
       // cancelling means anything.
-      expect(find.text('Άκυρο'), findsOneWidget);
-      await tester.tap(find.text('Άκυρο'));
+      expect(find.text('Cancel'), findsOneWidget);
+      await tester.tap(find.text('Cancel'));
       await tester.pump();
 
       gate.complete();
@@ -623,10 +623,10 @@ void main() {
       repo.uploadGate = gate;
       await _pumpEditor(tester, repo);
 
-      await tester.tap(find.text('Άλλαξε φωτογραφία'));
+      await tester.tap(find.text('Change photo'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Αποθήκευση'));
+      await tester.tap(find.text('Save'));
       await tester.pump();
 
       // Tear the screen down while the upload is still parked.
