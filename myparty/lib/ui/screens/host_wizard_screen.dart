@@ -41,7 +41,12 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
   /// nothing invented can be submitted as the title.
   final _nameController = TextEditingController();
   final _addressController = TextEditingController();
-  final _descController = TextEditingController(text: 'This is going to be fun!');
+  final _descController = TextEditingController();
+
+  /// Set when Continue is pressed on step 1 with no address; cleared as soon
+  /// as the host types one. The address is the only required field on the
+  /// step — a party nobody can find is not a party.
+  bool _addressMissing = false;
 
   DateTime _selectedDate = DateTime.now();
   TimeOfDay _selectedTime = const TimeOfDay(hour: 23, minute: 0);
@@ -108,6 +113,10 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
   Color get _accent => _private ? AppColors.pink : AppColors.purple;
 
   Future<void> _next() async {
+    if (_step == 1 && _addressController.text.trim().isEmpty) {
+      setState(() => _addressMissing = true);
+      return;
+    }
     if (_step < 4) {
       setState(() => _step += 1);
       return;
@@ -300,7 +309,15 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
     );
   }
 
-  Widget _field(String label, TextEditingController controller, {bool mono = false, int maxLines = 1, String? hint}) {
+  Widget _field(
+    String label,
+    TextEditingController controller, {
+    bool mono = false,
+    int maxLines = 1,
+    String? hint,
+    String? error,
+    ValueChanged<String>? onChanged,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 13),
       child: Column(
@@ -311,6 +328,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
           TextField(
             controller: controller,
             maxLines: maxLines,
+            onChanged: onChanged,
             style: mono
                 ? AppTextStyles.mono(size: 14, weight: FontWeight.w600, color: AppColors.text)
                 : const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600),
@@ -323,6 +341,10 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(13), borderSide: BorderSide(color: AppColors.hairline)),
               enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(13), borderSide: BorderSide(color: AppColors.hairline)),
               focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(13), borderSide: const BorderSide(color: AppColors.purple)),
+              errorText: error,
+              errorStyle: const TextStyle(fontSize: 11.5, color: AppColors.destructive),
+              errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(13), borderSide: const BorderSide(color: AppColors.destructive)),
+              focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(13), borderSide: const BorderSide(color: AppColors.destructive, width: 1.5)),
             ),
           ),
         ],
@@ -411,7 +433,15 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
           ),
         ),
         _field('NAME', _nameController),
-        _field('ADDRESS OR VENUE', _addressController, hint: 'Street address or venue name'),
+        _field(
+          'ADDRESS OR VENUE',
+          _addressController,
+          hint: 'e.g. 12 Example Street, Athens',
+          error: _addressMissing ? 'This field is necessary' : null,
+          onChanged: (_) {
+            if (_addressMissing) setState(() => _addressMissing = false);
+          },
+        ),
         Row(
           children: [
             Expanded(child: _datePickerField()),
@@ -419,7 +449,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
             Expanded(child: _timePickerField()),
           ],
         ),
-        _field('DESCRIPTION', _descController, maxLines: 4),
+        _field('DESCRIPTION (OPTIONAL)', _descController, maxLines: 4, hint: 'e.g. This is going to be fun!'),
       ],
     );
   }
@@ -717,7 +747,8 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(_descController.text, style: TextStyle(fontSize: 12, height: 1.45, color: AppColors.textAlpha(0.7))),
+                    if (_descController.text.trim().isNotEmpty)
+                      Text(_descController.text, style: TextStyle(fontSize: 12, height: 1.45, color: AppColors.textAlpha(0.7))),
                     Padding(
                       padding: const EdgeInsets.only(top: 11),
                       child: Row(
