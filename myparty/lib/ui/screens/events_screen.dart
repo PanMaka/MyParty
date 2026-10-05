@@ -341,8 +341,16 @@ class _EventsScreenState extends State<EventsScreen> {
                         final now = widget.clock();
                         final todayEnd = DateTime(now.year, now.month, now.day + 1);
                         final weekEnd = now.add(const Duration(days: 7));
-                        final upcoming = snapshot.data!.where((r) => r.startsAt.isAfter(now)).toList()
+                        // "Not over" is the MAP's rule, `ends_at is null or
+                        // ends_at > now()`, not "has not started": a party you
+                        // RSVP'd to from its pin while it was under way has to
+                        // show up here, or the answer looks like it was lost.
+                        final current = snapshot.data!
+                            .where((r) => r.endsAt == null || r.endsAt!.isAfter(now))
+                            .toList()
                           ..sort((a, b) => a.startsAt.compareTo(b.startsAt));
+                        final happening = current.where((r) => !r.startsAt.isAfter(now)).toList();
+                        final upcoming = current.where((r) => r.startsAt.isAfter(now)).toList();
 
                         final tonight = <RsvpParty>[];
                         final thisWeek = <RsvpParty>[];
@@ -357,12 +365,16 @@ class _EventsScreenState extends State<EventsScreen> {
                           }
                         }
 
-                        if (upcoming.isEmpty) return _emptyState(context);
+                        if (current.isEmpty) return _emptyState(context);
 
                         return ListView(
                           padding: const EdgeInsets.fromLTRB(14, 16, 14, 96),
                           children: [
-                            if (tonight.isNotEmpty) _rsvpSection(context, 'TONIGHT', tonight, live: true),
+                            if (happening.isNotEmpty) _rsvpSection(context, 'HAPPENING NOW', happening, live: true),
+                            if (tonight.isNotEmpty) ...[
+                              if (happening.isNotEmpty) const SizedBox(height: 20),
+                              _rsvpSection(context, 'TONIGHT', tonight, live: true),
+                            ],
                             if (thisWeek.isNotEmpty) ...[
                               const SizedBox(height: 20),
                               _rsvpSection(context, 'THIS WEEK', thisWeek),

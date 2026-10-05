@@ -126,6 +126,7 @@ PartyListItem _item({
 RsvpParty _rsvp({
   required String title,
   required DateTime startsAt,
+  DateTime? endsAt,
   bool isPrivate = false,
   String status = 'going',
   int going = 4,
@@ -135,6 +136,7 @@ RsvpParty _rsvp({
     partyId: '00000000-0000-0000-0000-00000000000${title.length % 10}',
     title: title,
     startsAt: startsAt,
+    endsAt: endsAt,
     isPrivate: isPrivate,
     rsvpStatus: status,
     goingCount: going,
@@ -434,6 +436,31 @@ void main() {
       expect(repo.rsvpWrites.single.partyId, 'p9');
       expect(repo.rsvpWrites.single.status, MpRsvp.going);
       expect(repo.rsvpWrites.single.current, MpRsvp.going);
+    });
+
+    testWidgets('MY PARTIES keeps a party that has STARTED, and drops one that is over', (tester) async {
+      // The map pins anything whose ends_at is null or still ahead, so a party
+      // answered from its pin while under way must be listed here too -- it
+      // used to be filtered on starts_at alone and vanished, which read as the
+      // RSVP not having saved.
+      final now = DateTime(2030, 6, 14, 20);
+      await tester.pumpWidget(_host(_FakePartyRepository([
+        _rsvp(title: 'Under way', startsAt: now.subtract(const Duration(hours: 2)),
+            endsAt: now.add(const Duration(hours: 3))),
+        _rsvp(title: 'Started, no end time', startsAt: now.subtract(const Duration(days: 40))),
+        _rsvp(title: 'Already over', startsAt: now.subtract(const Duration(hours: 9)),
+            endsAt: now.subtract(const Duration(hours: 1))),
+        _rsvp(title: 'Tonight one', startsAt: now.add(const Duration(hours: 2))),
+      ]), clock: () => now));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('MY PARTIES'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('HAPPENING NOW'), findsOneWidget);
+      expect(find.text('Under way'), findsOneWidget);
+      expect(find.text('Started, no end time'), findsOneWidget);
+      expect(find.text('TONIGHT'), findsOneWidget);
+      expect(find.text('Already over'), findsNothing);
     });
 
     testWidgets('an RSVP saved on ANOTHER tab reloads MY PARTIES and relights the card', (tester) async {

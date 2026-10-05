@@ -365,29 +365,29 @@ void main() {
       }
     });
 
-    test('the size follows the tense, not a number frozen at fetch time', () {
-      // The same pin, the same fetch, two clocks. A party four people are
-      // interested in and two hundred turn up to is a small bubble before it
-      // starts and a saturated one after — with no refetch, and with no
-      // server-computed `live` flag involved.
+    test('the size is interested_count in EVERY tense', () {
+      // Not the tense split it used to be: a live pin sized on going_count
+      // made "Interested" a button that never moved the pin of a party under
+      // way. interested_count includes everyone going, so it is the number
+      // both answers move, and the bubble must not change shape when the
+      // party starts.
       final start = DateTime.parse('2026-08-21T20:00:00Z');
       final pin = _pin(
         id: 'p',
         title: 'p',
         startsAt: start,
         endsAt: start.add(const Duration(hours: 8)),
-        interestedCount: 4,
-        goingCount: 200,
+        interestedCount: 200,
+        goingCount: 4,
       );
 
       final before = MpPinMetrics.forPin(pin, start.subtract(const Duration(hours: 1)));
       final during = MpPinMetrics.forPin(pin, start.add(const Duration(hours: 1)));
-      final after = MpPinMetrics.forPin(pin, start.add(const Duration(hours: 9)));
 
-      expect(during.width, greaterThan(before.width));
+      expect(during.width, before.width);
       expect(during.drop.radius, MpDropGeometry.maxRadius);
-      // And back down once it is over, because the count reverts to interest.
-      expect(after.width, before.width);
+      expect(MpPinMetrics.forCount(4).drop.radius, lessThan(during.drop.radius),
+          reason: 'had it read going_count the bubble would be far smaller');
     });
 
     test('a label wide enough to be a problem only lands on a saturated bubble', () {
@@ -547,7 +547,7 @@ void main() {
       await _teardown(tester);
     });
 
-    testWidgets('a live pin draws the going count, still bare', (tester) async {
+    testWidgets('a live pin draws the INTERESTED count, still bare', (tester) async {
       final pin = _pin(
         id: 'p',
         title: 'Τώρα',
@@ -559,8 +559,9 @@ void main() {
 
       await _pumpPin(tester, pin, start.add(const Duration(hours: 1)));
 
-      expect(find.text('12'), findsOneWidget);
-      expect(find.text('99'), findsNothing);
+      // 99 includes the 12 going; it is the number either answer moves.
+      expect(find.text('99'), findsOneWidget);
+      expect(find.text('12'), findsNothing);
       expect(find.textContaining('here now'), findsNothing);
 
       await _teardown(tester);
@@ -568,10 +569,10 @@ void main() {
 
     testWidgets('every count from empty to four digits fits without overflowing', (tester) async {
       // Each of these would throw a RenderFlex overflow or clip visibly if the
-      // step-down in labelSizeFor were dropped. 4237 is only reachable as a
-      // live going_count, and only on a saturated bubble.
+      // step-down in labelSizeFor were dropped. 4237 is only reachable on a
+      // saturated bubble.
       for (final count in [0, 7, 25, 99, 100, 4237]) {
-        final pin = _pin(id: 'p', title: 'Techno Noir', startsAt: start, goingCount: count);
+        final pin = _pin(id: 'p', title: 'Techno Noir', startsAt: start, interestedCount: count);
 
         await _pumpPin(tester, pin, start.add(const Duration(hours: 1)));
 
@@ -614,7 +615,7 @@ void main() {
   });
 
   group('MapScreen', () {
-    testWidgets('draws a pin per row, with the counter that matches its tense', (tester) async {
+    testWidgets('draws a pin per row, each printing its interested count', (tester) async {
       final now = DateTime.now();
       final repository = _FakePartyRepository([
         _pin(
@@ -642,12 +643,11 @@ void main() {
       // The counts that used to be a hardcoded 0 for every pin on the map.
       // Both pins carry both numbers, and each must print the OTHER one from
       // its neighbour — so a pin reading the wrong counter fails here rather
-      // than passing by coincidence. Bare numbers now: the live one is the
-      // going count, the upcoming one the interested count, and the pulse is
-      // what distinguishes them.
-      expect(find.text('12'), findsOneWidget);
+      // than passing by coincidence. Live or not, a pin prints
+      // interested_count (MapPartyPin.pinCount); the pulse says which is live.
+      expect(find.text('99'), findsOneWidget);
       expect(find.text('34'), findsOneWidget);
-      expect(find.text('99'), findsNothing);
+      expect(find.text('12'), findsNothing);
       expect(find.text('88'), findsNothing);
 
       await _teardown(tester);
@@ -752,8 +752,8 @@ void main() {
           id: 'live',
           title: 'Τώρα',
           startsAt: now.subtract(const Duration(minutes: 1)),
-          goingCount: 300,
-          interestedCount: 2,
+          goingCount: 2,
+          interestedCount: 300,
         ),
       ]);
 
@@ -772,14 +772,14 @@ void main() {
       expect(box.height, expected.boxHeight);
       expect(tester.getSize(find.byType(MpMapPin)), Size(expected.width, expected.boxHeight));
 
-      // And it is sized off the LIVE counter, not the interested one: 300
-      // going, 2 interested. Had the screen read the wrong one the pin would
+      // And it is sized off interested_count even while live: 300
+      // interested, 2 going. Had the screen read going the pin would
       // be squeezed into a minimum-radius box here, so the two sizes are
       // asserted apart rather than just asserted equal to each other.
       expect(expected.drop.radius, MpDropGeometry.maxRadius);
       expect(box.height, closeTo(expected.drop.height, 0.01));
       expect(MpPinMetrics.forCount(2).drop.radius, lessThan(MpDropGeometry.maxRadius * 0.6),
-          reason: 'the interested count would have drawn a far smaller bubble');
+          reason: 'the going count would have drawn a far smaller bubble');
 
       // THE ANCHOR. Inverting flutter_map's placement, the point lands at
       // (0.5·w·(1−ax), 0.5·h·(1−ay)) inside the box — which must be the apex.
@@ -849,6 +849,26 @@ void main() {
       expect(find.byType(MpMapPin), findsNothing);
       expect(find.text('Search parties or people'), findsOneWidget);
 
+      await _teardown(tester);
+    });
+  });
+
+  group('RSVP changes', () {
+    testWidgets('an RSVP saved anywhere makes the map refetch its pins', (tester) async {
+      // The map tab lives in an IndexedStack and never rebuilds by itself, so
+      // without this the number on the drop stays at its pre-tap value until
+      // the user pans. The refetch is what brings the server's counters in.
+      final now = DateTime.now();
+      final repository = _FakePartyRepository([
+        _pin(id: 'p1', title: 'p1', startsAt: now.add(const Duration(days: 1)), interestedCount: 3),
+      ]);
+      await _mount(tester, repository);
+      final before = repository.calls.length;
+
+      rsvpChanges.value = const RsvpChange(partyId: 'p1', status: MpRsvp.going);
+      await tester.pump();
+
+      expect(repository.calls.length, before + 1);
       await _teardown(tester);
     });
   });

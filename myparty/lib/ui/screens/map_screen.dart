@@ -101,9 +101,22 @@ class _MapScreenState extends State<MapScreen> {
 
   /// An RSVP moved a counter on the server — from this map's sheet, a search
   /// hit's, or the Parties tab — so the pin sizes and labels are stale.
-  /// Refetched rather than patched: the server's counters are the truth, and
-  /// the sheet already showed the optimistic number while the write was out.
+  ///
+  /// Patched first, so the number on the drop moves the moment the write
+  /// lands, then refetched, because the server's counters are the truth (and
+  /// include anyone else who answered meanwhile). [MapPartyPin.withRsvp] reads
+  /// the delta off THIS copy's `my_rsvp_status`, which is still the pre-tap
+  /// answer, so it applies the same step the sheet did.
   void _onRsvpChanged() {
+    final change = rsvpChanges.value;
+    if (change != null && mounted) {
+      final index = _pins.indexWhere((p) => p.id == change.partyId);
+      if (index >= 0) {
+        setState(() {
+          _pins = [..._pins]..[index] = _pins[index].withRsvp(change.status?.name);
+        });
+      }
+    }
     if (_mapReady) _fetchEventsInBounds();
   }
 

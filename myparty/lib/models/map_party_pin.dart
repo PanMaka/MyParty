@@ -169,6 +169,19 @@ class MapPartyPin {
 
   int? get attendeeCount => attendeeCountAt(DateTime.now());
 
+  /// The number the MAP PIN prints and is sized by: `interested_count`, in
+  /// every tense.
+  ///
+  /// Not [attendeeCountAt], which switches to `going_count` once a party is
+  /// live. On the pin that made "Interested" a button that never moved the
+  /// number for any party already under way — and since 20260826093437
+  /// `interested_count` counts everyone who answered at all, going included,
+  /// so it is the one number BOTH answers move. The tense split survives in
+  /// [MapPinSheet], which has room to label each counter.
+  ///
+  /// Null for a private party, exactly as [attendeeCountAt] is.
+  int? get pinCount => interestedCount;
+
   /// True only when the host uploaded a cover, mirroring [PartySummary].
   bool get hasCover => coverPath != null;
 
