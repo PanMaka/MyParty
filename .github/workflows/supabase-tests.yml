@@ -9,9 +9,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Pinned, not `latest`: resolving "latest" is an unauthenticated GitHub
+      # API call, and shared runners hit its rate limit ("Failed to resolve
+      # latest Supabase CLI release: rate limit exceeded"). A fixed version
+      # skips the lookup entirely, and keeps CI on the same CLI as local
+      # development. Bump deliberately, alongside your own `supabase --version`.
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.114.0
 
       - run: supabase db start
 
