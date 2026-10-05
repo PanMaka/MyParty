@@ -73,7 +73,7 @@ class _EventsScreenState extends State<EventsScreen> {
   @override
   void initState() {
     super.initState();
-    _rsvpsFuture = _repository.fetchMyRsvps();
+    _rsvpsFuture = _repository.fetchMyParties();
     _observe(_rsvpsFuture);
     rsvpChanges.addListener(_onRsvpChanged);
     _listScroll.addListener(_onScroll);
@@ -230,7 +230,7 @@ class _EventsScreenState extends State<EventsScreen> {
 
   void _reloadRsvps() {
     setState(() {
-      _rsvpsFuture = _repository.fetchMyRsvps();
+      _rsvpsFuture = _repository.fetchMyParties();
       _observe(_rsvpsFuture);
     });
   }
@@ -623,14 +623,20 @@ class _EventsScreenState extends State<EventsScreen> {
                         children: [
                           PrivacyBadge(isPrivate: rsvp.isPrivate, english: true),
                           const SizedBox(width: 5),
-                          // 'COMING' on a private party. Its rsvp row is
-                          // always 'going' -- the policy permits nothing else
-                          // -- so the word is the only thing that varies, and
-                          // it matches the button that wrote it.
+                          // Why the party is in YOUR list. HOSTING first: a
+                          // host's own rsvp, if any, is the least interesting
+                          // fact about them. INVITED is an invitation not yet
+                          // answered. Otherwise 'COMING' on a private party --
+                          // its rsvp row is always 'going', the policy permits
+                          // nothing else -- matching the button that wrote it.
                           Text(
-                            rsvp.isPrivate
-                                ? 'COMING'
-                                : (rsvp.rsvpStatus == 'going' ? 'GOING' : 'INTERESTED'),
+                            rsvp.isHost
+                                ? 'HOSTING'
+                                : rsvp.rsvpStatus == null
+                                    ? 'INVITED'
+                                    : rsvp.isPrivate
+                                        ? 'COMING'
+                                        : (rsvp.rsvpStatus == 'going' ? 'GOING' : 'INTERESTED'),
                             style: AppTextStyles.mono(size: 9, color: AppColors.textAlpha(0.45)),
                           ),
                         ],

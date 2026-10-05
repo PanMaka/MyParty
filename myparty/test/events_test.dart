@@ -11,7 +11,7 @@ import 'package:myparty/ui/screens/events_screen.dart';
 import 'package:myparty/ui/widgets/party_card.dart';
 import 'package:myparty/ui/widgets/party_detail_sheet.dart';
 
-/// Answers [PartyRepository.fetchMyRsvps] from a list instead of the network.
+/// Answers [PartyRepository.fetchMyParties] from a list instead of the network.
 ///
 /// Possible only because `PartyRepository` resolves its Supabase client
 /// lazily — no client is ever constructed here, the same trick `map_test.dart`
@@ -42,7 +42,7 @@ class _FakePartyRepository extends PartyRepository {
   int rsvpFetches = 0;
 
   @override
-  Future<List<RsvpParty>> fetchMyRsvps() async {
+  Future<List<RsvpParty>> fetchMyParties() async {
     rsvpFetches++;
     if (fail) throw Exception('nope');
     return rsvps;
@@ -128,7 +128,9 @@ RsvpParty _rsvp({
   required DateTime startsAt,
   DateTime? endsAt,
   bool isPrivate = false,
-  String status = 'going',
+  String? status = 'going',
+  bool isHost = false,
+  bool isInvited = false,
   int going = 4,
   int interested = 0,
 }) {
@@ -139,6 +141,8 @@ RsvpParty _rsvp({
     endsAt: endsAt,
     isPrivate: isPrivate,
     rsvpStatus: status,
+    isHost: isHost,
+    isInvited: isInvited,
     goingCount: going,
     interestedCount: interested,
   );
@@ -461,6 +465,30 @@ void main() {
       expect(find.text('Started, no end time'), findsOneWidget);
       expect(find.text('TONIGHT'), findsOneWidget);
       expect(find.text('Already over'), findsNothing);
+    });
+
+    testWidgets('MY PARTIES lists parties you HOST and are INVITED to, before any answer', (tester) async {
+      // Host and invitee are who can_chat_in_party lets into a private chat,
+      // so these rows are what give every Messages chat a MY PARTIES entry.
+      final now = DateTime(2030, 6, 14, 20);
+      await tester.pumpWidget(_host(_FakePartyRepository([
+        _rsvp(title: 'My own loft', startsAt: now.add(const Duration(days: 2)),
+            isPrivate: true, status: null, isHost: true),
+        _rsvp(title: 'Asked along', startsAt: now.add(const Duration(days: 3)),
+            isPrivate: true, status: null, isInvited: true),
+        _rsvp(title: 'Said yes', startsAt: now.add(const Duration(days: 4)),
+            isPrivate: true, status: 'going', isInvited: true),
+      ]), clock: () => now));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('MY PARTIES'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('My own loft'), findsOneWidget);
+      expect(find.text('HOSTING'), findsOneWidget);
+      expect(find.text('Asked along'), findsOneWidget);
+      expect(find.text('INVITED'), findsOneWidget);
+      // An answered invitation reads as the answer, not as the invitation.
+      expect(find.text('COMING'), findsOneWidget);
     });
 
     testWidgets('an RSVP saved on ANOTHER tab reloads MY PARTIES and relights the card', (tester) async {
