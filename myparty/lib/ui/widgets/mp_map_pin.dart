@@ -101,16 +101,15 @@ class MpPinMetrics {
 
   /// The metrics [pin] draws at when the clock reads [now].
   ///
-  /// Private branches first and never reaches [MapPartyPin.attendeeCountAt].
-  /// For a public party this goes through that method rather than a stored
-  /// number, so the pin follows the tense: sized on *interested* before the
-  /// party starts, re-sized on *going* the moment it does, with no new fetch
-  /// and no server flag involved.
+  /// Private branches first and never reaches [MapPartyPin.pinCount]. A
+  /// public pin is sized on `interested_count` in every tense, the same
+  /// number its label prints, so a bubble never disagrees with its digits.
+  /// [now] is kept for the callers that pass one instant to both.
   factory MpPinMetrics.forPin(MapPartyPin pin, DateTime now) {
     if (pin.isPrivate) return MpPinMetrics.private();
     // See MpDropGeometry.forPin: private branches first, and the coalesce
     // below can only ever apply to a public row.
-    return MpPinMetrics.forCount(pin.attendeeCountAt(now) ?? 0);
+    return MpPinMetrics.forCount(pin.pinCount ?? 0);
   }
 
   /// The type size for a label of [digits] glyphs inside a bubble of [radius].
@@ -216,15 +215,15 @@ class _MpMapPinState extends State<MpMapPin> with TickerProviderStateMixin {
     // One reading, three answers. `_syncPulse` asked the same question of the
     // same instant, so the ring and the number cannot disagree about tense.
     final live = pin.liveAt(widget.now);
-    final count = pin.attendeeCountAt(widget.now);
+    final count = pin.pinCount;
     final m = MpPinMetrics.forPin(pin, widget.now);
     final accent = pin.isPrivate ? AppColors.private : AppColors.purple;
     final pulse = _pulse;
 
-    // The bare number, with no unit and no title — for a PUBLIC party. Which
-    // of the two counters it is comes from the tense (`going` while live,
-    // `interested` before), and the pulse is what tells the reader which tense
-    // they are looking at. The exact wording lives in MapPinSheet, one tap
+    // The bare number, with no unit and no title — for a PUBLIC party. It is
+    // `interested_count` before AND during a party (see MapPartyPin.pinCount),
+    // so either RSVP answer moves it; the pulse alone says the party is live.
+    // The split into "here now" / "interested" lives in MapPinSheet, one tap
     // away, where there is room to say it.
     //
     // Null for a private party, and the bubble draws a lock instead. That is

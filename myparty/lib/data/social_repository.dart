@@ -26,7 +26,7 @@ class SocialRepository {
 
   /// People the current user follows — the host wizard's invite list.
   ///
-  /// Bounded rather than keyset-paginated, like [PartyRepository.fetchMyRsvps]:
+  /// Bounded rather than keyset-paginated, like [PartyRepository.fetchMyParties]:
   /// this feeds a picker, not an infinite scroll. The composite index from
   /// 20260814094943 is `(follower_id, created_at desc, followee_id desc)`, so
   /// when this does need paging the keyset is `(created_at, followee_id)`.

@@ -48,24 +48,64 @@ class PartyRepository {
     return id as String;
   }
 
-  /// Parties the current user has RSVP'd to (interested or going),
-  /// newest RSVP first. Bounded rather than keyset-paginated: this is a
-  /// personal list, not an unbounded feed.
-  Future<List<RsvpParty>> fetchMyRsvps() async {
+  /// Everything MY PARTIES lists: parties the current user RSVP'd to, hosts,
+  /// or is invited to — one row per party, flags merged.
+  ///
+  /// Host and invitee are the two people `can_chat_in_party` admits to a
+  /// private party's chat, so listing them here is what makes every group
+  /// chat in the Messages tab line up with an entry in this list. Before, a
+  /// party you hosted or were invited to had a chat but no row until you
+  /// pressed Coming, which read as a chat you had no business in.
+  ///
+  /// Three plain selects rather than an RPC: each is answered by an existing
+  /// policy (`rsvps` own rows; `parties` via can_access_party; `invitations`
+  /// lets a guest read their own), so nothing here decides visibility. Each
+  /// is bounded rather than keyset-paginated: a personal list, not a feed.
+  /// `published` only — a draft is not something you are part of yet, and a
+  /// cancelled party is something you are not part of any more.
+  Future<List<RsvpParty>> fetchMyParties() async {
     final userId = _client.auth.currentUser?.id;
     if (userId == null) return [];
 
-    final rows = await _client
-        .from('rsvps')
-        .select(
-          'status, parties!inner(id, title, starts_at, is_private, going_count, interested_count, status)',
-        )
-        .eq('user_id', userId)
-        .eq('parties.status', 'published')
-        .order('created_at', ascending: false)
-        .limit(200);
+    const columns = 'id, title, starts_at, ends_at, is_private, going_count, interested_count, status';
 
-    return (rows as List).map((row) => RsvpParty.fromRow(row as Map<String, dynamic>)).toList();
+    final results = await Future.wait([
+      _client
+          .from('rsvps')
+          .select('status, parties!inner($columns)')
+          .eq('user_id', userId)
+          .eq('parties.status', 'published')
+          .order('created_at', ascending: false)
+          .limit(200),
+      _client
+          .from('parties')
+          .select(columns)
+          .eq('host_id', userId)
+          .eq('status', 'published')
+          .limit(200),
+      _client
+          .from('invitations')
+          .select('parties!inner($columns)')
+          .eq('guest_id', userId)
+          .eq('parties.status', 'published')
+          .limit(200),
+    ]);
+
+    final byId = <String, RsvpParty>{};
+    void add(RsvpParty row) =>
+        byId.update(row.partyId, (seen) => seen.mergedWith(row), ifAbsent: () => row);
+
+    for (final row in results[0] as List) {
+      add(RsvpParty.fromRow(row as Map<String, dynamic>));
+    }
+    for (final row in results[1] as List) {
+      add(RsvpParty.fromParty(row as Map<String, dynamic>, isHost: true));
+    }
+    for (final row in results[2] as List) {
+      add(RsvpParty.fromParty((row as Map<String, dynamic>)['parties'] as Map<String, dynamic>,
+          isInvited: true));
+    }
+    return byId.values.toList();
   }
 
   /// Parties hosted by [hostId], or by the current user when it is null.
@@ -91,7 +131,7 @@ class PartyRepository {
   /// are hosting yet, and a cancelled party is something they are not hosting
   /// any more.
   ///
-  /// Bounded rather than keyset-paginated, like [fetchMyRsvps] and
+  /// Bounded rather than keyset-paginated, like [fetchMyParties] and
   /// [SocialRepository.fetchFollowing]: this feeds a card and a three-tile
   /// strip, not an infinite scroll. `parties_host_id_idx` (20260818175437)
   /// covers the lookup.

@@ -6,11 +6,12 @@ import 'package:myparty/data/party_repository.dart';
 import 'package:myparty/models/party_list_item.dart';
 import 'package:myparty/models/rsvp_party.dart';
 import 'package:myparty/state/mp_store.dart';
+import 'package:myparty/state/rsvp_changes.dart';
 import 'package:myparty/ui/screens/events_screen.dart';
 import 'package:myparty/ui/widgets/party_card.dart';
 import 'package:myparty/ui/widgets/party_detail_sheet.dart';
 
-/// Answers [PartyRepository.fetchMyRsvps] from a list instead of the network.
+/// Answers [PartyRepository.fetchMyParties] from a list instead of the network.
 ///
 /// Possible only because `PartyRepository` resolves its Supabase client
 /// lazily — no client is ever constructed here, the same trick `map_test.dart`
@@ -37,8 +38,12 @@ class _FakePartyRepository extends PartyRepository {
   /// reached the server at all lives on this.
   final List<PartySort> sortsRequested = [];
 
+  /// How many times MY PARTIES was (re)loaded.
+  int rsvpFetches = 0;
+
   @override
-  Future<List<RsvpParty>> fetchMyRsvps() async {
+  Future<List<RsvpParty>> fetchMyParties() async {
+    rsvpFetches++;
     if (fail) throw Exception('nope');
     return rsvps;
   }
@@ -121,8 +126,11 @@ PartyListItem _item({
 RsvpParty _rsvp({
   required String title,
   required DateTime startsAt,
+  DateTime? endsAt,
   bool isPrivate = false,
-  String status = 'going',
+  String? status = 'going',
+  bool isHost = false,
+  bool isInvited = false,
   int going = 4,
   int interested = 0,
 }) {
@@ -130,8 +138,11 @@ RsvpParty _rsvp({
     partyId: '00000000-0000-0000-0000-00000000000${title.length % 10}',
     title: title,
     startsAt: startsAt,
+    endsAt: endsAt,
     isPrivate: isPrivate,
     rsvpStatus: status,
+    isHost: isHost,
+    isInvited: isInvited,
     goingCount: going,
     interestedCount: interested,
   );
@@ -429,6 +440,73 @@ void main() {
       expect(repo.rsvpWrites.single.partyId, 'p9');
       expect(repo.rsvpWrites.single.status, MpRsvp.going);
       expect(repo.rsvpWrites.single.current, MpRsvp.going);
+    });
+
+    testWidgets('MY PARTIES keeps a party that has STARTED, and drops one that is over', (tester) async {
+      // The map pins anything whose ends_at is null or still ahead, so a party
+      // answered from its pin while under way must be listed here too -- it
+      // used to be filtered on starts_at alone and vanished, which read as the
+      // RSVP not having saved.
+      final now = DateTime(2030, 6, 14, 20);
+      await tester.pumpWidget(_host(_FakePartyRepository([
+        _rsvp(title: 'Under way', startsAt: now.subtract(const Duration(hours: 2)),
+            endsAt: now.add(const Duration(hours: 3))),
+        _rsvp(title: 'Started, no end time', startsAt: now.subtract(const Duration(days: 40))),
+        _rsvp(title: 'Already over', startsAt: now.subtract(const Duration(hours: 9)),
+            endsAt: now.subtract(const Duration(hours: 1))),
+        _rsvp(title: 'Tonight one', startsAt: now.add(const Duration(hours: 2))),
+      ]), clock: () => now));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('MY PARTIES'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('HAPPENING NOW'), findsOneWidget);
+      expect(find.text('Under way'), findsOneWidget);
+      expect(find.text('Started, no end time'), findsOneWidget);
+      expect(find.text('TONIGHT'), findsOneWidget);
+      expect(find.text('Already over'), findsNothing);
+    });
+
+    testWidgets('MY PARTIES lists parties you HOST and are INVITED to, before any answer', (tester) async {
+      // Host and invitee are who can_chat_in_party lets into a private chat,
+      // so these rows are what give every Messages chat a MY PARTIES entry.
+      final now = DateTime(2030, 6, 14, 20);
+      await tester.pumpWidget(_host(_FakePartyRepository([
+        _rsvp(title: 'My own loft', startsAt: now.add(const Duration(days: 2)),
+            isPrivate: true, status: null, isHost: true),
+        _rsvp(title: 'Asked along', startsAt: now.add(const Duration(days: 3)),
+            isPrivate: true, status: null, isInvited: true),
+        _rsvp(title: 'Said yes', startsAt: now.add(const Duration(days: 4)),
+            isPrivate: true, status: 'going', isInvited: true),
+      ]), clock: () => now));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('MY PARTIES'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('My own loft'), findsOneWidget);
+      expect(find.text('HOSTING'), findsOneWidget);
+      expect(find.text('Asked along'), findsOneWidget);
+      expect(find.text('INVITED'), findsOneWidget);
+      // An answered invitation reads as the answer, not as the invitation.
+      expect(find.text('COMING'), findsOneWidget);
+    });
+
+    testWidgets('an RSVP saved on ANOTHER tab reloads MY PARTIES and relights the card', (tester) async {
+      // The tabs live in an IndexedStack, so this screen is never rebuilt by
+      // the map sheet writing an rsvp. rsvpChanges is the only way it hears.
+      final repo = _FakePartyRepository(const [], pages: {
+        PartySort.soonest: [_item(id: 'p9', title: 'Techno Monday')],
+      });
+      await tester.pumpWidget(_host(repo));
+      await tester.pumpAndSettle();
+      final before = repo.rsvpFetches;
+      expect(find.text('Going ✓'), findsNothing);
+
+      rsvpChanges.value = const RsvpChange(partyId: 'p9', status: MpRsvp.going);
+      await tester.pumpAndSettle();
+
+      expect(repo.rsvpFetches, before + 1);
+      expect(find.text('Going ✓'), findsOneWidget);
     });
 
     testWidgets('only a PRIVATE rsvp row opens a chat', (tester) async {

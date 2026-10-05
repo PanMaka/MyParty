@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 
-enum MpTab { feed, events, map, messages, profile }
+/// Declaration order IS the bar's left-to-right order and [MainScreen]'s
+/// IndexedStack order, which picks its child by [MpTab.index].
+enum MpTab { map, events, messages, profile }
 
-/// The custom 5-tab bottom bar with a raised gradient circular map button,
-/// matching the design's Feed / Parties / Map / Messages / Profile bar.
+/// The custom 4-tab bottom bar: the raised gradient map button leads on the
+/// left, then Parties / Messages / Profile. The Feed tab was removed — the
+/// map is the app's home.
 ///
 /// The labels were the design's Greek (Ροή / Χάρτης / Μηνύματα / Προφίλ) until the
 /// English pass reached the chrome. 'Parties' never needed translating, which
@@ -31,9 +34,8 @@ class MpBottomNav extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          _item(MpTab.feed, Icons.waves_rounded, 'Feed'),
-          _item(MpTab.events, Icons.event_note_outlined, 'Parties'),
           _mapItem(),
+          _item(MpTab.events, Icons.event_note_outlined, 'Parties'),
           _item(MpTab.messages, Icons.chat_bubble_outline, 'Messages', dot: true),
           _item(MpTab.profile, Icons.person_outline, 'Profile'),
         ],

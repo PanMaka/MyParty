@@ -7,6 +7,8 @@ import 'package:latlong2/latlong.dart';
 import 'package:myparty/data/party_repository.dart';
 import 'package:myparty/models/map_party_pin.dart';
 import 'package:myparty/models/map_time_window.dart';
+import 'package:myparty/state/mp_store.dart';
+import 'package:myparty/state/rsvp_changes.dart';
 import 'package:myparty/ui/screens/map_screen.dart';
 import 'package:myparty/ui/screens/search_screen.dart';
 import 'package:myparty/ui/widgets/map_pin_sheet.dart';
@@ -66,6 +68,20 @@ class _FakePartyRepository extends PartyRepository {
     calls.add({'lon': lon, 'lat': lat, 'radiusMeters': radiusMeters, 'limit': limit.toDouble()});
     windows.add(window);
     return pins;
+  }
+
+  /// Every RSVP the sheet wrote, and whether the next one should fail.
+  final List<({String partyId, MpRsvp status, MpRsvp? current})> rsvpWrites = [];
+  bool rsvpFails = false;
+
+  @override
+  Future<void> setRsvp({
+    required String partyId,
+    required MpRsvp status,
+    required MpRsvp? current,
+  }) async {
+    rsvpWrites.add((partyId: partyId, status: status, current: current));
+    if (rsvpFails) throw Exception('nope');
   }
 }
 
@@ -253,6 +269,50 @@ void main() {
     });
   });
 
+  group('MapPartyPin.withRsvp', () {
+    MapPartyPin pin({String? status, bool isPrivate = false}) => MapPartyPin(
+          id: 'p',
+          lat: 0,
+          lng: 0,
+          title: 't',
+          isPrivate: isPrivate,
+          goingCount: isPrivate ? null : 5,
+          interestedCount: isPrivate ? null : 20,
+          myRsvpStatus: status,
+        );
+
+    test('a new going row counts in BOTH, because going implies interested', () {
+      final next = pin().withRsvp('going');
+      expect((next.goingCount, next.interestedCount, next.myRsvpStatus), (6, 21, 'going'));
+    });
+
+    test('a new interested row counts in interested only', () {
+      final next = pin().withRsvp('interested');
+      expect((next.goingCount, next.interestedCount), (5, 21));
+    });
+
+    test('a flip moves going alone, in both directions', () {
+      final up = pin(status: 'interested').withRsvp('going');
+      expect((up.goingCount, up.interestedCount), (6, 20));
+      final down = pin(status: 'going').withRsvp('interested');
+      expect((down.goingCount, down.interestedCount), (4, 20));
+    });
+
+    test('a withdrawal is the reverse of the matching insert', () {
+      final fromGoing = pin(status: 'going').withRsvp(null);
+      expect((fromGoing.goingCount, fromGoing.interestedCount, fromGoing.myRsvpStatus), (4, 19, null));
+      final fromInterested = pin(status: 'interested').withRsvp(null);
+      expect((fromInterested.goingCount, fromInterested.interestedCount), (5, 19));
+    });
+
+    test('a private pin keeps null counts -- there is no number to adjust', () {
+      final next = pin(isPrivate: true).withRsvp('going');
+      expect(next.goingCount, isNull);
+      expect(next.interestedCount, isNull);
+      expect(next.myRsvpStatus, 'going');
+    });
+  });
+
   group('MpPinMetrics', () {
     test('the box is the bubble exactly, with nothing overhanging it', () {
       // The teardrop's box had a `topPad` term because its chip could stand
@@ -305,29 +365,29 @@ void main() {
       }
     });
 
-    test('the size follows the tense, not a number frozen at fetch time', () {
-      // The same pin, the same fetch, two clocks. A party four people are
-      // interested in and two hundred turn up to is a small bubble before it
-      // starts and a saturated one after — with no refetch, and with no
-      // server-computed `live` flag involved.
+    test('the size is interested_count in EVERY tense', () {
+      // Not the tense split it used to be: a live pin sized on going_count
+      // made "Interested" a button that never moved the pin of a party under
+      // way. interested_count includes everyone going, so it is the number
+      // both answers move, and the bubble must not change shape when the
+      // party starts.
       final start = DateTime.parse('2026-08-21T20:00:00Z');
       final pin = _pin(
         id: 'p',
         title: 'p',
         startsAt: start,
         endsAt: start.add(const Duration(hours: 8)),
-        interestedCount: 4,
-        goingCount: 200,
+        interestedCount: 200,
+        goingCount: 4,
       );
 
       final before = MpPinMetrics.forPin(pin, start.subtract(const Duration(hours: 1)));
       final during = MpPinMetrics.forPin(pin, start.add(const Duration(hours: 1)));
-      final after = MpPinMetrics.forPin(pin, start.add(const Duration(hours: 9)));
 
-      expect(during.width, greaterThan(before.width));
+      expect(during.width, before.width);
       expect(during.drop.radius, MpDropGeometry.maxRadius);
-      // And back down once it is over, because the count reverts to interest.
-      expect(after.width, before.width);
+      expect(MpPinMetrics.forCount(4).drop.radius, lessThan(during.drop.radius),
+          reason: 'had it read going_count the bubble would be far smaller');
     });
 
     test('a label wide enough to be a problem only lands on a saturated bubble', () {
@@ -487,7 +547,7 @@ void main() {
       await _teardown(tester);
     });
 
-    testWidgets('a live pin draws the going count, still bare', (tester) async {
+    testWidgets('a live pin draws the INTERESTED count, still bare', (tester) async {
       final pin = _pin(
         id: 'p',
         title: 'Τώρα',
@@ -499,8 +559,9 @@ void main() {
 
       await _pumpPin(tester, pin, start.add(const Duration(hours: 1)));
 
-      expect(find.text('12'), findsOneWidget);
-      expect(find.text('99'), findsNothing);
+      // 99 includes the 12 going; it is the number either answer moves.
+      expect(find.text('99'), findsOneWidget);
+      expect(find.text('12'), findsNothing);
       expect(find.textContaining('here now'), findsNothing);
 
       await _teardown(tester);
@@ -508,10 +569,10 @@ void main() {
 
     testWidgets('every count from empty to four digits fits without overflowing', (tester) async {
       // Each of these would throw a RenderFlex overflow or clip visibly if the
-      // step-down in labelSizeFor were dropped. 4237 is only reachable as a
-      // live going_count, and only on a saturated bubble.
+      // step-down in labelSizeFor were dropped. 4237 is only reachable on a
+      // saturated bubble.
       for (final count in [0, 7, 25, 99, 100, 4237]) {
-        final pin = _pin(id: 'p', title: 'Techno Noir', startsAt: start, goingCount: count);
+        final pin = _pin(id: 'p', title: 'Techno Noir', startsAt: start, interestedCount: count);
 
         await _pumpPin(tester, pin, start.add(const Duration(hours: 1)));
 
@@ -554,7 +615,7 @@ void main() {
   });
 
   group('MapScreen', () {
-    testWidgets('draws a pin per row, with the counter that matches its tense', (tester) async {
+    testWidgets('draws a pin per row, each printing its interested count', (tester) async {
       final now = DateTime.now();
       final repository = _FakePartyRepository([
         _pin(
@@ -582,12 +643,11 @@ void main() {
       // The counts that used to be a hardcoded 0 for every pin on the map.
       // Both pins carry both numbers, and each must print the OTHER one from
       // its neighbour — so a pin reading the wrong counter fails here rather
-      // than passing by coincidence. Bare numbers now: the live one is the
-      // going count, the upcoming one the interested count, and the pulse is
-      // what distinguishes them.
-      expect(find.text('12'), findsOneWidget);
+      // than passing by coincidence. Live or not, a pin prints
+      // interested_count (MapPartyPin.pinCount); the pulse says which is live.
+      expect(find.text('99'), findsOneWidget);
       expect(find.text('34'), findsOneWidget);
-      expect(find.text('99'), findsNothing);
+      expect(find.text('12'), findsNothing);
       expect(find.text('88'), findsNothing);
 
       await _teardown(tester);
@@ -692,8 +752,8 @@ void main() {
           id: 'live',
           title: 'Τώρα',
           startsAt: now.subtract(const Duration(minutes: 1)),
-          goingCount: 300,
-          interestedCount: 2,
+          goingCount: 2,
+          interestedCount: 300,
         ),
       ]);
 
@@ -712,14 +772,14 @@ void main() {
       expect(box.height, expected.boxHeight);
       expect(tester.getSize(find.byType(MpMapPin)), Size(expected.width, expected.boxHeight));
 
-      // And it is sized off the LIVE counter, not the interested one: 300
-      // going, 2 interested. Had the screen read the wrong one the pin would
+      // And it is sized off interested_count even while live: 300
+      // interested, 2 going. Had the screen read going the pin would
       // be squeezed into a minimum-radius box here, so the two sizes are
       // asserted apart rather than just asserted equal to each other.
       expect(expected.drop.radius, MpDropGeometry.maxRadius);
       expect(box.height, closeTo(expected.drop.height, 0.01));
       expect(MpPinMetrics.forCount(2).drop.radius, lessThan(MpDropGeometry.maxRadius * 0.6),
-          reason: 'the interested count would have drawn a far smaller bubble');
+          reason: 'the going count would have drawn a far smaller bubble');
 
       // THE ANCHOR. Inverting flutter_map's placement, the point lands at
       // (0.5·w·(1−ax), 0.5·h·(1−ay)) inside the box — which must be the apex.
@@ -789,6 +849,26 @@ void main() {
       expect(find.byType(MpMapPin), findsNothing);
       expect(find.text('Search parties or people'), findsOneWidget);
 
+      await _teardown(tester);
+    });
+  });
+
+  group('RSVP changes', () {
+    testWidgets('an RSVP saved anywhere makes the map refetch its pins', (tester) async {
+      // The map tab lives in an IndexedStack and never rebuilds by itself, so
+      // without this the number on the drop stays at its pre-tap value until
+      // the user pans. The refetch is what brings the server's counters in.
+      final now = DateTime.now();
+      final repository = _FakePartyRepository([
+        _pin(id: 'p1', title: 'p1', startsAt: now.add(const Duration(days: 1)), interestedCount: 3),
+      ]);
+      await _mount(tester, repository);
+      final before = repository.calls.length;
+
+      rsvpChanges.value = const RsvpChange(partyId: 'p1', status: MpRsvp.going);
+      await tester.pump();
+
+      expect(repository.calls.length, before + 1);
       await _teardown(tester);
     });
   });
@@ -925,6 +1005,15 @@ void main() {
       await tester.pump();
     }
 
+    /// The answer buttons sit below the fold of the 800x600 test viewport, so
+    /// a bare tap() lands outside the render tree and hits nothing.
+    Future<void> tapAnswer(WidgetTester tester, String label) async {
+      await tester.ensureVisible(find.text(label));
+      await tester.pump();
+      await tester.tap(find.text(label));
+      await tester.pump();
+    }
+
     testWidgets('renders everything the pin stopped showing', (tester) async {
       // The whole point of stripping the pin: none of this is lost, it moves
       // one tap away. Asserted as a set rather than one field at a time
@@ -1036,6 +1125,101 @@ void main() {
       await pumpSheet(tester, full(isPrivate: true, myRsvpStatus: 'going'), repository);
       expect(find.text('You are coming ✓'), findsOneWidget);
       expect(find.text('Interested'), findsNothing);
+    });
+
+    testWidgets('Interested writes the rsvp, ticks, and counts the viewer in', (tester) async {
+      // Not live (the fixture party ended in August), so the lead number is
+      // interested_count -- the one the map pin draws -- and it must move on
+      // the tap, not after a round trip.
+      final repository = _FakePartyRepository(const []);
+      final published = <RsvpChange?>[];
+      void listener() => published.add(rsvpChanges.value);
+      rsvpChanges.addListener(listener);
+      addTearDown(() => rsvpChanges.removeListener(listener));
+
+      await pumpSheet(tester, full(), repository);
+      expect(find.text('34 interested'), findsOneWidget);
+
+      await tapAnswer(tester, 'Interested');
+
+      expect(repository.rsvpWrites.single.status, MpRsvp.interested);
+      expect(repository.rsvpWrites.single.current, isNull);
+      expect(find.text('Interested ✓'), findsOneWidget);
+      expect(find.text('35 interested'), findsOneWidget);
+      expect(find.text('12 going'), findsOneWidget);
+      // Published only once the write landed, which is what tells the map and
+      // MY PARTIES to refetch.
+      expect(published.single!.partyId, 'aaaaaaaa-0000-0000-0000-000000000002');
+      expect(published.single!.status, MpRsvp.interested);
+    });
+
+    testWidgets('switching interested -> going moves going ONLY', (tester) async {
+      // interested_count includes everyone going, so a flip changes nobody's
+      // interested membership -- the trigger's UPDATE branch touches one
+      // column, and the optimistic number must agree with it.
+      final repository = _FakePartyRepository(const []);
+      await pumpSheet(tester, full(myRsvpStatus: 'interested'), repository);
+
+      await tapAnswer(tester, 'Going');
+
+      expect(repository.rsvpWrites.single.current, MpRsvp.interested);
+      expect(find.text('Going ✓'), findsOneWidget);
+      expect(find.text('34 interested'), findsOneWidget);
+      expect(find.text('13 going'), findsOneWidget);
+    });
+
+    testWidgets('tapping the lit answer withdraws it and counts the viewer out', (tester) async {
+      final repository = _FakePartyRepository(const []);
+      await pumpSheet(tester, full(myRsvpStatus: 'going'), repository);
+
+      await tapAnswer(tester, 'Going ✓');
+
+      expect(repository.rsvpWrites.single.status, MpRsvp.going);
+      expect(repository.rsvpWrites.single.current, MpRsvp.going);
+      expect(find.text('Going'), findsOneWidget);
+      expect(find.text('33 interested'), findsOneWidget);
+      expect(find.text('11 going'), findsOneWidget);
+    });
+
+    testWidgets('a failed write rolls the sheet back and publishes nothing', (tester) async {
+      final repository = _FakePartyRepository(const [])..rsvpFails = true;
+      var notified = 0;
+      void listener() => notified++;
+      rsvpChanges.addListener(listener);
+      addTearDown(() => rsvpChanges.removeListener(listener));
+
+      await pumpSheet(tester, full(), repository);
+      await tapAnswer(tester, 'Going');
+      await tester.pump();
+
+      expect(find.text('Going'), findsOneWidget);
+      expect(find.text('34 interested'), findsOneWidget);
+      expect(find.text('That did not save.'), findsOneWidget);
+      expect(notified, 0);
+    });
+
+    testWidgets('only a PRIVATE sheet offers the group chat icon', (tester) async {
+      // A public party has no chat (20260825094044), and a public pin is seen
+      // by passers-by who could never be admitted to one.
+      final repository = _FakePartyRepository(const []);
+
+      await pumpSheet(tester, full(isPrivate: true, goingCount: null, interestedCount: null), repository);
+      expect(find.byTooltip('Group chat'), findsOneWidget);
+
+      await pumpSheet(tester, full(isPrivate: false), repository);
+      expect(find.byTooltip('Group chat'), findsNothing);
+    });
+
+    testWidgets('both public and private sheets carry a Directions button', (tester) async {
+      // A placeholder for now -- present and tappable, wired to nothing.
+      final repository = _FakePartyRepository(const []);
+      for (final isPrivate in [false, true]) {
+        await pumpSheet(tester, full(isPrivate: isPrivate), repository);
+        expect(find.text('Directions'), findsOneWidget, reason: 'isPrivate: $isPrivate');
+        await tapAnswer(tester, 'Directions');
+        expect(tester.takeException(), isNull);
+        expect(repository.rsvpWrites, isEmpty);
+      }
     });
 
     testWidgets('a private party shows no counts in the sheet at all', (tester) async {

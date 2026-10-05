@@ -12,6 +12,7 @@ import '../widgets/diagonal_placeholder.dart';
 import '../widgets/host_post_strip.dart';
 import '../widgets/mp_bottom_nav.dart';
 import '../../state/mp_store.dart' show MpRsvp;
+import '../../state/rsvp_changes.dart';
 import '../widgets/party_card.dart';
 import '../widgets/privacy_badge.dart';
 import 'chat_screen.dart';
@@ -72,14 +73,16 @@ class _EventsScreenState extends State<EventsScreen> {
   @override
   void initState() {
     super.initState();
-    _rsvpsFuture = _repository.fetchMyRsvps();
+    _rsvpsFuture = _repository.fetchMyParties();
     _observe(_rsvpsFuture);
+    rsvpChanges.addListener(_onRsvpChanged);
     _listScroll.addListener(_onScroll);
     _loadList(reset: true);
   }
 
   @override
   void dispose() {
+    rsvpChanges.removeListener(_onRsvpChanged);
     _listScroll.dispose();
     super.dispose();
   }
@@ -178,9 +181,13 @@ class _EventsScreenState extends State<EventsScreen> {
         status: status,
         current: previous,
       );
-      // The MY PARTIES tab is now stale -- it is the same rsvps rows seen from
-      // the other end.
-      _reloadRsvps();
+      // MY PARTIES is now stale -- it is the same rsvps rows seen from the
+      // other end. Published rather than reloaded here so the map's pins hear
+      // about it too; [_onRsvpChanged] does the reload.
+      rsvpChanges.value = RsvpChange(
+        partyId: item.partyId,
+        status: withdrawing ? null : status,
+      );
     } catch (_) {
       if (!mounted) return;
       setState(() => _items[index] = item);
@@ -201,9 +208,29 @@ class _EventsScreenState extends State<EventsScreen> {
     unawaited(future.then((_) {}, onError: (_) {}));
   }
 
+  /// An RSVP was saved, here or on another tab (the map sheet, search).
+  ///
+  /// MY PARTIES is refetched, since a new answer adds a row and a withdrawal
+  /// removes one. A matching ALL PARTIES card has its button patched in place
+  /// rather than the list reloaded, which would lose the reader's scroll
+  /// position and page; its counters refresh on the next load, for the reason
+  /// [_setRsvp] gives.
+  void _onRsvpChanged() {
+    final change = rsvpChanges.value;
+    if (change == null || !mounted) return;
+    final index = _items.indexWhere((i) => i.partyId == change.partyId);
+    if (index >= 0) {
+      _items[index] = _items[index].copyWith(
+        myRsvp: change.status,
+        clearRsvp: change.status == null,
+      );
+    }
+    _reloadRsvps();
+  }
+
   void _reloadRsvps() {
     setState(() {
-      _rsvpsFuture = _repository.fetchMyRsvps();
+      _rsvpsFuture = _repository.fetchMyParties();
       _observe(_rsvpsFuture);
     });
   }
@@ -314,8 +341,16 @@ class _EventsScreenState extends State<EventsScreen> {
                         final now = widget.clock();
                         final todayEnd = DateTime(now.year, now.month, now.day + 1);
                         final weekEnd = now.add(const Duration(days: 7));
-                        final upcoming = snapshot.data!.where((r) => r.startsAt.isAfter(now)).toList()
+                        // "Not over" is the MAP's rule, `ends_at is null or
+                        // ends_at > now()`, not "has not started": a party you
+                        // RSVP'd to from its pin while it was under way has to
+                        // show up here, or the answer looks like it was lost.
+                        final current = snapshot.data!
+                            .where((r) => r.endsAt == null || r.endsAt!.isAfter(now))
+                            .toList()
                           ..sort((a, b) => a.startsAt.compareTo(b.startsAt));
+                        final happening = current.where((r) => !r.startsAt.isAfter(now)).toList();
+                        final upcoming = current.where((r) => r.startsAt.isAfter(now)).toList();
 
                         final tonight = <RsvpParty>[];
                         final thisWeek = <RsvpParty>[];
@@ -330,12 +365,16 @@ class _EventsScreenState extends State<EventsScreen> {
                           }
                         }
 
-                        if (upcoming.isEmpty) return _emptyState(context);
+                        if (current.isEmpty) return _emptyState(context);
 
                         return ListView(
                           padding: const EdgeInsets.fromLTRB(14, 16, 14, 96),
                           children: [
-                            if (tonight.isNotEmpty) _rsvpSection(context, 'TONIGHT', tonight, live: true),
+                            if (happening.isNotEmpty) _rsvpSection(context, 'HAPPENING NOW', happening, live: true),
+                            if (tonight.isNotEmpty) ...[
+                              if (happening.isNotEmpty) const SizedBox(height: 20),
+                              _rsvpSection(context, 'TONIGHT', tonight, live: true),
+                            ],
                             if (thisWeek.isNotEmpty) ...[
                               const SizedBox(height: 20),
                               _rsvpSection(context, 'THIS WEEK', thisWeek),
@@ -584,14 +623,20 @@ class _EventsScreenState extends State<EventsScreen> {
                         children: [
                           PrivacyBadge(isPrivate: rsvp.isPrivate, english: true),
                           const SizedBox(width: 5),
-                          // 'COMING' on a private party. Its rsvp row is
-                          // always 'going' -- the policy permits nothing else
-                          // -- so the word is the only thing that varies, and
-                          // it matches the button that wrote it.
+                          // Why the party is in YOUR list. HOSTING first: a
+                          // host's own rsvp, if any, is the least interesting
+                          // fact about them. INVITED is an invitation not yet
+                          // answered. Otherwise 'COMING' on a private party --
+                          // its rsvp row is always 'going', the policy permits
+                          // nothing else -- matching the button that wrote it.
                           Text(
-                            rsvp.isPrivate
-                                ? 'COMING'
-                                : (rsvp.rsvpStatus == 'going' ? 'GOING' : 'INTERESTED'),
+                            rsvp.isHost
+                                ? 'HOSTING'
+                                : rsvp.rsvpStatus == null
+                                    ? 'INVITED'
+                                    : rsvp.isPrivate
+                                        ? 'COMING'
+                                        : (rsvp.rsvpStatus == 'going' ? 'GOING' : 'INTERESTED'),
                             style: AppTextStyles.mono(size: 9, color: AppColors.textAlpha(0.45)),
                           ),
                         ],

@@ -575,6 +575,18 @@ where party_id = 'cccccccc-0000-0000-0000-000000000001';
 delete from public.sent_notifications
 where party_id = 'cccccccc-0000-0000-0000-000000000001';
 
+-- Headroom under the daily cap, or this section is decided by HEAP ORDER.
+-- By now the stranger holds 2 jobs today against the default cap of 5, and
+-- the sweep finds FOUR enqueueable parties for them, not one: 0001 plus
+-- 0005/0006/0007, each created while a gate was shut (block, push consent,
+-- notify_nearby) and each re-opened by its section afterwards. The sweep's
+-- loop has no ORDER BY, so whichever of the four it reaches last is capped
+-- out -- 0001 came first on a long-lived local database and last on CI's
+-- fresh one, and this assertion read 0. The cap is section 6's subject; here
+-- it is noise.
+update public.profiles set notify_daily_cap = 50
+where id = '44444444-4444-4444-4444-444444444444';
+
 select ok(
   (select jobs_enqueued from public.sweep_missed_nearby_notifications()) >= 1,
   'the sweep re-enqueues a notification whose trigger never fired'
