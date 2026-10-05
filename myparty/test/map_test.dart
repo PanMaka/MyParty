@@ -1198,6 +1198,18 @@ void main() {
       expect(notified, 0);
     });
 
+    testWidgets('both public and private sheets carry a Directions button', (tester) async {
+      // A placeholder for now -- present and tappable, wired to nothing.
+      final repository = _FakePartyRepository(const []);
+      for (final isPrivate in [false, true]) {
+        await pumpSheet(tester, full(isPrivate: isPrivate), repository);
+        expect(find.text('Directions'), findsOneWidget, reason: 'isPrivate: $isPrivate');
+        await tapAnswer(tester, 'Directions');
+        expect(tester.takeException(), isNull);
+        expect(repository.rsvpWrites, isEmpty);
+      }
+    });
+
     testWidgets('a private party shows no counts in the sheet at all', (tester) async {
       // goingCount/interestedCount are null because the RPC no longer sends
       // them for a private row. The counts row is omitted rather than blanked

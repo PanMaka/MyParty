@@ -150,6 +150,8 @@ class _MapPinSheetState extends State<MapPinSheet> {
               ],
               const SizedBox(height: 18),
               _action(),
+              const SizedBox(height: 8),
+              _directions(),
             ],
           ),
         ),
@@ -407,6 +409,32 @@ class _MapPinSheetState extends State<MapPinSheet> {
           ),
         ),
       ],
+    );
+  }
+
+  /// Directions to the party. A PLACEHOLDER: deliberately inert for now —
+  /// no snackbar, no navigation — until the maps hand-off is built. This
+  /// sheet is the right home for it because it is fed by a spatial query, so
+  /// [MapPartyPin.lat]/[MapPartyPin.lng] are already here to hand over (the
+  /// Parties-tab sheet's own Directions button has no coordinates to give).
+  ///
+  /// Secondary styling, under the RSVP answers: it is a utility, not the
+  /// sheet's call to action.
+  Widget _directions() {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: () {},
+        icon: const Icon(Icons.directions_outlined, size: 18),
+        label: const Text('Directions', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 13),
+          side: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+          backgroundColor: Colors.white.withValues(alpha: 0.06),
+          foregroundColor: AppColors.text,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
+      ),
     );
   }
 
