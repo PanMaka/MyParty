@@ -195,7 +195,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: FeedScreen(repository: repo)));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Ήσυχα εδώ.'), findsOneWidget);
+    expect(find.textContaining('Quiet here.'), findsOneWidget);
   });
 
   testWidgets('liking moves the counter optimistically and writes through', (tester) async {
@@ -227,7 +227,7 @@ void main() {
 
     expect(repo.likeCalls, 1);
     expect(find.text('3'), findsOneWidget);
-    expect(find.text('Δεν έγινε. Δοκίμασε ξανά.'), findsOneWidget);
+    expect(find.text('That didn’t work. Try again.'), findsOneWidget);
   });
 
   testWidgets('someone else\'s post offers the report actions', (tester) async {

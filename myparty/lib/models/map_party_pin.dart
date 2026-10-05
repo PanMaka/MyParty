@@ -92,7 +92,7 @@ class MapPartyPin {
       id: (row['party_id'] ?? fallbackId).toString(),
       lat: (row['lat'] as num).toDouble(),
       lng: (row['lon'] as num).toDouble(),
-      title: (row['title'] as String?) ?? 'Πάρτι',
+      title: (row['title'] as String?) ?? 'Party',
       isPrivate: (row['is_private'] as bool?) ?? false,
       // No `?? 0` any more. On a PUBLIC row zero really is "nobody yet" and
       // the server sends it; on a private row the server sends null and that

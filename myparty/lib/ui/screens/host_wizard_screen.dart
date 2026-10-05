@@ -6,7 +6,7 @@ import '../../data/party_repository.dart';
 import '../../data/profile_repository.dart';
 import '../../data/social_repository.dart';
 import '../../models/profile.dart';
-import '../../utils/greek_date.dart';
+import '../../utils/english_date.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
 import 'chat_screen.dart';
@@ -733,7 +733,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(_nameController.text, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
-                          Text('${formatPartyStart(_startsAt)} · ${_addressController.text}',
+                          Text('${formatPartyStartEn(_startsAt)} · ${_addressController.text}',
                               maxLines: 1, overflow: TextOverflow.ellipsis,
                               style: TextStyle(fontSize: 11.5, color: AppColors.textAlpha(0.65))),
                         ],
