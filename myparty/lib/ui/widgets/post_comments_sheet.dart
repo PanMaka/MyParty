@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/feed_repository.dart';
 import '../../models/feed_post.dart';
-import '../../utils/greek_date.dart';
+import '../../utils/english_date.dart';
 import '../theme/app_theme.dart';
 import 'report_sheet.dart';
 
@@ -138,7 +138,7 @@ class _CommentsSheetState extends State<_CommentsSheet> {
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Δεν στάλθηκε.'), behavior: SnackBarBehavior.floating),
+        const SnackBar(content: Text('Not sent.'), behavior: SnackBarBehavior.floating),
       );
     }
   }
@@ -152,7 +152,7 @@ class _CommentsSheetState extends State<_CommentsSheet> {
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Δεν διαγράφηκε.'), behavior: SnackBarBehavior.floating),
+        const SnackBar(content: Text('Not deleted.'), behavior: SnackBarBehavior.floating),
       );
     }
   }
@@ -181,7 +181,7 @@ class _CommentsSheetState extends State<_CommentsSheet> {
             ),
             const Padding(
               padding: EdgeInsets.only(bottom: 10),
-              child: Text('Σχόλια',
+              child: Text('Comments',
                   style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
             ),
             Flexible(child: _body()),
@@ -199,7 +199,7 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                         style: const TextStyle(fontSize: 13.5),
                         decoration: InputDecoration(
                           isDense: true,
-                          hintText: 'Γράψε ένα σχόλιο…',
+                          hintText: 'Write a comment…',
                           hintStyle: TextStyle(fontSize: 13, color: AppColors.textAlpha(0.4)),
                           filled: true,
                           fillColor: Colors.white.withValues(alpha: 0.05),
@@ -241,7 +241,7 @@ class _CommentsSheetState extends State<_CommentsSheet> {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 42),
         child: Center(
-          child: Text('Δεν φόρτωσαν τα σχόλια.',
+          child: Text('The comments didn’t load.',
               style: TextStyle(fontSize: 13, color: AppColors.textAlpha(0.55))),
         ),
       );
@@ -251,7 +251,7 @@ class _CommentsSheetState extends State<_CommentsSheet> {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 42),
         child: Center(
-          child: Text('Κανένα σχόλιο ακόμη.',
+          child: Text('No comments yet.',
               style: TextStyle(fontSize: 13, color: AppColors.textAlpha(0.55))),
         ),
       );
@@ -291,7 +291,7 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                     Text(comment.authorUsername,
                         style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
                     const SizedBox(width: 7),
-                    Text(formatPostAge(comment.createdAt),
+                    Text(formatPostAgeEn(comment.createdAt),
                         style: TextStyle(fontSize: 11, color: AppColors.textAlpha(0.45))),
                   ],
                 ),
@@ -327,9 +327,9 @@ class _CommentsSheetState extends State<_CommentsSheet> {
         // Report is offered on someone else's comment only — reporting your
         // own is noise in the queue, and you can just delete it.
         if (!mine)
-          const PopupMenuItem(value: 'report', child: Text('Αναφορά', style: TextStyle(fontSize: 13))),
+          const PopupMenuItem(value: 'report', child: Text('Report', style: TextStyle(fontSize: 13))),
         if (mine)
-          const PopupMenuItem(value: 'delete', child: Text('Διαγραφή', style: TextStyle(fontSize: 13))),
+          const PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(fontSize: 13))),
       ],
     );
   }

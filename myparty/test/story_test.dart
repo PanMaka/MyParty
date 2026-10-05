@@ -379,7 +379,7 @@ void main() {
     await tester.tap(find.text('Ταράτσα στο Κουκάκι'));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Πολλά stories'), findsOneWidget);
+    expect(find.textContaining('Too many stories'), findsOneWidget);
   });
 
   testWidgets('with no party to post to, the sheet explains why', (tester) async {
@@ -389,6 +389,6 @@ void main() {
     )));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Δεν είσαι σε κανένα πάρτι'), findsOneWidget);
+    expect(find.textContaining('not in any party yet'), findsOneWidget);
   });
 }

@@ -239,9 +239,9 @@ void main() {
     await tester.tap(find.byIcon(Icons.more_horiz));
     await tester.pumpAndSettle();
 
-    expect(find.text('Αναφορά δημοσίευσης'), findsOneWidget);
-    expect(find.text('Αναφορά χρήστη'), findsOneWidget);
-    expect(find.text('Διαγραφή'), findsNothing);
+    expect(find.text('Report post'), findsOneWidget);
+    expect(find.text('Report user'), findsOneWidget);
+    expect(find.text('Delete'), findsNothing);
   });
 
   testWidgets('your own post offers delete instead', (tester) async {
@@ -254,8 +254,8 @@ void main() {
     await tester.tap(find.byIcon(Icons.more_horiz));
     await tester.pumpAndSettle();
 
-    expect(find.text('Διαγραφή'), findsOneWidget);
-    expect(find.text('Αναφορά δημοσίευσης'), findsNothing);
+    expect(find.text('Delete'), findsOneWidget);
+    expect(find.text('Report post'), findsNothing);
   });
 
   testWidgets('the second page is fetched by keyset cursor, never an offset', (tester) async {
