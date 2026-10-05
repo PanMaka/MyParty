@@ -74,9 +74,9 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
     try {
       final json = await _accounts.exportData();
       await Clipboard.setData(ClipboardData(text: json));
-      _toast('Τα δεδομένα σου αντιγράφηκαν (${json.length} χαρακτήρες)');
+      _toast('Your data was copied (${json.length} characters)');
     } catch (error) {
-      _toast('Η εξαγωγή απέτυχε: $error');
+      _toast('Export failed: $error');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -87,19 +87,19 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         backgroundColor: AppColors.sheet,
-        title: const Text('Διαγραφή λογαριασμού;'),
+        title: const Text('Delete account?'),
         content: const Text(
-          'Ο λογαριασμός σου θα διαγραφεί οριστικά σε 30 ημέρες. '
-          'Μέχρι τότε μπορείς να τον επαναφέρεις κάνοντας ξανά σύνδεση.',
+          'Your account will be permanently deleted in 30 days. '
+          'Until then, you can restore it by signing in again.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Άκυρο'),
+            child: const Text('Cancel'),
           ),
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Διαγραφή', style: TextStyle(color: AppColors.destructive)),
+            child: const Text('Delete', style: TextStyle(color: AppColors.destructive)),
           ),
         ],
       ),
@@ -118,7 +118,7 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
       // recovered — one action, not two.
       await AuthService().signOut();
     } catch (error) {
-      _toast('Η διαγραφή απέτυχε: $error');
+      _toast('Deletion failed: $error');
       if (mounted) setState(() => _busy = false);
     }
   }
@@ -129,9 +129,9 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
     try {
       await _accounts.cancelDeletion();
       await _load();
-      _toast('Ο λογαριασμός σου δεν θα διαγραφεί');
+      _toast('Your account will not be deleted');
     } catch (error) {
-      _toast('Κάτι πήγε στραβά: $error');
+      _toast('Something went wrong: $error');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -144,7 +144,7 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
       appBar: AppBar(
         backgroundColor: AppColors.canvas,
         elevation: 0,
-        title: const Text('Ο λογαριασμός μου', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+        title: const Text('My account', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
       ),
       body: !_loaded
           ? const Center(child: CircularProgressIndicator())
@@ -160,7 +160,7 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
   // ----------------------------------------------------------------
   List<Widget> _activeSections() {
     return [
-      Text('ΤΑ ΔΕΔΟΜΕΝΑ ΜΟΥ', style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.45))),
+      Text('MY DATA', style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.45))),
       const SizedBox(height: 9),
       _card(
         child: InkWell(
@@ -170,10 +170,10 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Εξαγωγή δεδομένων', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+                Text('Export data', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
                 SizedBox(height: 2),
                 Text(
-                  'Το προφίλ, τα πάρτι, οι συμμετοχές, οι δημοσιεύσεις και τα μηνύματά σου, σε JSON.',
+                  'Your profile, parties, RSVPs, posts and messages, as JSON.',
                   style: TextStyle(fontSize: 11, height: 1.4),
                 ),
               ],
@@ -183,7 +183,7 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
       ),
 
       const SizedBox(height: 22),
-      Text('ΔΙΑΓΡΑΦΗ', style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.45))),
+      Text('DELETION', style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.45))),
       const SizedBox(height: 9),
 
       // The five facts. Each one is a thing the server actually does, and each
@@ -195,11 +195,11 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: const [
-              _Fact('Ο λογαριασμός σου διαγράφεται οριστικά μετά από 30 ημέρες.'),
-              _Fact('Μέχρι τότε μπορείς να τον επαναφέρεις κάνοντας ξανά σύνδεση.'),
-              _Fact('Τα μηνύματα που έχεις στείλει παραμένουν στις συνομιλίες, ως «Διαγραμμένος χρήστης».'),
-              _Fact('Η τοποθεσία σου και οι ειδοποιήσεις διαγράφονται αμέσως, όχι σε 30 ημέρες.'),
-              _Fact('Τα πάρτι που δεν έχουν ξεκινήσει ακυρώνονται.', last: true),
+              _Fact('Your account is permanently deleted after 30 days.'),
+              _Fact('Until then, you can restore it by signing in again.'),
+              _Fact('Messages you have sent stay in their chats, shown as “Deleted user”.'),
+              _Fact('Your location and notifications are deleted immediately, not in 30 days.'),
+              _Fact('Parties that have not started yet are cancelled.', last: true),
             ],
           ),
         ),
@@ -207,7 +207,7 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
 
       const SizedBox(height: 14),
       _dangerButton(
-        label: 'Διαγραφή λογαριασμού',
+        label: 'Delete account',
         onTap: _busy ? null : _confirmAndDelete,
       ),
     ];
@@ -228,14 +228,14 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Ο λογαριασμός σου διαγράφεται',
+                'Your account is being deleted',
                 style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 6),
               Text(
                 daysLeft > 0
-                    ? 'Απομένουν $daysLeft ημέρες. Μέχρι τότε μπορείς να τον επαναφέρεις.'
-                    : 'Η διαγραφή θα ολοκληρωθεί σύντομα.',
+                    ? '$daysLeft ${daysLeft == 1 ? 'day' : 'days'} left. Until then, you can restore it.'
+                    : 'Deletion will be completed soon.',
                 style: TextStyle(fontSize: 12, height: 1.5, color: AppColors.textAlpha(0.6)),
               ),
             ],
@@ -249,7 +249,7 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
           child: const Padding(
             padding: EdgeInsets.all(13),
             child: Center(
-              child: Text('Επαναφορά λογαριασμού', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+              child: Text('Restore account', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
             ),
           ),
         ),
