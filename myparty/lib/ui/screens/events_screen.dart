@@ -621,7 +621,7 @@ class _EventsScreenState extends State<EventsScreen> {
                     children: [
                       Row(
                         children: [
-                          PrivacyBadge(isPrivate: rsvp.isPrivate, english: true),
+                          PrivacyBadge(isPrivate: rsvp.isPrivate),
                           const SizedBox(width: 5),
                           // Why the party is in YOUR list. HOSTING first: a
                           // host's own rsvp, if any, is the least interesting

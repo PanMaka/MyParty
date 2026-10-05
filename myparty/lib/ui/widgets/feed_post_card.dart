@@ -159,7 +159,6 @@ class FeedPostCard extends StatelessWidget {
                     const SizedBox(width: 6),
                     PrivacyBadge(
                       isPrivate: post.partyIsPrivate,
-                      english: true,
                     ),
                   ],
                 ),

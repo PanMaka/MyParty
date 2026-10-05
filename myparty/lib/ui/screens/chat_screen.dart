@@ -423,7 +423,7 @@ class _ChatScreenState extends State<ChatScreen> {
                           style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700)),
                     ),
                     const SizedBox(width: 6),
-                    PrivacyBadge(isPrivate: widget.isPrivate, english: true),
+                    PrivacyBadge(isPrivate: widget.isPrivate),
                   ],
                 ),
                 if (widget.memberCount != null)

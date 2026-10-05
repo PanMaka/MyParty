@@ -1,14 +1,4 @@
 /// The party stamps and the post age, in English.
-///
-/// A deliberate near-duplicate of `greek_date.dart`, not a replacement for it.
-/// The rest of the app — the map, the feed, events, chat, the host wizard — is
-/// still Greek, and a single formatter cannot be both; the alternative to two
-/// files is one file with a locale argument threaded through every call site,
-/// which is a localisation layer this app does not have yet. When it grows one,
-/// these two functions and their Greek twins collapse into it.
-///
-/// [formatPostAgeEn] joined the two party stamps when the feed post card and
-/// the comments sheet were translated — it has callers now.
 const _weekdayAbbr = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const _monthAbbr = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
