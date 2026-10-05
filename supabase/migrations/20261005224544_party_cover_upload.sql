@@ -21,9 +21,14 @@
 -- ============================================================
 -- 1. The path. One per party, derived here, never accepted from the client.
 --
--- {party_id}/cover.jpg: the client always re-encodes to JPEG (image_picker
--- with imageQuality), so the extension is not a question worth a parameter.
--- A fixed name is what makes the handshake one-shot: once confirmed,
+-- {party_id}/cover, with no extension. The picker re-encodes to JPEG unless
+-- the image has an alpha channel, in which case it stays PNG
+-- (image_picker_android's ImageResizer: saveAsPNG = bitmap.hasAlpha()) --
+-- and phone screenshots, i.e. photographed flyers, usually do. So the format
+-- is not knowable up front, and Storage records each object's real
+-- content-type anyway; an extension would only be a second claim about the
+-- format that could disagree with the first. A fixed name is what makes the
+-- handshake one-shot: once confirmed,
 -- cover_path is not null and this refuses to answer again, and the edge
 -- function signs with upsert: false, so even a replayed token cannot swap the
 -- picture under guests who have already seen it. Changing a cover later is a
@@ -50,7 +55,7 @@ begin
       using errcode = '42501';
   end if;
 
-  return p_party_id::text || '/cover.jpg';
+  return p_party_id::text || '/cover';
 end;
 $$;
 
@@ -121,11 +126,12 @@ grant execute on function public.party_cover_upload_target(uuid) to service_role
 --
 -- A signed upload URL lets the holder choose the body and its content type, so
 -- without these a two-minute URL is an invitation to store a 500MB file or an
--- HTML page in a bucket whose objects are served back to every guest. A cover
--- renders as a card header; the client resizes to 1600px at quality 85, which
--- lands well under 1MB, so 5MB is headroom rather than a target.
+-- HTML page in a bucket whose objects are served back to every guest. JPEG and
+-- PNG are the two formats the picker can hand over (see section 1). A cover
+-- renders as a card header and the client resizes to 1600px, so a JPEG lands
+-- well under 1MB; 5MB is headroom for the PNG case rather than a target.
 -- ============================================================
 update storage.buckets
 set file_size_limit = 5 * 1024 * 1024,
-    allowed_mime_types = array['image/jpeg']
+    allowed_mime_types = array['image/jpeg', 'image/png']
 where id = 'party-covers';

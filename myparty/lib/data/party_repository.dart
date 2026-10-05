@@ -60,9 +60,14 @@ class PartyRepository {
   /// the state every party was in before covers existed — so callers report
   /// it rather than treat the party as not created.
   ///
-  /// [bytes] must be a JPEG: the bucket accepts nothing else, and the image
-  /// picker's `imageQuality` re-encodes to JPEG on the way out.
+  /// [bytes] must be a JPEG or a PNG — the only two types the bucket accepts,
+  /// and the only two the image picker emits (see [coverContentType]).
   Future<String> uploadCover(String partyId, Uint8List bytes) async {
+    final contentType = coverContentType(bytes);
+    if (contentType == null) {
+      throw ArgumentError('A cover must be a JPEG or a PNG');
+    }
+
     final signed = await _client.functions.invoke(
       'party-cover/upload-url',
       body: {'party_id': partyId},
@@ -81,11 +86,28 @@ class PartyRepository {
           path,
           token,
           bytes,
-          const FileOptions(contentType: 'image/jpeg'),
+          FileOptions(contentType: contentType),
         );
 
     final confirmed = await _client.rpc('confirm_party_cover', params: {'p_party_id': partyId});
     return confirmed as String;
+  }
+
+  /// The content-type a cover is uploaded with, read from its first bytes, or
+  /// null for anything the `party-covers` bucket would refuse.
+  ///
+  /// Sniffed rather than assumed: the picker re-encodes to JPEG EXCEPT when
+  /// the image has an alpha channel, which it keeps as PNG — and phone
+  /// screenshots usually have one. Labelling those bytes `image/jpeg` would
+  /// store a PNG that every reader is told is a JPEG.
+  static String? coverContentType(Uint8List bytes) {
+    bool startsWith(List<int> signature) =>
+        bytes.length >= signature.length &&
+        Iterable<int>.generate(signature.length).every((i) => bytes[i] == signature[i]);
+
+    if (startsWith(const [0xFF, 0xD8, 0xFF])) return 'image/jpeg';
+    if (startsWith(const [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])) return 'image/png';
+    return null;
   }
 
   /// Everything MY PARTIES lists: parties the current user RSVP'd to, hosts,

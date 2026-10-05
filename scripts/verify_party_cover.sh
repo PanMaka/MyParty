@@ -40,7 +40,7 @@ cleanup() {
   for id in "${PARTY_IDS[@]}"; do
     curl -s -o /dev/null -X DELETE "$API_URL/storage/v1/object/party-covers" \
       -H "Authorization: Bearer $SERVICE_KEY" -H "Content-Type: application/json" \
-      -d "{\"prefixes\":[\"$id/cover.jpg\"]}" || true
+      -d "{\"prefixes\":[\"$id/cover\"]}" || true
     sql "delete from public.invitations where party_id = '$id';
          delete from public.parties where id = '$id';" >/dev/null || true
   done
@@ -99,6 +99,10 @@ base64 -d >"$WORKDIR/cover.jpg" <<'B64'
 /9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=
 B64
 printf '<html>not a cover</html>' >"$WORKDIR/page.html"
+# And a real 1x1 PNG: the picker keeps images with an alpha channel as PNG.
+base64 -d >"$WORKDIR/cover.png" <<'B64'
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==
+B64
 
 # ============================================================
 step "0. preflight"
@@ -130,7 +134,7 @@ pass "the invitee -- who can see the party -- is refused (403)"
 upload_url "$HOST_JWT" "$PARTY"
 [ "$STATUS" = 200 ] || fail "upload-url for the host: $STATUS $BODY"
 PATH_KEY=$(jget "$BODY" path); TOKEN=$(jget "$BODY" token)
-[ "$PATH_KEY" = "$PARTY/cover.jpg" ] || fail "signed the wrong path: $PATH_KEY"
+[ "$PATH_KEY" = "$PARTY/cover" ] || fail "signed the wrong path: $PATH_KEY"
 pass "the host gets a URL for $PATH_KEY"
 
 # ============================================================
@@ -146,7 +150,7 @@ pass "the JPEG is uploaded through the signed URL"
 
 rpc "$HOST_JWT" confirm_party_cover "{\"p_party_id\":\"$PARTY\"}"
 [ "$STATUS" = 200 ] || fail "confirm after upload: $STATUS $BODY"
-[ "$(sql "select cover_path from public.parties where id = '$PARTY'")" = "$PARTY/cover.jpg" ] \
+[ "$(sql "select cover_path from public.parties where id = '$PARTY'")" = "$PARTY/cover" ] \
   || fail "cover_path was not set"
 pass "confirm sets parties.cover_path"
 
@@ -167,13 +171,21 @@ cmp -s "$WORKDIR/cover.jpg" "$WORKDIR/read.jpg" || fail "the bytes read back dif
 pass "the invitee signs a read URL under RLS and gets the same bytes back"
 
 # ============================================================
-step "4. the bucket refuses what is not a JPEG"
+step "4. the bucket refuses what is not an image"
 # ============================================================
 OTHER=$(new_party two); PARTY_IDS+=("$OTHER")
 upload_url "$HOST_JWT" "$OTHER"
 [ "$STATUS" = 200 ] || fail "upload-url for the second party: $STATUS $BODY"
-code=$(put_signed "$(jget "$BODY" path)" "$(jget "$BODY" token)" "$WORKDIR/page.html" text/html)
+OTHER_PATH=$(jget "$BODY" path); OTHER_TOKEN=$(jget "$BODY" token)
+code=$(put_signed "$OTHER_PATH" "$OTHER_TOKEN" "$WORKDIR/page.html" text/html)
 [ "$code" != 200 ] || fail "the bucket accepted an HTML page as a cover"
 pass "an HTML upload is refused ($code: $(jget "$(cat "$WORKDIR/put.out")" message))"
+
+# Same signed URL: the refused PUT wrote nothing, so it is still unused.
+code=$(put_signed "$OTHER_PATH" "$OTHER_TOKEN" "$WORKDIR/cover.png" image/png)
+[ "$code" = 200 ] || fail "the bucket refused a PNG: $code $(cat "$WORKDIR/put.out")"
+rpc "$HOST_JWT" confirm_party_cover "{\"p_party_id\":\"$OTHER\"}"
+[ "$STATUS" = 200 ] || fail "confirm after a PNG upload: $STATUS $BODY"
+pass "a PNG -- what the picker hands over for a screenshot -- is accepted and confirmed"
 
 printf '\n\033[32mAll party cover checks passed.\033[0m\n'

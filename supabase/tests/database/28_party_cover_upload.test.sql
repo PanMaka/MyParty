@@ -40,7 +40,7 @@ select tests.authenticate_as('11111111-1111-1111-1111-111111111111'); -- host
 
 select is(
   public.party_cover_upload_target('aaaaaaaa-0000-0000-0000-000000000001'),
-  'aaaaaaaa-0000-0000-0000-000000000001/cover.jpg',
+  'aaaaaaaa-0000-0000-0000-000000000001/cover',
   'the host is handed the path inside the party''s own folder'
 );
 
@@ -84,7 +84,7 @@ select is(
 -- policy any client role could use, which is why the real upload is signed.
 reset role;
 insert into storage.objects (bucket_id, name, owner)
-values ('party-covers', 'aaaaaaaa-0000-0000-0000-000000000001/cover.jpg',
+values ('party-covers', 'aaaaaaaa-0000-0000-0000-000000000001/cover',
         '11111111-1111-1111-1111-111111111111');
 
 select tests.authenticate_as('44444444-4444-4444-4444-444444444444'); -- stranger
@@ -100,13 +100,13 @@ select tests.authenticate_as('11111111-1111-1111-1111-111111111111'); -- host
 
 select is(
   public.confirm_party_cover('aaaaaaaa-0000-0000-0000-000000000001'),
-  'aaaaaaaa-0000-0000-0000-000000000001/cover.jpg',
+  'aaaaaaaa-0000-0000-0000-000000000001/cover',
   'confirm succeeds once the object really exists'
 );
 
 select is(
   (select cover_path from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000001'),
-  'aaaaaaaa-0000-0000-0000-000000000001/cover.jpg',
+  'aaaaaaaa-0000-0000-0000-000000000001/cover',
   'and cover_path now points at it'
 );
 
@@ -167,8 +167,8 @@ select is(
 
 select is(
   (select allowed_mime_types from storage.buckets where id = 'party-covers'),
-  array['image/jpeg'],
-  'party-covers accepts JPEG only'
+  array['image/jpeg', 'image/png'],
+  'party-covers accepts JPEG and PNG only -- the two formats the picker emits'
 );
 
 select * from finish();
