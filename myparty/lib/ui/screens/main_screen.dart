@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../widgets/mp_bottom_nav.dart';
 import 'events_screen.dart';
-import 'feed_screen.dart';
 import 'map_screen.dart';
 import 'messages_screen.dart';
 import 'profile_screen.dart';
@@ -27,9 +26,8 @@ class _MainScreenState extends State<MainScreen> {
           IndexedStack(
             index: _tab.index,
             children: [
-              const FeedScreen(),
-              EventsScreen(onNavigate: _select),
               const MapScreen(),
+              EventsScreen(onNavigate: _select),
               const MessagesScreen(),
               // The signed-in user's own profile. Deliberately NOT their uuid
               // read out of the session here: ProfileRepository.fetchProfile
