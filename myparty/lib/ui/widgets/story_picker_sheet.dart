@@ -249,7 +249,6 @@ class _StoryPickerSheetState extends State<StoryPickerSheet> {
               ),
               PrivacyBadge(
                 isPrivate: target.isPrivate,
-                english: true,
               ),
             ],
           ),

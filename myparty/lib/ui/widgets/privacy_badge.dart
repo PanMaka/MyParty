@@ -2,17 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 
-/// PUBLIC / PRIVATE pill badge, Greek by default and English on request.
-///
-/// The [english] flag exists because this badge is shared by seven surfaces
-/// and only the map tab has been translated. Threading a real locale through
-/// every call site is a localisation layer this app does not have yet -- the
-/// same reason `english_date.dart` is a deliberate near-duplicate of
-/// `greek_date.dart` rather than one file with a locale argument. When that
-/// layer arrives, this flag and those two files collapse into it together.
-///
-/// Defaulted to Greek so the six call sites nobody asked about cannot change
-/// by accident.
+/// PUBLIC / PRIVATE pill badge.
 ///
 /// Takes the bool that `parties.is_private` actually is, rather than the
 /// `MpPartyType` enum it used to. Every one of the six call sites was already
@@ -26,25 +16,18 @@ class PrivacyBadge extends StatelessWidget {
   final String? suffix;
   final double fontSize;
 
-  /// Renders PRIVATE/PUBLIC instead of ΙΔΙΩΤΙΚΟ/ΔΗΜΟΣΙΟ. Opt-in, per call site.
-  final bool english;
-
   const PrivacyBadge({
     super.key,
     required this.isPrivate,
     this.suffix,
     this.fontSize = 8,
-    this.english = false,
   });
 
   bool get _private => isPrivate;
 
   @override
   Widget build(BuildContext context) {
-    final label = (english
-            ? (_private ? 'PRIVATE' : 'PUBLIC')
-            : (_private ? 'ΙΔΙΩΤΙΚΟ' : 'ΔΗΜΟΣΙΟ')) +
-        (suffix != null ? ' · $suffix' : '');
+    final label = (_private ? 'PRIVATE' : 'PUBLIC') + (suffix != null ? ' · $suffix' : '');
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(

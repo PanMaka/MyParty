@@ -176,7 +176,7 @@ class _MapPinSheetState extends State<MapPinSheet> {
               const SizedBox(height: 5),
               Row(
                 children: [
-                  PrivacyBadge(isPrivate: pin.isPrivate, english: true),
+                  PrivacyBadge(isPrivate: pin.isPrivate),
                   if (live) ...[
                     const SizedBox(width: 6),
                     Text('LIVE', style: AppTextStyles.mono(size: 9, color: AppColors.pinkLight)),

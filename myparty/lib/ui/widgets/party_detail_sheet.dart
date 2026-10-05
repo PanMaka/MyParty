@@ -308,7 +308,6 @@ class PartyDetailSheet extends StatelessWidget {
                   isPrivate: item.isPrivate,
                   suffix: item.isPrivate ? 'INVITE ONLY' : null,
                   fontSize: 9,
-                  english: true,
                 ),
                 if (item.isLive) ...[
                   const SizedBox(width: 6),

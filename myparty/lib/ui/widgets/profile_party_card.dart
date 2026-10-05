@@ -76,7 +76,7 @@ class ProfilePartyCard extends StatelessWidget {
                     children: [
                       Row(
                         children: [
-                          PrivacyBadge(isPrivate: party.isPrivate, english: true),
+                          PrivacyBadge(isPrivate: party.isPrivate),
                           const Spacer(),
                           Text(
                             relationship,
