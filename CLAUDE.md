@@ -936,6 +936,12 @@ bash scripts/loadtest_map_query.sh [N_PARTIES] [N_RSVPS] [N_USERS] [ITERATIONS]
 # the map body with neither / box only / window only / both. Rolled back.
 bash scripts/explain_map_time_windows.sh [N_PARTIES]
 
+# Phase 25: a party cover end to end over HTTP -- create, party-cover edge
+# function, signed PUT, confirm_party_cover, a guest reading it back -- plus the
+# refusals (non-host, second upload, non-image). Needs the stack up; starts
+# `functions serve` itself and deletes its two throwaway private parties.
+bash scripts/verify_party_cover.sh
+
 # Host posts WITH their bytes, so HostPostStrip on MY PARTIES has something to
 # draw. Not in seed.sql, and it cannot be: seed.sql cannot put a file in a
 # bucket (gotcha #7), and 20260825095311 keeps a media post invisible until

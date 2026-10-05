@@ -47,19 +47,19 @@ measured a time window on the map query body at **1483ms → 42ms** — a leakpr
 bounding box, and the two compose. This is the cheapest performance work
 outstanding and it is also a bug report waiting to happen.
 
-### 1.3 Cover images do not render on the map
+### 1.3 Cover images do not render on the map pin itself
 
-`MapPartyPin` carries `coverPath` and `hasCover`, and `PartyRepository.
-signedCoverUrls` exists and is used — but only by `ProfileScreen`. `MapPinSheet`
-still draws a `DiagonalStripePlaceholder`, and so does the pin itself.
+`MapPinSheet` now signs and draws the cover (`PartyRepository.signedCoverUrl`),
+as do the parties tab, its detail sheet and the profile's party list. The pin
+on the map still draws a placeholder.
 
-*Why it is still open:* covers went in for the profile's party list and were not
-carried across; the map pin sheet predates them.
+*Why it is still open:* the pin thumbnail is a harder call than the sheet was —
+a signed URL per visible pin is up to 200 round trips, so it needs batching or a
+decision to stay a placeholder.
 
-*What it costs to leave:* the payload is fetched and discarded on the busiest
-screen. Note the pin thumbnail is a harder call than the sheet — a signed URL
-per visible pin is up to 200 round trips, so the sheet is the cheap half and the
-pin needs batching or a decision to stay a placeholder.
+*What it costs to leave:* nothing is fetched and discarded any more; the pin is
+just plainer than the sheet it opens. Since Phase 25 hosts can actually upload
+covers, so this is now visible rather than theoretical.
 
 ### 1.4 `fetchMyRsvps` is bounded at 200 with no pagination
 
@@ -152,6 +152,36 @@ for under-15s (the DOB is now stored, so the last is implementable).
 
 *What it costs to leave:* location and push consent given by Greek users aged
 13–14 may not be valid consent.
+
+### 1.11 A typed address does not place the pin
+
+Phase 25's host wizard answers "where" with an address **or** a spot picked on
+the map. Only the spot sets `parties.location`; an address on its own is stored
+as text in the description and the pin falls back to the host's position at
+the moment of creating — the only behaviour before Phase 25. The wizard says so
+under the map box.
+
+*Why it is still open:* turning text into a point needs a geocoder, which means
+sending the address to a third party (Google, Mapbox, Nominatim/OSM). For a
+private party that is exactly the disclosure `parties.area`'s comment refuses
+for reverse geocoding — so it is a product and privacy decision with a provider
+contract behind it, not a missing line of code. The cheap alternative is to make
+the map spot required and the address a label only.
+
+*What it costs to leave:* a host who types an address across town and skips the
+map pins the party where they are standing.
+
+### 1.12 A party's cover cannot be changed or removed
+
+`party_cover_upload_target` answers only while `cover_path is null`, and the
+edge function signs with `upsert: false` — one cover per party, set in the
+wizard. Same shape as 1.1.
+
+*Why it is still open:* replacing needs the ordering `ProfileRepository.
+replaceAvatar` already solves (new object, repoint, delete old), plus an edit-
+party screen to put the button on; neither exists.
+
+*What it costs to leave:* a wrong cover stays until the party is cancelled.
 
 ---
 
