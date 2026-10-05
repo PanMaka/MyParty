@@ -181,7 +181,7 @@ void main() {
     await tester.pumpWidget(_chat(repo));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Κανείς δεν έχει γράψει ακόμα'), findsOneWidget);
+    expect(find.textContaining('Nobody has written anything yet'), findsOneWidget);
   });
 
   testWidgets('opening the chat marks it read', (tester) async {
@@ -228,7 +228,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('δεν θα φύγει'), findsOneWidget);
-    expect(find.text('Δεν στάλθηκε. Δοκίμασε ξανά.'), findsOneWidget);
+    expect(find.text('Not sent. Try again.'), findsOneWidget);
   });
 
   testWidgets('the broadcast echo of our own message does not duplicate it', (tester) async {
@@ -389,6 +389,6 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: MessagesScreen(repository: repo)));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Καμία συζήτηση ακόμα'), findsOneWidget);
+    expect(find.textContaining('No chats yet'), findsOneWidget);
   });
 }

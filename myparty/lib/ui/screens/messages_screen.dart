@@ -75,15 +75,15 @@ class _MessagesScreenState extends State<MessagesScreen> {
                 children: [
                   const Padding(
                     padding: EdgeInsets.fromLTRB(16, 10, 16, 12),
-                    child: Text('Μηνύματα',
+                    child: Text('Messages',
                         style: TextStyle(
                             fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -0.5)),
                   ),
                   if (snapshot.hasError)
-                    _notice('Δεν φόρτωσαν οι συζητήσεις.')
+                    _notice('Your chats didn’t load.')
                   else if (chats.isEmpty)
                     _notice(
-                      'Καμία συζήτηση ακόμα.\nΜπες σε ένα πάρτι και θα εμφανιστεί εδώ.',
+                      'No chats yet.\nJoin a party and its chat will show up here.',
                     )
                   else
                     for (final chat in chats) _chatRow(chat),
@@ -112,7 +112,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
     final unread = chat.unreadCount > 0;
 
     final preview = chat.lastMessageBody == null
-        ? 'Κανένα μήνυμα ακόμα'
+        ? 'No messages yet'
         : '${chat.lastMessageAuthorUsername ?? ''}: ${chat.lastMessageBody}';
 
     return GestureDetector(

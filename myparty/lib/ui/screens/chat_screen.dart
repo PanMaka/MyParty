@@ -88,7 +88,7 @@ class _ChatScreenState extends State<ChatScreen> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = 'Δεν φόρτωσε η συζήτηση.';
+        _error = 'The chat didn’t load.';
       });
     }
   }
@@ -328,7 +328,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   });
                   _loadInitialHistory();
                 },
-                child: const Text('Δοκίμασε ξανά'),
+                child: const Text('Try again'),
               ),
             ],
           ),
@@ -341,7 +341,7 @@ class _ChatScreenState extends State<ChatScreen> {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Text(
-            'Κανείς δεν έχει γράψει ακόμα. Πες κάτι.',
+            'Nobody has written anything yet. Say something.',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 13, color: AppColors.textAlpha(0.5)),
           ),
@@ -368,7 +368,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                   )
                 : Text(
-                    _reachedStart ? 'ΑΡΧΗ ΣΥΖΗΤΗΣΗΣ' : '…',
+                    _reachedStart ? 'START OF CHAT' : '…',
                     style: AppTextStyles.mono(size: 9.5, color: AppColors.textAlpha(0.3)),
                   ),
           );
@@ -423,14 +423,14 @@ class _ChatScreenState extends State<ChatScreen> {
                           style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700)),
                     ),
                     const SizedBox(width: 6),
-                    PrivacyBadge(isPrivate: widget.isPrivate),
+                    PrivacyBadge(isPrivate: widget.isPrivate, english: true),
                   ],
                 ),
                 if (widget.memberCount != null)
                   Text(
                     widget.isPrivate
-                        ? '${widget.memberCount} μέλη · μόνο καλεσμένοι'
-                        : '${widget.memberCount} μέλη',
+                        ? '${widget.memberCount} ${widget.memberCount == 1 ? 'member' : 'members'} · invited only'
+                        : '${widget.memberCount} ${widget.memberCount == 1 ? 'member' : 'members'}',
                     style: TextStyle(fontSize: 11, color: AppColors.textAlpha(0.5)),
                   ),
               ],
@@ -478,7 +478,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
-                child: Text('Δεν στάλθηκε. Δοκίμασε ξανά.',
+                child: Text('Not sent. Try again.',
                     style: TextStyle(fontSize: 10.5, color: AppColors.pinkLight)),
               ),
           ],
@@ -543,7 +543,7 @@ class _ChatScreenState extends State<ChatScreen> {
           children: [
             ListTile(
               leading: const Icon(Icons.visibility_off_outlined, size: 20),
-              title: const Text('Απόκρυψη μηνύματος', style: TextStyle(fontSize: 13.5)),
+              title: const Text('Hide message', style: TextStyle(fontSize: 13.5)),
               onTap: () async {
                 Navigator.of(sheetContext).pop();
                 final messenger = ScaffoldMessenger.of(context);
@@ -552,7 +552,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 } catch (_) {
                   messenger.showSnackBar(
                     const SnackBar(
-                      content: Text('Δεν έγινε. Δοκίμασε ξανά.'),
+                      content: Text('Failed to hide message. Try again.'),
                       behavior: SnackBarBehavior.floating,
                     ),
                   );
@@ -581,7 +581,7 @@ class _ChatScreenState extends State<ChatScreen> {
               maxLength: 2000,
               buildCounter: (_, {required currentLength, required isFocused, maxLength}) => null,
               decoration: InputDecoration(
-                hintText: 'Μήνυμα στο πάρτι…',
+                hintText: 'Party message…',
                 hintStyle: TextStyle(fontSize: 13, color: AppColors.textAlpha(0.42)),
                 filled: true,
                 fillColor: Colors.white.withValues(alpha: 0.06),
