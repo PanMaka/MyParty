@@ -6,6 +6,7 @@ import 'package:myparty/data/party_repository.dart';
 import 'package:myparty/models/party_list_item.dart';
 import 'package:myparty/models/rsvp_party.dart';
 import 'package:myparty/state/mp_store.dart';
+import 'package:myparty/state/rsvp_changes.dart';
 import 'package:myparty/ui/screens/events_screen.dart';
 import 'package:myparty/ui/widgets/party_card.dart';
 import 'package:myparty/ui/widgets/party_detail_sheet.dart';
@@ -37,8 +38,12 @@ class _FakePartyRepository extends PartyRepository {
   /// reached the server at all lives on this.
   final List<PartySort> sortsRequested = [];
 
+  /// How many times MY PARTIES was (re)loaded.
+  int rsvpFetches = 0;
+
   @override
   Future<List<RsvpParty>> fetchMyRsvps() async {
+    rsvpFetches++;
     if (fail) throw Exception('nope');
     return rsvps;
   }
@@ -429,6 +434,24 @@ void main() {
       expect(repo.rsvpWrites.single.partyId, 'p9');
       expect(repo.rsvpWrites.single.status, MpRsvp.going);
       expect(repo.rsvpWrites.single.current, MpRsvp.going);
+    });
+
+    testWidgets('an RSVP saved on ANOTHER tab reloads MY PARTIES and relights the card', (tester) async {
+      // The tabs live in an IndexedStack, so this screen is never rebuilt by
+      // the map sheet writing an rsvp. rsvpChanges is the only way it hears.
+      final repo = _FakePartyRepository(const [], pages: {
+        PartySort.soonest: [_item(id: 'p9', title: 'Techno Monday')],
+      });
+      await tester.pumpWidget(_host(repo));
+      await tester.pumpAndSettle();
+      final before = repo.rsvpFetches;
+      expect(find.text('Going ✓'), findsNothing);
+
+      rsvpChanges.value = const RsvpChange(partyId: 'p9', status: MpRsvp.going);
+      await tester.pumpAndSettle();
+
+      expect(repo.rsvpFetches, before + 1);
+      expect(find.text('Going ✓'), findsOneWidget);
     });
 
     testWidgets('only a PRIVATE rsvp row opens a chat', (tester) async {

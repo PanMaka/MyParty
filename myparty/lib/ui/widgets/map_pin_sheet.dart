@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../../data/party_repository.dart';
 import '../../models/feed_post.dart';
 import '../../models/map_party_pin.dart';
+import '../../state/mp_store.dart';
+import '../../state/rsvp_changes.dart';
 import '../../utils/english_date.dart';
 import '../theme/app_theme.dart';
 import 'diagonal_placeholder.dart';
@@ -48,6 +50,16 @@ class MapPinSheet extends StatefulWidget {
 }
 
 class _MapPinSheetState extends State<MapPinSheet> {
+  /// The pin as the sheet currently shows it — [MapPinSheet.pin] plus any RSVP
+  /// the viewer has answered here, applied optimistically by
+  /// [MapPartyPin.withRsvp] so the button and the counts move on the tap.
+  late MapPartyPin _pin = widget.pin;
+
+  /// An RSVP write in flight. Taps are refused meanwhile: a second answer
+  /// sent before the first lands would compute its `current` from an
+  /// optimistic state the server has not confirmed yet.
+  bool _saving = false;
+
   /// The signed cover URL, or null for "no cover, or it would not sign".
   ///
   /// Both collapse to the same rendering on purpose — the placeholder — so
@@ -61,10 +73,18 @@ class _MapPinSheetState extends State<MapPinSheet> {
     _loadCover();
   }
 
+  /// A new pin from the caller replaces whatever was answered locally: it is
+  /// fresher than the optimistic copy, which only stood in for the server.
+  @override
+  void didUpdateWidget(MapPinSheet oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.pin, widget.pin)) _pin = widget.pin;
+  }
+
   Future<void> _loadCover() async {
-    if (!widget.pin.hasCover) return;
+    if (!_pin.hasCover) return;
     try {
-      final url = await widget.repository.signedCoverUrl(widget.pin.coverPath);
+      final url = await widget.repository.signedCoverUrl(_pin.coverPath);
       if (mounted) setState(() => _coverUrl = url);
     } catch (_) {
       // Swallowed for the reason above: the placeholder is already correct.
@@ -74,7 +94,7 @@ class _MapPinSheetState extends State<MapPinSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final pin = widget.pin;
+    final pin = _pin;
     // One clock reading for the whole sheet. `pin.live` and `pin.attendeeCount`
     // are conveniences that each call `DateTime.now()` themselves, so the
     // uses below would be separate readings of the clock — and a party
@@ -138,7 +158,7 @@ class _MapPinSheetState extends State<MapPinSheet> {
   }
 
   Widget _header(bool live) {
-    final pin = widget.pin;
+    final pin = _pin;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -183,7 +203,7 @@ class _MapPinSheetState extends State<MapPinSheet> {
   /// [ProfilePartyCard] uses, so one party does not change shape between two
   /// screens that can both show it.
   Widget _cover() {
-    final pin = widget.pin;
+    final pin = _pin;
     final placeholder = DiagonalStripePlaceholder(
       colors: pin.isPrivate
           ? const [Color(0xFF2C1F2A), Color(0xFF20161F)]
@@ -215,7 +235,7 @@ class _MapPinSheetState extends State<MapPinSheet> {
   /// and a blank row reads as a field that failed to load rather than one
   /// nobody filled in.
   Widget _facts() {
-    final pin = widget.pin;
+    final pin = _pin;
     final startsAt = pin.startsAt;
 
     return Column(
@@ -274,7 +294,7 @@ class _MapPinSheetState extends State<MapPinSheet> {
   /// two counters it reads alongside are non-null for the same reason: the
   /// server nulls all three together or none of them.
   Widget _counts(bool live, int count) {
-    final pin = widget.pin;
+    final pin = _pin;
     final other = live
         ? '${pin.interestedCount} interested'
         : '${pin.goingCount} going';
@@ -305,17 +325,46 @@ class _MapPinSheetState extends State<MapPinSheet> {
     );
   }
 
-  /// Still a placeholder, and still says so.
+  /// Writes the viewer's answer through [PartyRepository.setRsvp].
   ///
-  /// Nothing in the client writes `rsvps` — the table has all four policies and
-  /// `authenticated` holds insert/update/delete (`20260813100309`), so this is
-  /// a missing repository method rather than missing schema, and it is its own
-  /// phase: an RSVP needs optimistic state, a rollback and a story for the two
-  /// counters this sheet is displaying.
-  ///
-  /// What is NOT a placeholder is the SHAPE. How many buttons there are, what
-  /// they say, and which one is lit are all decided here from `is_private` and
-  /// `my_rsvp_status`, both of which arrive from either RPC.
+  /// Optimistic: the button and both counts move on the tap, and roll back if
+  /// the write fails. The sheet stays open so the viewer sees it take. On
+  /// success the change is published on [rsvpChanges], which is what makes
+  /// the map refetch its pins and MY PARTIES reload — neither tab rebuilds on
+  /// its own, they live in an IndexedStack.
+  Future<void> _answer(MpRsvp status) async {
+    if (_saving) return;
+    final before = _pin;
+    final current = parseRsvpStatus(before.myRsvpStatus);
+    final withdrawing = current == status;
+    final next = withdrawing ? null : status;
+
+    setState(() {
+      _saving = true;
+      _pin = before.withRsvp(next?.name);
+    });
+
+    try {
+      await widget.repository.setRsvp(
+        partyId: before.id,
+        status: status,
+        current: current,
+      );
+      rsvpChanges.value = RsvpChange(partyId: before.id, status: next);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _pin = before);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('That did not save.'), behavior: SnackBarBehavior.floating),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  /// How many buttons there are, what they say, and which one is lit are all
+  /// decided here from `is_private` and `my_rsvp_status`, both of which
+  /// arrive from either RPC.
   ///
   /// PUBLIC: two answers, and the viewer can switch between them — which is a
   /// plain `update rsvps set status`, the case the counter trigger's UPDATE
@@ -326,7 +375,7 @@ class _MapPinSheetState extends State<MapPinSheet> {
   /// row on a private party, so a second button here would be an affordance
   /// the server answers with a 42501.
   Widget _action() {
-    final pin = widget.pin;
+    final pin = _pin;
     final status = pin.myRsvpStatus;
 
     if (pin.isPrivate) {
@@ -334,6 +383,7 @@ class _MapPinSheetState extends State<MapPinSheet> {
         label: status == 'going' ? 'You are coming ✓' : 'Coming',
         selected: status == 'going',
         gradient: AppColors.privateGradient,
+        onTap: () => _answer(MpRsvp.going),
       );
     }
 
@@ -344,6 +394,7 @@ class _MapPinSheetState extends State<MapPinSheet> {
             label: status == 'going' ? 'Going ✓' : 'Going',
             selected: status == 'going',
             gradient: AppColors.purpleGradient,
+            onTap: () => _answer(MpRsvp.going),
           ),
         ),
         const SizedBox(width: 8),
@@ -352,6 +403,7 @@ class _MapPinSheetState extends State<MapPinSheet> {
             label: status == 'interested' ? 'Interested ✓' : 'Interested',
             selected: status == 'interested',
             gradient: AppColors.purpleGradient,
+            onTap: () => _answer(MpRsvp.interested),
           ),
         ),
       ],
@@ -368,16 +420,12 @@ class _MapPinSheetState extends State<MapPinSheet> {
     required String label,
     required bool selected,
     required Gradient gradient,
+    required VoidCallback onTap,
   }) {
     return SizedBox(
       width: double.infinity,
       child: ElevatedButton(
-        onPressed: () {
-          Navigator.of(context).pop();
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Coming soon'), behavior: SnackBarBehavior.floating),
-          );
-        },
+        onPressed: _saving ? null : onTap,
         style: ElevatedButton.styleFrom(
           padding: const EdgeInsets.symmetric(vertical: 14),
           backgroundColor: Colors.transparent,

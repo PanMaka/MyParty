@@ -171,4 +171,54 @@ class MapPartyPin {
 
   /// True only when the host uploaded a cover, mirroring [PartySummary].
   bool get hasCover => coverPath != null;
+
+  /// This pin as it reads once the viewer's answer is [next] ('going',
+  /// 'interested', or null for withdrawn) — the optimistic half of an RSVP.
+  ///
+  /// The deltas mirror `sync_party_rsvp_counters` exactly, and they are not
+  /// symmetric, because `interested_count` INCLUDES everyone going
+  /// (20260826093437):
+  ///
+  ///  * gaining a row moves interested; it moves going too if the row is going;
+  ///  * a status FLIP moves going alone — the person was counted as
+  ///    interested before the flip and still is after it;
+  ///  * losing a row is the reverse of gaining it.
+  ///
+  /// A private pin's counts stay null: the server sends none, so there is
+  /// nothing to adjust and inventing a number here would print one.
+  MapPartyPin withRsvp(String? next) {
+    final prev = myRsvpStatus;
+    var going = goingCount;
+    var interested = interestedCount;
+
+    if (going != null && interested != null && prev != next) {
+      if (prev == null) {
+        interested += 1;
+        if (next == 'going') going += 1;
+      } else if (next == null) {
+        interested -= 1;
+        if (prev == 'going') going -= 1;
+      } else {
+        going += next == 'going' ? 1 : -1;
+      }
+    }
+
+    return MapPartyPin(
+      id: id,
+      lat: lat,
+      lng: lng,
+      title: title,
+      isPrivate: isPrivate,
+      goingCount: going,
+      interestedCount: interested,
+      startsAt: startsAt,
+      endsAt: endsAt,
+      area: area,
+      description: description,
+      hostId: hostId,
+      hostUsername: hostUsername,
+      myRsvpStatus: next,
+      coverPath: coverPath,
+    );
+  }
 }

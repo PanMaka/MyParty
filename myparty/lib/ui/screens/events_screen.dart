@@ -12,6 +12,7 @@ import '../widgets/diagonal_placeholder.dart';
 import '../widgets/host_post_strip.dart';
 import '../widgets/mp_bottom_nav.dart';
 import '../../state/mp_store.dart' show MpRsvp;
+import '../../state/rsvp_changes.dart';
 import '../widgets/party_card.dart';
 import '../widgets/privacy_badge.dart';
 import 'chat_screen.dart';
@@ -74,12 +75,14 @@ class _EventsScreenState extends State<EventsScreen> {
     super.initState();
     _rsvpsFuture = _repository.fetchMyRsvps();
     _observe(_rsvpsFuture);
+    rsvpChanges.addListener(_onRsvpChanged);
     _listScroll.addListener(_onScroll);
     _loadList(reset: true);
   }
 
   @override
   void dispose() {
+    rsvpChanges.removeListener(_onRsvpChanged);
     _listScroll.dispose();
     super.dispose();
   }
@@ -178,9 +181,13 @@ class _EventsScreenState extends State<EventsScreen> {
         status: status,
         current: previous,
       );
-      // The MY PARTIES tab is now stale -- it is the same rsvps rows seen from
-      // the other end.
-      _reloadRsvps();
+      // MY PARTIES is now stale -- it is the same rsvps rows seen from the
+      // other end. Published rather than reloaded here so the map's pins hear
+      // about it too; [_onRsvpChanged] does the reload.
+      rsvpChanges.value = RsvpChange(
+        partyId: item.partyId,
+        status: withdrawing ? null : status,
+      );
     } catch (_) {
       if (!mounted) return;
       setState(() => _items[index] = item);
@@ -199,6 +206,26 @@ class _EventsScreenState extends State<EventsScreen> {
   /// untouched: the tab still renders `_errorState()` when it is opened.
   void _observe(Future<List<RsvpParty>> future) {
     unawaited(future.then((_) {}, onError: (_) {}));
+  }
+
+  /// An RSVP was saved, here or on another tab (the map sheet, search).
+  ///
+  /// MY PARTIES is refetched, since a new answer adds a row and a withdrawal
+  /// removes one. A matching ALL PARTIES card has its button patched in place
+  /// rather than the list reloaded, which would lose the reader's scroll
+  /// position and page; its counters refresh on the next load, for the reason
+  /// [_setRsvp] gives.
+  void _onRsvpChanged() {
+    final change = rsvpChanges.value;
+    if (change == null || !mounted) return;
+    final index = _items.indexWhere((i) => i.partyId == change.partyId);
+    if (index >= 0) {
+      _items[index] = _items[index].copyWith(
+        myRsvp: change.status,
+        clearRsvp: change.status == null,
+      );
+    }
+    _reloadRsvps();
   }
 
   void _reloadRsvps() {

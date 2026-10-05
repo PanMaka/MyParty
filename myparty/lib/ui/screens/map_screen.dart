@@ -10,6 +10,7 @@ import '../../data/party_repository.dart';
 import '../../data/social_repository.dart';
 import '../../models/map_party_pin.dart';
 import '../../models/map_time_window.dart';
+import '../../state/rsvp_changes.dart';
 import '../theme/app_theme.dart';
 import '../widgets/map_pin_sheet.dart';
 import '../widgets/mp_map_pin.dart';
@@ -87,10 +88,23 @@ class _MapScreenState extends State<MapScreen> {
   /// incapable of removing a pin from anyone's map until they tap something.
   MapTimeWindow _filter = MapTimeWindow.all;
 
+  /// Set by `onMapReady`. Until then the camera has no viewport to read, so a
+  /// refetch triggered from outside (an RSVP) has nothing to ask for.
+  bool _mapReady = false;
+
   @override
   void initState() {
     super.initState();
+    rsvpChanges.addListener(_onRsvpChanged);
     _initializeMap();
+  }
+
+  /// An RSVP moved a counter on the server — from this map's sheet, a search
+  /// hit's, or the Parties tab — so the pin sizes and labels are stale.
+  /// Refetched rather than patched: the server's counters are the truth, and
+  /// the sheet already showed the optimistic number while the write was out.
+  void _onRsvpChanged() {
+    if (_mapReady) _fetchEventsInBounds();
   }
 
   Future<void> _initializeMap() async {
@@ -196,6 +210,7 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   void dispose() {
+    rsvpChanges.removeListener(_onRsvpChanged);
     _debounce?.cancel();
     super.dispose();
   }
@@ -226,7 +241,10 @@ class _MapScreenState extends State<MapScreen> {
             options: MapOptions(
               initialCenter: startingPoint,
               initialZoom: 15,
-              onMapReady: _fetchEventsInBounds,
+              onMapReady: () {
+                _mapReady = true;
+                _fetchEventsInBounds();
+              },
               onPositionChanged: (position, hasGesture) {
                 if (_debounce?.isActive ?? false) _debounce!.cancel();
                 _debounce = Timer(const Duration(milliseconds: 500), _fetchEventsInBounds);
