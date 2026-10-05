@@ -1,9 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../data/party_repository.dart';
@@ -12,41 +10,10 @@ import '../../models/map_party_pin.dart';
 import '../../models/map_time_window.dart';
 import '../../state/rsvp_changes.dart';
 import '../theme/app_theme.dart';
+import '../widgets/map_base.dart';
 import '../widgets/map_pin_sheet.dart';
 import '../widgets/mp_map_pin.dart';
 import 'search_screen.dart';
-
-/// The real device fix, and the default for [MapScreen.locate].
-///
-/// Best-effort by construction: every branch that cannot answer returns null
-/// and the map falls back to its default centre. The try/catch is the same
-/// promise for the branches that throw instead — a permission revoked while
-/// the app was backgrounded, a handset with no location provider. An escaping
-/// throw here would leave the screen on its spinner permanently, because the
-/// caller clears `_isLoading` on the line after this one. Failing to locate
-/// the user is not failing to draw the map.
-Future<LatLng?> _deviceLocation() async {
-  try {
-    if (!await Geolocator.isLocationServiceEnabled()) return null;
-
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) return null;
-    }
-    if (permission == LocationPermission.deniedForever) return null;
-
-    final position = await Geolocator.getCurrentPosition();
-    return LatLng(position.latitude, position.longitude);
-  } catch (e) {
-    debugPrint('Location unavailable, falling back to the default centre: $e');
-    return null;
-  }
-}
-
-/// Where the map should centre itself, or null when there is no fix — the map
-/// has a default centre and is fully usable without one.
-typedef LocationFix = Future<LatLng?> Function();
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key, this.repository, this.social, this.locate});
@@ -65,7 +32,7 @@ class MapScreen extends StatefulWidget {
   /// Injectable for a sharper reason than the repository is, and the seam is
   /// not optional: geolocator's platform channel never completes inside
   /// `testWidgets`' fake-async zone. It does not throw — it hangs — so the
-  /// try/catch in [_deviceLocation] cannot rescue a test, and any widget test
+  /// try/catch in [deviceLocation] cannot rescue a test, and any widget test
   /// of this screen would sit on the loading spinner until it timed out.
   /// Measured, not assumed: the same call resolves to a MissingPluginException
   /// immediately under a plain `test()`.
@@ -121,7 +88,7 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _initializeMap() async {
-    _currentPosition = await (widget.locate ?? _deviceLocation)();
+    _currentPosition = await (widget.locate ?? deviceLocation)();
     if (mounted) setState(() => _isLoading = false);
   }
 
@@ -237,7 +204,7 @@ class _MapScreenState extends State<MapScreen> {
       );
     }
 
-    final startingPoint = _currentPosition ?? const LatLng(37.9748, 23.7232);
+    final startingPoint = _currentPosition ?? kDefaultMapCentre;
     // The one clock reading every pin on this frame is drawn against. Read
     // here rather than inside each pin so a party crossing its start time
     // cannot be live in one pin's label and not-yet in its own marker box —
@@ -264,14 +231,7 @@ class _MapScreenState extends State<MapScreen> {
               },
             ),
             children: [
-              TileLayer(
-                // CARTO serves an "API KEY REQUIRED" placeholder for every tile
-                // without `key`. Read guarded: widget tests never load .env.
-                urlTemplate: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
-                    '?key=${dotenv.isInitialized ? dotenv.maybeGet('CARTO_API_KEY') ?? '' : ''}',
-                subdomains: const ['a', 'b', 'c', 'd'],
-                userAgentPackageName: 'com.myparty.app',
-              ),
+              mpTileLayer(),
               MarkerLayer(
                 markers: [
                   for (final pin in _painted(now)) _marker(pin, now),

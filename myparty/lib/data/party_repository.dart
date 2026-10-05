@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/hosted_parties.dart';
@@ -46,6 +48,44 @@ class PartyRepository {
       'p_invitee_ids': inviteeIds,
     });
     return id as String;
+  }
+
+  /// Gives a party its cover: the `party-cover` edge function signs an upload
+  /// URL for the path `party_cover_upload_target` derives, the bytes go up,
+  /// and `confirm_party_cover` points `parties.cover_path` at them only once
+  /// Storage really has them. Host-only and one-shot, both decided in SQL.
+  ///
+  /// Called after [createPartyWithInvites] because the path is the party's own
+  /// `{party_id}/` folder. A failure here leaves the party without a cover —
+  /// the state every party was in before covers existed — so callers report
+  /// it rather than treat the party as not created.
+  ///
+  /// [bytes] must be a JPEG: the bucket accepts nothing else, and the image
+  /// picker's `imageQuality` re-encodes to JPEG on the way out.
+  Future<String> uploadCover(String partyId, Uint8List bytes) async {
+    final signed = await _client.functions.invoke(
+      'party-cover/upload-url',
+      body: {'party_id': partyId},
+    );
+
+    final data = signed.data as Map?;
+    final path = data?['path'] as String?;
+    final token = data?['token'] as String?;
+    if (path == null || token == null) {
+      throw StateError('Could not get an upload URL for the cover');
+    }
+
+    // uploadBinaryToSignedUrl for the reason FeedRepository gives: the picker
+    // hands us bytes, and a dart:io File would tie this to a platform.
+    await _client.storage.from('party-covers').uploadBinaryToSignedUrl(
+          path,
+          token,
+          bytes,
+          const FileOptions(contentType: 'image/jpeg'),
+        );
+
+    final confirmed = await _client.rpc('confirm_party_cover', params: {'p_party_id': partyId});
+    return confirmed as String;
   }
 
   /// Everything MY PARTIES lists: parties the current user RSVP'd to, hosts,
