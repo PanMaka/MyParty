@@ -153,6 +153,30 @@ for under-15s (the DOB is now stored, so the last is implementable).
 *What it costs to leave:* location and push consent given by Greek users aged
 13–14 may not be valid consent.
 
+### 1.11 `09_notification_engine` #35 fails intermittently
+
+"and exactly one job comes back, not one per sweep tick": after the test wipes
+`notification_jobs` and `sent_notifications` for party `…0001`, the sweep
+sometimes re-enqueues nothing for it (have 0, want 1). Seen 2026-10-04/05 at
+roughly 1 in 5 full-suite runs before 00:00 UTC and about 1 in 15 after, on
+`main` before and after Phase 20 alike. It has never failed with the file run
+alone (16/16).
+
+What was ruled out, with diagnostics captured on a failing run: the recipient
+(`4444…`, tz UTC) is inside its radius, `wants_nearby_notifications` and
+`can_user_access_party` are true, the daily cap reads 2/5, the party is published,
+public and 5h out, and the dedupe rows really are gone before the sweep runs.
+So every input to `enqueue_nearby_party_notifications` says "enqueue". Not
+concurrent test files either: `supabase test db` runs them one at a time.
+
+*Why it is still open:* the remaining suspect is something outside the test's
+transaction that can still act on the rows it reads (the every-minute
+`notification-worker-tick` cron is the obvious candidate), and catching it needs
+a failing run with `pg_stat_activity`/lock diagnostics, which nobody has had yet.
+
+*What it costs to leave:* a red CI run now and then that a rerun clears, which
+trains people to rerun red runs. That is the real cost.
+
 ---
 
 ## 2. Costed: should the map adopt `party_is_past()`?
