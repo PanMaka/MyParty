@@ -1,4 +1,4 @@
-/// The two party stamps the profile tab needs, in English.
+/// The party stamps and the post age, in English.
 ///
 /// A deliberate near-duplicate of `greek_date.dart`, not a replacement for it.
 /// The rest of the app — the map, the feed, events, chat, the host wizard — is
@@ -7,9 +7,8 @@
 /// which is a localisation layer this app does not have yet. When it grows one,
 /// these two functions and their Greek twins collapse into it.
 ///
-/// Only the two the profile renders are here. `formatPostAge` has no English
-/// caller, and writing one nothing uses would be a third copy to keep in sync
-/// with a screen that does not exist.
+/// [formatPostAgeEn] joined the two party stamps when the feed post card and
+/// the comments sheet were translated — it has callers now.
 const _weekdayAbbr = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const _monthAbbr = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -48,4 +47,19 @@ String formatPartyPastEn(DateTime startsAt) {
   final stamp = '${startsAt.day} $month';
   if (startsAt.year == DateTime.now().year) return stamp;
   return '$stamp ${startsAt.year}';
+}
+
+/// "now" / "12m" / "5h" / "3d" / "8 Aug" — the age stamp on a feed post or
+/// comment. Takes a UTC instant (`created_at` comes off the wire in UTC and
+/// stays that way, because it doubles as the keyset cursor).
+String formatPostAgeEn(DateTime createdAt) {
+  final elapsed = DateTime.now().toUtc().difference(createdAt.toUtc());
+
+  if (elapsed.inMinutes < 1) return 'now';
+  if (elapsed.inMinutes < 60) return '${elapsed.inMinutes}m';
+  if (elapsed.inHours < 24) return '${elapsed.inHours}h';
+  if (elapsed.inDays < 7) return '${elapsed.inDays}d';
+
+  final local = createdAt.toLocal();
+  return '${local.day} ${_monthAbbr[local.month - 1]}';
 }

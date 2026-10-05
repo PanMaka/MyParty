@@ -26,11 +26,11 @@ Future<void> showReportSheet(
 }
 
 const _reasons = <String, String>{
-  'spam': 'Spam ή διαφήμιση',
-  'harassment': 'Παρενόχληση ή μίσος',
-  'inappropriate': 'Ακατάλληλο περιεχόμενο',
-  'false_info': 'Ψευδείς πληροφορίες',
-  'other': 'Κάτι άλλο',
+  'spam': 'Spam or advertising',
+  'harassment': 'Harassment or hate',
+  'inappropriate': 'Inappropriate content',
+  'false_info': 'False information',
+  'other': 'Something else',
 };
 
 class _ReportSheet extends StatefulWidget {
@@ -62,13 +62,13 @@ class _ReportSheetState extends State<_ReportSheet> {
         targetId: widget.targetId,
         reason: reason,
       );
-      message = 'Ευχαριστούμε, το είδαμε.';
+      message = 'Thanks, we’ve seen it.';
     } on AlreadyReportedException {
       // The unique index did its job — a second report is not an error worth
       // alarming anyone about, it just means the first one already landed.
-      message = 'Το έχεις ήδη αναφέρει.';
+      message = 'You’ve already reported this.';
     } catch (_) {
-      message = 'Δεν στάλθηκε. Δοκίμασε ξανά.';
+      message = 'Not sent. Try again.';
     }
 
     if (!mounted) return;
@@ -107,11 +107,11 @@ class _ReportSheetState extends State<_ReportSheet> {
                 ),
               ),
             ),
-            const Text('Αναφορά',
+            const Text('Report',
                 style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
             Padding(
               padding: const EdgeInsets.only(top: 4, bottom: 12),
-              child: Text('Τι δεν πάει καλά;',
+              child: Text('What’s wrong?',
                   style: TextStyle(fontSize: 12.5, color: AppColors.textAlpha(0.55))),
             ),
             for (final entry in _reasons.entries)

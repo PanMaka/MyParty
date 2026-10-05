@@ -565,8 +565,8 @@ void main() {
       await _pumpProfile(tester, _FakeProfileRepository(), parties: parties);
       await _scrollTo(tester, find.text('Ιδιωτικό'));
 
-      expect(find.text('ΙΔΙΩΤΙΚΟ'), findsOneWidget);
-      expect(find.text('ΔΗΜΟΣΙΟ'), findsOneWidget);
+      expect(find.text('PRIVATE'), findsOneWidget);
+      expect(find.text('PUBLIC'), findsOneWidget);
       expect(find.textContaining('Κουκάκι'), findsOneWidget);
 
       // area is nullable and there is no derivation available — reverse

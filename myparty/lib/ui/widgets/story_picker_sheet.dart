@@ -4,12 +4,12 @@ import 'package:image_picker/image_picker.dart';
 import '../../data/story_repository.dart';
 import '../../models/story.dart';
 import '../screens/story_viewer_screen.dart';
-import '../../utils/greek_date.dart';
+import '../../utils/english_date.dart';
 import '../theme/app_theme.dart';
 import 'diagonal_placeholder.dart';
 import 'privacy_badge.dart';
 
-/// Opens the "Σε ποιο πάρτι ανεβάζεις;" sheet. Returns true if a story was
+/// Opens the "Which party are you posting to?" sheet. Returns true if a story was
 /// actually uploaded, so the caller can refresh its rail.
 Future<bool?> showStoryPickerSheet(
   BuildContext context, {
@@ -113,8 +113,8 @@ class _StoryPickerSheetState extends State<StoryPickerSheet> {
         // second is the one worth naming, because it is the only one a user can
         // do something about.
         _error = error.toString().contains('rate limit')
-            ? 'Πολλά stories σε λίγη ώρα. Δοκίμασε αργότερα.'
-            : 'Δεν ανέβηκε. Δοκίμασε ξανά.';
+            ? 'Too many stories in a short time. Try again later.'
+            : 'Didn’t upload. Try again.';
       });
     }
   }
@@ -144,11 +144,11 @@ class _StoryPickerSheetState extends State<StoryPickerSheet> {
                 ),
               ),
             ),
-            const Text('Σε ποιο πάρτι ανεβάζεις;',
+            const Text('Which party are you posting to?',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
             const SizedBox(height: 4),
             Text(
-              'Το story σου μπαίνει στο κοινό story του πάρτι, μαζί με όλων των άλλων. Σβήνει μόνο του σε 24 ώρες.',
+              'Your story joins the party’s shared story, along with everyone else’s. It disappears on its own after 24 hours.',
               style: TextStyle(fontSize: 12, height: 1.45, color: AppColors.textAlpha(0.5)),
             ),
             const SizedBox(height: 16),
@@ -162,12 +162,12 @@ class _StoryPickerSheetState extends State<StoryPickerSheet> {
                 child: Center(child: CircularProgressIndicator()),
               )
             else if (_failed)
-              _note('Κάτι πήγε στραβά.', onTap: _load)
+              _note('Something went wrong.', onTap: _load)
             else if (_targets.isEmpty)
               // The honest empty state: the INSERT policy needs you to be able
               // to see the party, and the natural way to get there is to host
               // one or say you are going.
-              _note('Δεν είσαι σε κανένα πάρτι ακόμα. Δήλωσε συμμετοχή ή φτιάξε το δικό σου.')
+              _note('You’re not in any party yet. RSVP to one or host your own.')
             else
               for (final target in _targets) _row(target),
           ],
@@ -241,7 +241,7 @@ class _StoryPickerSheetState extends State<StoryPickerSheet> {
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
                     Text(
-                      uploading ? 'Ανεβαίνει…' : formatPartyStart(target.startsAt),
+                      uploading ? 'Uploading…' : formatPartyStartEn(target.startsAt),
                       style: TextStyle(fontSize: 11, color: AppColors.textAlpha(0.5)),
                     ),
                   ],
@@ -249,6 +249,7 @@ class _StoryPickerSheetState extends State<StoryPickerSheet> {
               ),
               PrivacyBadge(
                 isPrivate: target.isPrivate,
+                english: true,
               ),
             ],
           ),

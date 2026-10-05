@@ -72,7 +72,7 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
       await action();
       await _load();
     } catch (error) {
-      _say('Κάτι πήγε στραβά: $error');
+      _say('Something went wrong: $error');
       await _load();
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -95,11 +95,11 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
         case PushAvailability.available:
           break;
         case PushAvailability.permissionDenied:
-          _say('Οι ειδοποιήσεις είναι απενεργοποιημένες στις ρυθμίσεις του κινητού.');
+          _say('Notifications are turned off in your phone’s settings.');
         case PushAvailability.notConfigured:
-          _say('Οι ειδοποιήσεις δεν είναι διαθέσιμες σε αυτή την έκδοση.');
+          _say('Notifications are not available in this version.');
         case PushAvailability.unavailable:
-          _say('Δεν ήταν δυνατή η σύνδεση με την υπηρεσία ειδοποιήσεων.');
+          _say('Could not connect to the notification service.');
       }
     });
   }
@@ -113,7 +113,7 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
         // user immediately. Stopping the stream alone would leave the last one
         // on disk, and matchable, for up to 24 hours.
         await _devices.setLocationConsent(false);
-        _say('Η τοποθεσία σου διαγράφηκε.');
+        _say('Your location was deleted.');
         return;
       }
 
@@ -127,15 +127,15 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
         case LocationConsentResult.explanationDeclined:
           break; // They said no to us; the OS was never asked.
         case LocationConsentResult.permissionDenied:
-          _say('Χωρίς άδεια τοποθεσίας δεν μπορούμε να ξέρουμε τι είναι κοντά σου.');
+          _say('Without location permission we can’t know what’s near you.');
         case LocationConsentResult.permissionDeniedForever:
           // Re-prompting is impossible at this point — only the system settings
           // app can undo it, so that is what gets offered instead of a dialog
           // the OS will never show.
-          _say('Άνοιξε τις ρυθμίσεις για να επιτρέψεις την τοποθεσία.');
+          _say('Open settings to allow location access.');
           await Geolocator.openAppSettings();
         case LocationConsentResult.serviceDisabled:
-          _say('Οι υπηρεσίες τοποθεσίας είναι κλειστές στη συσκευή.');
+          _say('Location services are turned off on this device.');
       }
     });
   }
@@ -165,7 +165,7 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
     if (newStart == newEnd) {
       // `profiles_quiet_hours_distinct`: start == end is ambiguous between
       // "zero-length" and "all day", and those differ by 24 hours of silence.
-      _say('Η αρχή και το τέλος δεν μπορούν να είναι η ίδια ώρα.');
+      _say('Start and end can’t be the same time.');
       return;
     }
 
@@ -185,7 +185,7 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
         backgroundColor: AppColors.bg,
         elevation: 0,
         title: const Text(
-          'Ειδοποιήσεις',
+          'Notifications',
           style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, letterSpacing: -0.3),
         ),
       ),
@@ -194,31 +194,31 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
           : ListView(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
               children: [
-                _section('ΑΔΕΙΕΣ'),
+                _section('PERMISSIONS'),
                 _card([
                   _switchRow(
-                    'Ειδοποιήσεις push',
-                    'Προσκλήσεις, μηνύματα και πάρτι κοντά σου.',
+                    'Push notifications',
+                    'Invitations, messages and parties near you.',
                     prefs.pushConsent,
                     _togglePush,
                   ),
                   _divider(),
                   _switchRow(
-                    'Τοποθεσία για πάρτι κοντά σου',
+                    'Location for parties near you',
                     prefs.locationConsent
-                        ? 'Περιοχή ~100μ, σβήνεται μετά από 24 ώρες.'
-                        : 'Θα σου εξηγήσουμε ακριβώς τι κρατάμε πριν ρωτήσουμε.',
+                        ? '~100 m area, erased after 24 hours.'
+                        : 'We’ll explain exactly what we keep before we ask.',
                     prefs.locationConsent,
                     _toggleLocation,
                   ),
                 ]),
                 _note(
-                  'Η τοποθεσία σου δεν εμφανίζεται ποτέ σε άλλον χρήστη. '
-                  'Αν κλείσεις τον διακόπτη, ό,τι έχει αποθηκευτεί διαγράφεται αμέσως.',
+                  'Your location is never shown to another user. '
+                  'If you turn the switch off, anything stored is deleted immediately.',
                 ),
 
                 const SizedBox(height: 22),
-                _section('ΠΑΡΤΙ ΚΟΝΤΑ ΣΟΥ'),
+                _section('PARTIES NEAR YOU'),
                 // Dimmed, not hidden, when the consents above are off: the
                 // settings still exist and are still theirs, and hiding them
                 // would make the screen look broken rather than gated.
@@ -230,8 +230,8 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
                       children: [
                         _card([
                           _switchRow(
-                            'Ειδοποίησέ με για πάρτι κοντά μου',
-                            'Ξεχωριστό από την άδεια — μπορείς να το κλείσεις χωρίς να ανακαλέσεις τίποτα.',
+                            'Notify me about parties near me',
+                            'Separate from the permission — you can turn it off without revoking anything.',
                             prefs.notifyNearby,
                             (v) => _mutate(() => _devices.updatePrefs(notifyNearby: v)),
                           ),
@@ -239,7 +239,7 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
                         const SizedBox(height: 12),
                         _card([
                           _CommittingSlider(
-                            title: 'Απόσταση',
+                            title: 'Distance',
                             value: prefs.radiusMeters.toDouble(),
                             // The 100 floor is the resolution limit — locations
                             // are stored as a ~100m cell, so a smaller radius
@@ -252,13 +252,13 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
                             max: 5000,
                             divisions: 49,
                             enabled: !_busy,
-                            label: (v) => '${v.round()} μ.',
+                            label: (v) => '${v.round()} m',
                             onCommit: (v) =>
                                 _mutate(() => _devices.updatePrefs(radiusMeters: v.round())),
                           ),
                           _divider(),
                           _CommittingSlider(
-                            title: 'Μέγιστο ανά ημέρα',
+                            title: 'Maximum per day',
                             value: prefs.dailyCap.toDouble(),
                             min: 0,
                             max: 20,
@@ -266,7 +266,7 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
                             enabled: !_busy,
                             // Zero is a real, reachable setting — "never send me
                             // these" without withdrawing any consent.
-                            label: (v) => v.round() == 0 ? 'καμία' : '${v.round()}',
+                            label: (v) => v.round() == 0 ? 'none' : '${v.round()}',
                             onCommit: (v) =>
                                 _mutate(() => _devices.updatePrefs(dailyCap: v.round())),
                           ),
@@ -277,10 +277,10 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
                 ),
 
                 const SizedBox(height: 22),
-                _section('ΩΡΕΣ ΗΣΥΧΙΑΣ'),
+                _section('QUIET HOURS'),
                 _card([
                   _tapRow(
-                    'Από',
+                    'From',
                     prefs.quietHoursStart == null
                         ? '—'
                         : NotificationPrefs.formatTime(prefs.quietHoursStart!),
@@ -288,7 +288,7 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
                   ),
                   _divider(),
                   _tapRow(
-                    'Έως',
+                    'Until',
                     prefs.quietHoursEnd == null
                         ? '—'
                         : NotificationPrefs.formatTime(prefs.quietHoursEnd!),
@@ -296,7 +296,7 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
                   ),
                   if (prefs.hasQuietHours) ...[
                     _divider(),
-                    _tapRow('Κατάργηση ωρών ησυχίας', '', () {
+                    _tapRow('Remove quiet hours', '', () {
                       _mutate(() => _devices.updatePrefs(clearQuietHours: true));
                     }),
                   ],
@@ -307,9 +307,9 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
                       // party is published and only the delivery moves. Worth
                       // saying, because "you will get it later" and "you will
                       // not get it" are different promises.
-                      ? 'Μέσα σε αυτό το διάστημα δεν χτυπάει τίποτα. Οι ειδοποιήσεις '
-                          'δεν χάνονται — έρχονται μόλις τελειώσει.'
-                      : 'Όρισε ένα διάστημα για να μη σε ξυπνάει τίποτα.',
+                      ? 'Nothing rings during this window. Notifications '
+                          'aren’t lost — they arrive as soon as it ends.'
+                      : 'Set a window so nothing wakes you up.',
                 ),
               ],
             ),

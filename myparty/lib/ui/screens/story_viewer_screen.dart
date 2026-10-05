@@ -134,19 +134,19 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         backgroundColor: AppColors.sheet,
-        title: const Text('Κατέβασμα story;', style: TextStyle(fontSize: 16)),
+        title: const Text('Take down story?', style: TextStyle(fontSize: 16)),
         content: Text(
-          'Φεύγει για όλους. Δεν μπορεί να αναιρεθεί.',
+          'It’s removed for everyone. This can’t be undone.',
           style: TextStyle(fontSize: 13, color: AppColors.textAlpha(0.7)),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Άκυρο'),
+            child: const Text('Cancel'),
           ),
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Κατέβασέ το', style: TextStyle(color: AppColors.pink)),
+            child: const Text('Take it down', style: TextStyle(color: AppColors.pink)),
           ),
         ],
       ),
@@ -173,7 +173,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Δεν έγινε. Δοκίμασε ξανά.'),
+          content: Text('That didn’t work. Try again.'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -188,9 +188,9 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _failed
-              ? _message('Κάτι πήγε στραβά.', retry: true)
+              ? _message('Something went wrong.', retry: true)
               : _stories.isEmpty
-                  ? _message('Κανένα story εδώ — ακόμα.')
+                  ? _message('No stories here — yet.')
                   : _reel(),
     );
   }
@@ -206,7 +206,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
                 Text(text, style: TextStyle(fontSize: 14, color: AppColors.textAlpha(0.7))),
                 if (retry) ...[
                   const SizedBox(height: 10),
-                  TextButton(onPressed: _load, child: const Text('Δοκίμασε ξανά')),
+                  TextButton(onPressed: _load, child: const Text('Try again')),
                 ],
               ],
             ),
@@ -333,7 +333,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
                 style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
               ),
               Text(
-                '${_index + 1} από ${_stories.length} · ${_expiryLabel(story)}',
+                '${_index + 1} of ${_stories.length} · ${_expiryLabel(story)}',
                 style: TextStyle(fontSize: 11, color: AppColors.textAlpha(0.55)),
               ),
             ],
@@ -390,7 +390,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
           ),
           const SizedBox(width: 7),
           Text(
-            isMine ? 'Εσύ' : story.authorUsername,
+            isMine ? 'You' : story.authorUsername,
             style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
           ),
           const SizedBox(width: 6),
@@ -418,8 +418,8 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
 
   String _expiryLabel(Story story) {
     final left = story.remaining(DateTime.now());
-    if (left.isNegative) return 'έληξε';
-    if (left.inHours >= 1) return 'σβήνει σε ${left.inHours}ω';
-    return 'σβήνει σε ${left.inMinutes}λ';
+    if (left.isNegative) return 'expired';
+    if (left.inHours >= 1) return 'disappears in ${left.inHours}h';
+    return 'disappears in ${left.inMinutes}m';
   }
 }

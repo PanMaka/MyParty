@@ -173,7 +173,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('zoe'), findsOneWidget);
-    expect(find.textContaining('1 από 2'), findsOneWidget);
+    expect(find.textContaining('1 of 2'), findsOneWidget);
     // The mock frames are gone for good.
     expect(find.textContaining('clip · πλήθος στην πίστα'), findsNothing);
 
@@ -182,7 +182,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('dimitris'), findsOneWidget);
-    expect(find.textContaining('2 από 2'), findsOneWidget);
+    expect(find.textContaining('2 of 2'), findsOneWidget);
 
     // Timer from the last frame; let it run out so the test ends clean.
     await tester.pumpAndSettle(const Duration(seconds: 6));
@@ -219,7 +219,7 @@ void main() {
     await tester.pumpWidget(_wrap(StoryViewerScreen(partyId: 'party-1', repository: repo)));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('1 από 1'), findsOneWidget);
+    expect(find.textContaining('1 of 1'), findsOneWidget);
     await tester.pumpAndSettle(const Duration(seconds: 6));
   });
 
@@ -229,7 +229,7 @@ void main() {
     await tester.pumpWidget(_wrap(StoryViewerScreen(partyId: 'party-1', repository: repo)));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Κανένα story'), findsOneWidget);
+    expect(find.textContaining('No stories'), findsOneWidget);
   });
 
   testWidgets('only your own frames offer a takedown', (tester) async {
@@ -247,7 +247,7 @@ void main() {
 
     await tester.tap(find.byIcon(Icons.delete_outline));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Κατέβασέ το'));
+    await tester.tap(find.text('Take it down'));
     await tester.pumpAndSettle();
 
     expect(mine.hiddenIds, ['s1']);
@@ -309,8 +309,8 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Ανέβασε'), findsOneWidget);
-    expect(find.textContaining('Ήσυχα εδώ.'), findsOneWidget);
+    expect(find.textContaining('Post to'), findsOneWidget);
+    expect(find.textContaining('Quiet here.'), findsOneWidget);
   }, skip: railHidden);
 
   testWidgets('neither story entry point is on the feed while the flag is off', (tester) async {
@@ -329,10 +329,10 @@ void main() {
     expect(find.text('+ Story'), findsNothing);
     // …and the rail itself, which would otherwise show this rail.
     expect(find.text('Γενέθλια Μαρίας'), findsNothing);
-    expect(find.textContaining('Ανέβασε'), findsNothing);
+    expect(find.textContaining('Post to'), findsNothing);
 
     // The feed below it is untouched — this hides a row, not the screen.
-    expect(find.textContaining('Ήσυχα εδώ.'), findsOneWidget);
+    expect(find.textContaining('Quiet here.'), findsOneWidget);
   });
 
   testWidgets('picking a photo uploads it to the chosen party', (tester) async {
@@ -379,7 +379,7 @@ void main() {
     await tester.tap(find.text('Ταράτσα στο Κουκάκι'));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Πολλά stories'), findsOneWidget);
+    expect(find.textContaining('Too many stories'), findsOneWidget);
   });
 
   testWidgets('with no party to post to, the sheet explains why', (tester) async {
@@ -389,6 +389,6 @@ void main() {
     )));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Δεν είσαι σε κανένα πάρτι'), findsOneWidget);
+    expect(find.textContaining('not in any party yet'), findsOneWidget);
   });
 }

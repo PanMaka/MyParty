@@ -3,9 +3,10 @@ import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../../data/party_repository.dart';
+import '../../data/profile_repository.dart';
 import '../../data/social_repository.dart';
 import '../../models/profile.dart';
-import '../../utils/greek_date.dart';
+import '../../utils/english_date.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
 import 'chat_screen.dart';
@@ -21,6 +22,7 @@ class HostWizardScreen extends StatefulWidget {
 class _HostWizardScreenState extends State<HostWizardScreen> {
   final _repository = PartyRepository();
   final _social = SocialRepository();
+  final _profiles = ProfileRepository();
 
   int _step = 1;
   bool _private = true;
@@ -34,10 +36,17 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
 
   late Future<List<Profile>> _following;
 
-  final _nameController = TextEditingController(text: 'Ταράτσα στου Θανάση');
-  final _addressController = TextEditingController(text: 'Ζησιμοπούλου 8, Νέα Σμύρνη');
-  final _descController = TextEditingController(
-      text: 'Φέρτε ό,τι πίνετε. Έχει ηχείο, μη φέρετε άλλο. Ταράτσα, βάλτε κάτι ζεστό για μετά τις 3.');
+  /// Seeded with "{username}'s party" once the profile loads — see
+  /// [_suggestName]. Starts empty rather than with a placeholder name, so
+  /// nothing invented can be submitted as the title.
+  final _nameController = TextEditingController();
+  final _addressController = TextEditingController();
+  final _descController = TextEditingController();
+
+  /// Set when Continue is pressed on step 1 with no address; cleared as soon
+  /// as the host types one. The address is the only required field on the
+  /// step — a party nobody can find is not a party.
+  bool _addressMissing = false;
 
   DateTime _selectedDate = DateTime.now();
   TimeOfDay _selectedTime = const TimeOfDay(hour: 23, minute: 0);
@@ -50,7 +59,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
         _selectedTime.minute,
       );
 
-  static const _titles = ['Λεπτομέρειες', 'Ποιος το βλέπει;', 'Κάλεσε κόσμο', 'Έτοιμο;'];
+  static const _titles = ['Details', 'Who sees it?', 'Invite people', 'Ready?'];
 
   @override
   void initState() {
@@ -59,37 +68,55 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
     // straight from a method call re-queries on every rebuild, and this
     // screen rebuilds on each keystroke and step change.
     _following = _social.fetchFollowing();
+    _suggestName();
+  }
+
+  /// Fills the name with "{username}'s party", unless the host has already
+  /// typed something by the time the profile arrives — a suggestion must
+  /// never overwrite their words. A failed fetch just leaves the field empty.
+  Future<void> _suggestName() async {
+    try {
+      final profile = await _profiles.fetchProfile();
+      if (!mounted || profile == null || _nameController.text.isNotEmpty) return;
+      _nameController.text = "${profile.username}'s party";
+    } catch (_) {}
   }
 
   String get _ctaLabel {
     switch (_step) {
       case 1:
-        return 'Συνέχεια';
+        return 'Continue';
       case 2:
-        return _private ? 'Ιδιωτικό, συνέχεια' : 'Δημόσιο, συνέχεια';
+        return _private ? 'Private, continue' : 'Public, continue';
       case 3:
-        return 'Δες τι θα δουν';
+        return 'See what they’ll see';
       default:
-        return 'Δημιούργησε το πάρτι';
+        return 'Create the party';
     }
   }
 
   String get _footLabel {
     switch (_step) {
       case 1:
-        return '4 πεδία, 20 δευτερόλεπτα';
+        return '4 fields, 20 seconds';
       case 2:
-        return 'Μπορείς να το αλλάξεις μέχρι να ξεκινήσει';
+        return 'You can change this until it starts';
       case 3:
-        return '${_invited.length} καλεσμένοι + όποιος ανοίξει το λινκ';
+        return '${_invited.length} invited + anyone who opens the link';
       default:
-        return 'Στέλνεται σε ${_invited.length} φίλους και μπαίνει στον χάρτη τους';
+        return 'Sent to ${_people(_invited.length)} and added to their map';
     }
   }
+
+  static String _people(int n) => n == 1 ? '1 person' : '$n people';
 
   Color get _accent => _private ? AppColors.pink : AppColors.purple;
 
   Future<void> _next() async {
+    if (_step == 1 && _addressController.text.trim().isEmpty) {
+      setState(() => _addressMissing = true);
+      return;
+    }
     if (_step < 4) {
       setState(() => _step += 1);
       return;
@@ -104,7 +131,9 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
       final partyId = await _repository.createPartyWithInvites(
         party: {
           'title': _nameController.text.trim(),
-          'description': '${_addressController.text.trim()}\n\n${_descController.text.trim()}',
+          'description': [_addressController.text.trim(), _descController.text.trim()]
+              .where((part) => part.isNotEmpty)
+              .join('\n\n'),
           'lat': position.latitude,
           'lon': position.longitude,
           'starts_at': _startsAt.toUtc().toIso8601String(),
@@ -131,7 +160,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
       ));
     } catch (e) {
       if (!mounted) return;
-      setState(() => _submitError = 'Κάτι πήγε στραβά. Δοκίμασε ξανά.');
+      setState(() => _submitError = 'Something went wrong. Try again.');
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -193,14 +222,14 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('ΒΗΜΑ $_step ΑΠΟ 4', style: AppTextStyles.mono(size: 10, color: AppColors.textAlpha(0.45))),
+                        Text('STEP $_step OF 4', style: AppTextStyles.mono(size: 10, color: AppColors.textAlpha(0.45))),
                         Text(_titles[_step - 1], style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
                       ],
                     ),
                   ),
                   GestureDetector(
                     onTap: () => Navigator.of(context).pop(),
-                    child: Text('Άκυρο', style: TextStyle(fontSize: 12, color: AppColors.textAlpha(0.45))),
+                    child: Text('Cancel', style: TextStyle(fontSize: 12, color: AppColors.textAlpha(0.45))),
                   ),
                 ],
               ),
@@ -280,7 +309,15 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
     );
   }
 
-  Widget _field(String label, TextEditingController controller, {bool mono = false, int maxLines = 1}) {
+  Widget _field(
+    String label,
+    TextEditingController controller, {
+    bool mono = false,
+    int maxLines = 1,
+    String? hint,
+    String? error,
+    ValueChanged<String>? onChanged,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 13),
       child: Column(
@@ -291,16 +328,23 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
           TextField(
             controller: controller,
             maxLines: maxLines,
+            onChanged: onChanged,
             style: mono
                 ? AppTextStyles.mono(size: 14, weight: FontWeight.w600, color: AppColors.text)
                 : const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600),
             decoration: InputDecoration(
+              hintText: hint,
+              hintStyle: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w500, color: AppColors.textAlpha(0.3)),
               filled: true,
               fillColor: Colors.white.withValues(alpha: 0.05),
               contentPadding: const EdgeInsets.all(13),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(13), borderSide: BorderSide(color: AppColors.hairline)),
               enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(13), borderSide: BorderSide(color: AppColors.hairline)),
               focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(13), borderSide: const BorderSide(color: AppColors.purple)),
+              errorText: error,
+              errorStyle: const TextStyle(fontSize: 11.5, color: AppColors.destructive),
+              errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(13), borderSide: const BorderSide(color: AppColors.destructive)),
+              focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(13), borderSide: const BorderSide(color: AppColors.destructive, width: 1.5)),
             ),
           ),
         ],
@@ -335,7 +379,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
 
   Widget _datePickerField() {
     final label = '${_selectedDate.day}/${_selectedDate.month}/${_selectedDate.year}';
-    return _pickerField('ΜΕΡΑ', label, () async {
+    return _pickerField('DATE', label, () async {
       final picked = await showDatePicker(
         context: context,
         initialDate: _selectedDate,
@@ -348,7 +392,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
 
   Widget _timePickerField() {
     final label = _selectedTime.format(context);
-    return _pickerField('ΩΡΑ', label, () async {
+    return _pickerField('TIME', label, () async {
       final picked = await showTimePicker(context: context, initialTime: _selectedTime);
       if (picked != null) setState(() => _selectedTime = picked);
     });
@@ -360,7 +404,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
       children: [
         GestureDetector(
           onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Έρχεται σύντομα'), behavior: SnackBarBehavior.floating),
+            const SnackBar(content: Text('Coming soon'), behavior: SnackBarBehavior.floating),
           ),
           child: Container(
             height: 132,
@@ -382,14 +426,22 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
                     child: const Icon(Icons.add, color: AppColors.purpleLight, size: 18),
                   ),
                   const SizedBox(height: 7),
-                  Text('cover · φωτό ή βίντεο', style: AppTextStyles.mono(size: 9.5, color: AppColors.textAlpha(0.4))),
+                  Text('cover · photo or video', style: AppTextStyles.mono(size: 9.5, color: AppColors.textAlpha(0.4))),
                 ],
               ),
             ),
           ),
         ),
-        _field('ΟΝΟΜΑ', _nameController),
-        _field('ΔΙΕΥΘΥΝΣΗ Ή ΧΩΡΟΣ', _addressController),
+        _field('NAME', _nameController),
+        _field(
+          'ADDRESS OR VENUE',
+          _addressController,
+          hint: 'e.g. 12 Example Street, Athens',
+          error: _addressMissing ? 'This field is necessary' : null,
+          onChanged: (_) {
+            if (_addressMissing) setState(() => _addressMissing = false);
+          },
+        ),
         Row(
           children: [
             Expanded(child: _datePickerField()),
@@ -397,7 +449,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
             Expanded(child: _timePickerField()),
           ],
         ),
-        _field('ΠΕΡΙΓΡΑΦΗ', _descController, maxLines: 4),
+        _field('DESCRIPTION (OPTIONAL)', _descController, maxLines: 4, hint: 'e.g. This is going to be fun!'),
       ],
     );
   }
@@ -409,8 +461,8 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
         _typeCard(
           selected: _private,
           icon: Icons.lock,
-          title: 'Ιδιωτικό πάρτι',
-          desc: 'Εμφανίζεται στον χάρτη μόνο σε όσους καλέσεις. Κανείς άλλος δεν βλέπει ούτε το πάρτι, ούτε τη διεύθυνση, ούτε το story του.',
+          title: 'Private party',
+          desc: 'Shows on the map only for the people you invite. Nobody else sees the party, its address or its story.',
           accent: AppColors.pink,
           onTap: () => setState(() => _private = true),
         ),
@@ -418,8 +470,8 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
         _typeCard(
           selected: !_private,
           icon: Icons.public,
-          title: 'Δημόσιο πάρτι',
-          desc: 'Εμφανίζεται στον χάρτη σε όλους όσους είναι κοντά. Το pin μεγαλώνει όσο ανεβαίνει το ενδιαφέρον.',
+          title: 'Public party',
+          desc: 'Shows on the map for everyone nearby. The pin grows as interest rises.',
           accent: AppColors.purple,
           onTap: () => setState(() => _private = false),
         ),
@@ -440,8 +492,8 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
                 Expanded(
                   child: Text(
                     _private
-                        ? 'Στον χάρτη το ιδιωτικό πάρτι έχει διακεκομμένο ροζ pin και το βλέπουν μόνο οι καλεσμένοι σου. Αν κάποιος δεν είναι καλεσμένος, για αυτόν το πάρτι δεν υπάρχει.'
-                        : 'Στον χάρτη το δημόσιο πάρτι έχει γεμάτο μοβ pin που μεγαλώνει όσο μαζεύεται κόσμος. Το βλέπουν όλοι μέσα σε 3 χλμ.',
+                        ? 'On the map, a private party has a dashed red pin and only your guests can see it. For anyone who isn’t invited, the party doesn’t exist.'
+                        : 'On the map, a public party has a solid purple pin that grows as people gather. Everyone within 3 km can see it.',
                     style: TextStyle(fontSize: 11.5, height: 1.5, color: AppColors.textAlpha(0.55)),
                   ),
                 ),
@@ -525,7 +577,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Λινκ πρόσκλησης', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
+                          Text('Invite link', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
                           SizedBox(height: 3),
                         ],
                       ),
@@ -533,13 +585,13 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
                       decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(10)),
-                      child: Text(_copied ? 'Έτοιμο ✓' : 'Αντιγραφή', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
+                      child: Text(_copied ? 'Copied ✓' : 'Copy', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
                     ),
                   ],
                 ),
                 Text('myparty.gr/p/taratsa-thanasi', style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.55))),
                 const SizedBox(height: 9),
-                Text('Στείλ\' το στο group chat. Όποιος το ανοίξει μπαίνει στους καλεσμένους και βλέπει το πάρτι στον χάρτη.',
+                Text('Send it to your group chat. Anyone who opens it joins the guest list and sees the party on the map.',
                     style: TextStyle(fontSize: 11, height: 1.45, color: AppColors.textAlpha(0.5))),
               ],
             ),
@@ -550,8 +602,8 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('ΑΚΟΛΟΥΘΕΙΣ', style: AppTextStyles.mono(size: 10, color: AppColors.textAlpha(0.45))),
-              Text('${_invited.length} επιλεγμένοι', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.purpleLight)),
+              Text('YOU FOLLOW', style: AppTextStyles.mono(size: 10, color: AppColors.textAlpha(0.45))),
+              Text('${_invited.length} selected', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.purpleLight)),
             ],
           ),
         ),
@@ -566,12 +618,12 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
               );
             }
             if (snapshot.hasError) {
-              return _pickerNotice('Δεν φόρτωσε η λίστα. Δοκίμασε ξανά.');
+              return _pickerNotice('The list didn’t load. Try again.');
             }
             final people = snapshot.data ?? const <Profile>[];
             if (people.isEmpty) {
               return _pickerNotice(
-                'Δεν ακολουθείς κανέναν ακόμα. Το πάρτι μπορεί να δημιουργηθεί και να μοιραστεί με το λινκ.',
+                'You don’t follow anyone yet. You can still create the party and share it with the link.',
               );
             }
             return Column(children: [for (final p in people) _personRow(p)]);
@@ -618,7 +670,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(f.username, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
-                    Text('${f.followerCount} ακόλουθοι',
+                    Text('${f.followerCount} ${f.followerCount == 1 ? 'follower' : 'followers'}',
                         style: TextStyle(fontSize: 10.5, color: AppColors.textAlpha(0.42))),
                   ],
                 ),
@@ -644,7 +696,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Αυτό θα δουν οι ${_invited.length} καλεσμένοι σου στον χάρτη και στη ροή τους.',
+        Text('This is what your ${_invited.length} ${_invited.length == 1 ? 'guest' : 'guests'} will see on their map and in their feed.',
             style: TextStyle(fontSize: 12.5, height: 1.5, color: AppColors.textAlpha(0.55))),
         const SizedBox(height: 14),
         Container(
@@ -670,7 +722,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                         decoration: BoxDecoration(color: _accent.withValues(alpha: 0.92), borderRadius: BorderRadius.circular(8)),
-                        child: Text(_private ? 'ΙΔΙΩΤΙΚΟ · ΜΟΝΟ ΚΑΛΕΣΜΕΝΟΙ' : 'ΔΗΜΟΣΙΟ', style: AppTextStyles.mono(size: 9)),
+                        child: Text(_private ? 'PRIVATE · INVITED ONLY' : 'PUBLIC', style: AppTextStyles.mono(size: 9)),
                       ),
                     ),
                     Positioned(
@@ -681,7 +733,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(_nameController.text, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
-                          Text('${formatPartyStart(_startsAt)} · ${_addressController.text}',
+                          Text('${formatPartyStartEn(_startsAt)} · ${_addressController.text}',
                               maxLines: 1, overflow: TextOverflow.ellipsis,
                               style: TextStyle(fontSize: 11.5, color: AppColors.textAlpha(0.65))),
                         ],
@@ -695,7 +747,8 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(_descController.text, style: TextStyle(fontSize: 12, height: 1.45, color: AppColors.textAlpha(0.7))),
+                    if (_descController.text.trim().isNotEmpty)
+                      Text(_descController.text, style: TextStyle(fontSize: 12, height: 1.45, color: AppColors.textAlpha(0.7))),
                     Padding(
                       padding: const EdgeInsets.only(top: 11),
                       child: Row(
@@ -705,7 +758,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
                               padding: const EdgeInsets.symmetric(vertical: 10),
                               alignment: Alignment.center,
                               decoration: BoxDecoration(gradient: _private ? AppColors.pinkGradient : AppColors.purpleGradient, borderRadius: BorderRadius.circular(11)),
-                              child: Text(_private ? 'Έρχομαι' : 'Μ’ ενδιαφέρει', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                              child: Text(_private ? 'Coming' : 'Interested', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
                             ),
                           ),
                           const SizedBox(width: 7),
@@ -743,8 +796,8 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
                 Expanded(
                   child: Text(
                     _private
-                        ? 'Οι ${_invited.length} καλεσμένοι βλέπουν διεύθυνση, story και chat. Κανείς άλλος δεν βλέπει τίποτα.'
-                        : 'Όλοι κοντά σου το βλέπουν στον χάρτη. Η διεύθυνση είναι δημόσια.',
+                        ? 'Your ${_invited.length} ${_invited.length == 1 ? 'guest sees' : 'guests see'} the address, story and chat. Nobody else sees anything.'
+                        : 'Everyone near you sees it on the map. The address is public.',
                     style: TextStyle(fontSize: 11.5, height: 1.5, color: AppColors.textAlpha(0.6)),
                   ),
                 ),
@@ -800,13 +853,13 @@ class _HostDoneScreen extends StatelessWidget {
                   child: const Icon(Icons.check, color: Colors.white, size: 32),
                 ),
                 const SizedBox(height: 20),
-                const Text('Το πάρτι είναι ζωντανό', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+                const Text('Your party is live', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Text(
                     isPrivate
-                        ? 'Στάλθηκε σε $invitedCount φίλους και μπήκε στον χάρτη τους. Το group chat άνοιξε.'
-                        : 'Μπήκε στον χάρτη. Όποιος είναι κοντά μπορεί να το δει.',
+                        ? 'Sent to ${invitedCount == 1 ? '1 person' : '$invitedCount people'} and added to their map. The group chat is open.'
+                        : 'It’s on the map. Anyone nearby can see it.',
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 13, height: 1.55, color: AppColors.textAlpha(0.6)),
                   ),
@@ -837,7 +890,7 @@ class _HostDoneScreen extends StatelessWidget {
                           border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
                           borderRadius: BorderRadius.circular(13),
                         ),
-                        child: const Text('Άνοιξε το group chat', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
+                        child: const Text('Open the group chat', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
                       ),
                     ),
                   ),
@@ -845,7 +898,7 @@ class _HostDoneScreen extends StatelessWidget {
                   padding: const EdgeInsets.only(top: 12),
                   child: GestureDetector(
                     onTap: () => Navigator.of(context).popUntil((route) => route.isFirst),
-                    child: Text('Τέλος', style: TextStyle(fontSize: 12.5, color: AppColors.textAlpha(0.45))),
+                    child: Text('Done', style: TextStyle(fontSize: 12.5, color: AppColors.textAlpha(0.45))),
                   ),
                 ),
               ],

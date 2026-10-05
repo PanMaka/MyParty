@@ -136,7 +136,7 @@ class _ProfileGateError extends StatelessWidget {
                 const Icon(Icons.cloud_off, size: 48),
                 const SizedBox(height: 16),
                 Text(
-                  'Δεν μπορέσαμε να φορτώσουμε το προφίλ σου.',
+                  'We couldn’t load your profile.',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
@@ -149,11 +149,11 @@ class _ProfileGateError extends StatelessWidget {
                 const SizedBox(height: 24),
                 FilledButton(
                   onPressed: onRetry,
-                  child: const Text('Δοκίμασε ξανά'),
+                  child: const Text('Try again'),
                 ),
                 TextButton(
                   onPressed: () => Supabase.instance.client.auth.signOut(),
-                  child: const Text('Αποσύνδεση'),
+                  child: const Text('Sign out'),
                 ),
               ],
             ),

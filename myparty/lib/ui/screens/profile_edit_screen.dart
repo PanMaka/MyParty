@@ -18,7 +18,7 @@ import '../widgets/diagonal_placeholder.dart';
 /// screen is not missing fields, it is the whole of what a profile is.
 ///
 /// The avatar is picked into memory and uploaded on save rather than on pick.
-/// That is what makes "Άκυρο" mean something during the upload — see
+/// That is what makes "Cancel" mean something during the upload — see
 /// [ProfileRepository.replaceAvatar], which owns the ordering and the three
 /// ways it can fail. The screen's job is to say which one happened.
 class ProfileEditScreen extends StatefulWidget {
@@ -53,7 +53,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
 
   bool _saving = false;
 
-  /// Set by "Άκυρο" and by [dispose], and read by [ProfileRepository.replaceAvatar]
+  /// Set by "Cancel" and by [dispose], and read by [ProfileRepository.replaceAvatar]
   /// through a closure.
   ///
   /// A plain field rather than anything derived from `mounted`, because the
@@ -174,8 +174,8 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
           // separately because it is a bug in this app rather than something
           // the user did.
           _error = error.toString().contains('23514')
-              ? 'Το bio δεν έγινε δεκτό.'
-              : 'Το bio δεν αποθηκεύτηκε. Δοκίμασε ξανά.';
+              ? 'Your bio was not accepted.'
+              : 'Your bio was not saved. Try again.';
         });
         return;
       }
@@ -208,8 +208,8 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
               // either way, but in this branch a file was left in the bucket,
               // and a screen that reported it as a plain retry would be
               // claiming a rollback that did not happen.
-              ? 'Η φωτογραφία δεν αποθηκεύτηκε και δεν καθαρίστηκε πλήρως. Δοκίμασε ξανά.'
-              : 'Η φωτογραφία δεν αποθηκεύτηκε. Δοκίμασε ξανά.';
+              ? 'Your photo was not saved and was not fully cleaned up. Try again.'
+              : 'Your photo was not saved. Try again.';
         });
         return;
       } catch (_) {
@@ -219,7 +219,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
           // The upload itself failed, so nothing reached the bucket and
           // nothing was written. Distinct from the branch above, where bytes
           // did land.
-          _error = 'Η φωτογραφία δεν ανέβηκε. Δοκίμασε ξανά.';
+          _error = 'Your photo did not upload. Try again.';
         });
         return;
       }
@@ -238,7 +238,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   void _cancel() {
     setState(() {
       _cancelled = true;
-      _error = 'Ακυρώνεται…';
+      _error = 'Cancelling…';
     });
   }
 
@@ -250,7 +250,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         backgroundColor: AppColors.bg,
         elevation: 0,
         title: const Text(
-          'Επεξεργασία προφίλ',
+          'Edit profile',
           style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, letterSpacing: -0.3),
         ),
       ),
@@ -267,7 +267,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              'Δεν φόρτωσε το προφίλ',
+              'Could not load your profile',
               style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textAlpha(0.7)),
             ),
             const SizedBox(height: 6),
@@ -280,7 +280,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                 _load();
               },
               child: const Text(
-                'Δοκίμασε ξανά',
+                'Try again',
                 style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.pinkLight),
               ),
             ),
@@ -365,7 +365,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
           // pictures, and whichever committed would be a coin toss.
           onTap: _saving ? null : _pick,
           child: Text(
-            pending == null ? 'Άλλαξε φωτογραφία' : 'Διάλεξε άλλη',
+            pending == null ? 'Change photo' : 'Choose another',
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w700,
@@ -377,7 +377,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
           Padding(
             padding: const EdgeInsets.only(top: 5),
             child: Text(
-              'Θα ανέβει όταν αποθηκεύσεις.',
+              'It will upload when you save.',
               style: TextStyle(fontSize: 11.5, color: AppColors.textAlpha(0.4)),
             ),
           ),
@@ -411,7 +411,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
           onSubmitted: (_) => _dirty && !_saving ? _save() : null,
           style: const TextStyle(fontSize: 14.5),
           decoration: InputDecoration(
-            hintText: 'Μία γραμμή για σένα.',
+            hintText: 'One line about you.',
             hintStyle: TextStyle(fontSize: 14.5, color: AppColors.textAlpha(0.3)),
             filled: true,
             fillColor: Colors.white.withValues(alpha: 0.04),
@@ -437,7 +437,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
             children: [
               Expanded(
                 child: Text(
-                  'Άδειο σημαίνει «χωρίς bio».',
+                  'Leave it empty for no bio.',
                   style: TextStyle(fontSize: 11.5, color: AppColors.textAlpha(0.38)),
                 ),
               ),
@@ -487,7 +487,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                   borderRadius: BorderRadius.circular(13),
                 ),
                 child: Text(
-                  'Άκυρο',
+                  'Cancel',
                   style: TextStyle(
                     fontSize: 13.5,
                     fontWeight: FontWeight.w700,
@@ -513,7 +513,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
           borderRadius: BorderRadius.circular(13),
         ),
         child: Text(
-          'Αποθήκευση',
+          'Save',
           style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w700,

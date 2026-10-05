@@ -370,18 +370,18 @@ void main() {
 
       // Each of these is a promise something in the schema keeps. If the copy
       // stops saying them the sheet has stopped being informed consent.
-      expect(find.textContaining('~100 μέτρων'), findsOneWidget);
-      expect(find.textContaining('24 ώρες'), findsOneWidget);
-      expect(find.textContaining('Δεν τη βλέπει κανένας'), findsOneWidget);
-      expect(find.textContaining('διαγράφεται'), findsOneWidget);
+      expect(find.textContaining('~100 metre'), findsOneWidget);
+      expect(find.textContaining('24 hours'), findsOneWidget);
+      expect(find.textContaining('Nobody can see it'), findsOneWidget);
+      expect(find.textContaining('deleted immediately'), findsOneWidget);
     });
 
     testWidgets('accepting returns true', (tester) async {
-      expect(await showAndTap(tester, 'Συμφωνώ, ενεργοποίησέ το'), isTrue);
+      expect(await showAndTap(tester, 'I agree, turn it on'), isTrue);
     });
 
     testWidgets('declining returns false', (tester) async {
-      expect(await showAndTap(tester, 'Όχι τώρα'), isFalse);
+      expect(await showAndTap(tester, 'Not now'), isFalse);
     });
   });
 
@@ -403,14 +403,14 @@ void main() {
       await tester.tap(find.byType(Switch).at(1));
       await tester.pump();
 
-      expect(find.textContaining('~100 μέτρων'), findsOneWidget,
+      expect(find.textContaining('~100 metre'), findsOneWidget,
           reason: 'the explanation sheet must be on screen before consent is requested');
       expect(reporter.consentCalls, isEmpty,
           reason: 'nothing may be requested while the user is still reading');
 
-      await tester.ensureVisible(find.text('Συμφωνώ, ενεργοποίησέ το'));
+      await tester.ensureVisible(find.text('I agree, turn it on'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Συμφωνώ, ενεργοποίησέ το'));
+      await tester.tap(find.text('I agree, turn it on'));
       await tester.pumpAndSettle();
 
       expect(reporter.consentCalls, [true]);
@@ -431,9 +431,9 @@ void main() {
 
       await tester.tap(find.byType(Switch).at(1));
       await tester.pump();
-      await tester.ensureVisible(find.text('Όχι τώρα'));
+      await tester.ensureVisible(find.text('Not now'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Όχι τώρα'));
+      await tester.tap(find.text('Not now'));
       await tester.pumpAndSettle();
 
       expect(reporter.consentCalls, [false]);

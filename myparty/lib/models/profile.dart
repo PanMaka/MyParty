@@ -150,7 +150,7 @@ class BioConstraint {
     // `btrim(bio) <> ''`. Unreachable through [normalize], which is the point:
     // it stays here so this function alone is a complete statement of the
     // constraint, rather than one that is only correct if called in order.
-    if (value.trim().isEmpty) return 'Γράψε κάτι ή άφησέ το κενό.';
+    if (value.trim().isEmpty) return 'Write something or leave it empty.';
 
     // `position(E'\n' in bio) = 0 and position(E'\r' in bio) = 0`.
     //
@@ -160,12 +160,12 @@ class BioConstraint {
     // telling them the field is one line, which is the thing the column
     // actually enforces.
     if (value.contains('\n') || value.contains('\r')) {
-      return 'Το bio είναι μία γραμμή.';
+      return 'Your bio is one line.';
     }
 
     // `char_length(bio) <= 160`.
     if (length(value) > maxCharacters) {
-      return 'Μέχρι $maxCharacters χαρακτήρες.';
+      return 'Up to $maxCharacters characters.';
     }
 
     return null;

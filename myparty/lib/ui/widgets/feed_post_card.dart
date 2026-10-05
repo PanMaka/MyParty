@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/feed_repository.dart';
 import '../../models/feed_post.dart';
-import '../../utils/greek_date.dart';
+import '../../utils/english_date.dart';
 import '../theme/app_theme.dart';
 import 'diagonal_placeholder.dart';
 import 'follow_button.dart';
@@ -49,7 +49,7 @@ class FeedPostCard extends StatelessWidget {
     } catch (_) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Δεν διαγράφηκε.'), behavior: SnackBarBehavior.floating),
+        const SnackBar(content: Text('Not deleted.'), behavior: SnackBarBehavior.floating),
       );
     }
   }
@@ -159,10 +159,11 @@ class FeedPostCard extends StatelessWidget {
                     const SizedBox(width: 6),
                     PrivacyBadge(
                       isPrivate: post.partyIsPrivate,
+                      english: true,
                     ),
                   ],
                 ),
-                Text('${formatPostAge(post.createdAt)} · ${post.partyTitle}',
+                Text('${formatPostAgeEn(post.createdAt)} · ${post.partyTitle}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 11.5, color: AppColors.textAlpha(0.5))),
@@ -215,16 +216,16 @@ class FeedPostCard extends StatelessWidget {
       },
       itemBuilder: (_) => [
         if (!_mine) ...[
-          const PopupMenuItem(value: 'report', child: Text('Αναφορά δημοσίευσης', style: TextStyle(fontSize: 13))),
-          const PopupMenuItem(value: 'report_author', child: Text('Αναφορά χρήστη', style: TextStyle(fontSize: 13))),
+          const PopupMenuItem(value: 'report', child: Text('Report post', style: TextStyle(fontSize: 13))),
+          const PopupMenuItem(value: 'report_author', child: Text('Report user', style: TextStyle(fontSize: 13))),
         ],
-        const PopupMenuItem(value: 'report_party', child: Text('Αναφορά πάρτι', style: TextStyle(fontSize: 13))),
+        const PopupMenuItem(value: 'report_party', child: Text('Report party', style: TextStyle(fontSize: 13))),
         // hide_post also accepts the party's host, but the feed row does not
         // carry host_id, so the client only offers this on your own posts.
         // A host who needs it gets the same 42501 as anyone else here and
         // moderates from the party surface instead.
         if (_mine)
-          const PopupMenuItem(value: 'delete', child: Text('Διαγραφή', style: TextStyle(fontSize: 13))),
+          const PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(fontSize: 13))),
       ],
     );
   }

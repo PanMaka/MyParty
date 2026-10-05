@@ -57,22 +57,22 @@ void main() {
       await tester.pumpWidget(_wrap(repo));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Διαγραφή λογαριασμού'));
+      await tester.tap(find.text('Delete account'));
       await tester.pumpAndSettle();
 
       // Nothing has happened yet: the confirmation is a real gate, not a
       // formality. A destructive irreversible action behind a single tap is
       // the failure mode this assertion exists to prevent.
       expect(repo.deletionRequests, 0);
-      expect(find.text('Διαγραφή λογαριασμού;'), findsOneWidget);
+      expect(find.text('Delete account?'), findsOneWidget);
 
-      await tester.tap(find.text('Άκυρο'));
+      await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
       expect(repo.deletionRequests, 0, reason: 'cancelling the dialog must not delete the account');
 
-      await tester.tap(find.text('Διαγραφή λογαριασμού'));
+      await tester.tap(find.text('Delete account'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Διαγραφή'));
+      await tester.tap(find.text('Delete'));
       await tester.pumpAndSettle();
 
       expect(repo.deletionRequests, 1);
@@ -88,29 +88,29 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.text('Ο λογαριασμός σου διαγράφεται οριστικά μετά από 30 ημέρες.'),
+        find.text('Your account is permanently deleted after 30 days.'),
         findsOneWidget,
         reason: 'the grace period is the whole reason deletion is recoverable',
       );
       expect(
-        find.text('Μέχρι τότε μπορείς να τον επαναφέρεις κάνοντας ξανά σύνδεση.'),
+        find.text('Until then, you can restore it by signing in again.'),
         findsOneWidget,
         reason: 'cancel_account_deletion exists and the user has to know how to reach it',
       );
       expect(
-        find.text('Τα μηνύματα που έχεις στείλει παραμένουν στις συνομιλίες, ως «Διαγραμμένος χρήστης».'),
+        find.text('Messages you have sent stay in their chats, shown as “Deleted user”.'),
         findsOneWidget,
         reason:
             'THE surprising one. The tombstone design means messages survive attributed to an '
             'anonymous handle, and a user who expected them to vanish must be told before they act.',
       );
       expect(
-        find.text('Η τοποθεσία σου και οι ειδοποιήσεις διαγράφονται αμέσως, όχι σε 30 ημέρες.'),
+        find.text('Your location and notifications are deleted immediately, not in 30 days.'),
         findsOneWidget,
         reason: 'request_account_deletion purges user_devices at T+0 — the screen should say so',
       );
       expect(
-        find.text('Τα πάρτι που δεν έχουν ξεκινήσει ακυρώνονται.'),
+        find.text('Parties that have not started yet are cancelled.'),
         findsOneWidget,
         reason: 'guests of a cancelled party are affected by this button too',
       );
@@ -123,18 +123,18 @@ void main() {
       await tester.pumpWidget(_wrap(repo));
       await tester.pumpAndSettle();
 
-      expect(find.text('Ο λογαριασμός σου διαγράφεται'), findsOneWidget);
+      expect(find.text('Your account is being deleted'), findsOneWidget);
       expect(
-        find.text('Διαγραφή λογαριασμού'),
+        find.text('Delete account'),
         findsNothing,
         reason: 'offering delete again to someone already deleting is a second clock they cannot see',
       );
 
       // 30 days of grace minus 3 elapsed. Asserting the arithmetic because an
       // off-by-one here is a number the user will plan around.
-      expect(find.textContaining('Απομένουν 26 ημέρες'), findsOneWidget);
+      expect(find.textContaining('26 days left'), findsOneWidget);
 
-      await tester.tap(find.text('Επαναφορά λογαριασμού'));
+      await tester.tap(find.text('Restore account'));
       await tester.pumpAndSettle();
       expect(repo.cancellations, 1);
     });
@@ -144,7 +144,7 @@ void main() {
       await tester.pumpWidget(_wrap(repo));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Εξαγωγή δεδομένων'));
+      await tester.tap(find.text('Export data'));
       await tester.pumpAndSettle();
 
       expect(repo.exports, 1);
@@ -156,15 +156,15 @@ void main() {
       await tester.pumpWidget(_wrap(repo));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Διαγραφή λογαριασμού'));
+      await tester.tap(find.text('Delete account'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Διαγραφή'));
+      await tester.tap(find.text('Delete'));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('Η διαγραφή απέτυχε'), findsOneWidget);
+      expect(find.textContaining('Deletion failed'), findsOneWidget);
       // Still on the active screen: a failure that looked like a success would
       // leave the user believing their account is gone when it is not.
-      expect(find.text('Διαγραφή λογαριασμού'), findsOneWidget);
+      expect(find.text('Delete account'), findsOneWidget);
     });
   });
 }

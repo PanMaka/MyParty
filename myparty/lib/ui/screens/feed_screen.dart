@@ -4,7 +4,7 @@ import '../../data/feed_repository.dart';
 import '../../data/story_repository.dart';
 import '../../models/feed_post.dart';
 import '../../models/story.dart';
-import '../../utils/greek_date.dart';
+import '../../utils/english_date.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
 import '../widgets/feed_post_card.dart';
@@ -184,7 +184,7 @@ class _FeedScreenState extends State<FeedScreen> {
       final at = _posts.indexWhere((p) => p.postId == before.postId);
       if (at != -1) setState(() => _posts[at] = before);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Δεν έγινε. Δοκίμασε ξανά.'), behavior: SnackBarBehavior.floating),
+        const SnackBar(content: Text('That didn’t work. Try again.'), behavior: SnackBarBehavior.floating),
       );
     }
   }
@@ -247,13 +247,13 @@ class _FeedScreenState extends State<FeedScreen> {
     }
 
     if (_failed) {
-      return [_notice('Δεν φόρτωσε το feed.', action: ('Δοκίμασε ξανά', _load))];
+      return [_notice('The feed didn’t load.', action: ('Try again', _load))];
     }
 
     if (_posts.isEmpty) {
       return [
         _notice(
-          'Ήσυχα εδώ.\nΑκολούθησε κόσμο ή δήλωσε συμμετοχή σε πάρτι\nκαι θα γεμίσει.',
+          'Quiet here.\nFollow people or RSVP to a party\nand it will fill up.',
         ),
       ];
     }
@@ -383,7 +383,7 @@ class _FeedScreenState extends State<FeedScreen> {
                     child: const Icon(Icons.add, color: Colors.white, size: 19),
                   ),
                   const SizedBox(height: 9),
-                  Text('Ανέβασε\nστο πάρτι σου',
+                  Text('Post to\nyour party',
                       textAlign: TextAlign.center,
                       style: TextStyle(fontSize: 11, height: 1.3, color: AppColors.textAlpha(0.6))),
                 ],
@@ -466,7 +466,7 @@ class _FeedScreenState extends State<FeedScreen> {
                   color: Colors.black.withValues(alpha: 0.7),
                   borderRadius: BorderRadius.circular(99),
                 ),
-                child: Text(formatPostAge(rail.latestAt.toUtc()), style: AppTextStyles.mono(size: 8.5)),
+                child: Text(formatPostAgeEn(rail.latestAt.toUtc()), style: AppTextStyles.mono(size: 8.5)),
               ),
             ),
             if (rail.isPrivate)

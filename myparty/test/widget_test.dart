@@ -195,7 +195,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: FeedScreen(repository: repo)));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Ήσυχα εδώ.'), findsOneWidget);
+    expect(find.textContaining('Quiet here.'), findsOneWidget);
   });
 
   testWidgets('liking moves the counter optimistically and writes through', (tester) async {
@@ -227,7 +227,7 @@ void main() {
 
     expect(repo.likeCalls, 1);
     expect(find.text('3'), findsOneWidget);
-    expect(find.text('Δεν έγινε. Δοκίμασε ξανά.'), findsOneWidget);
+    expect(find.text('That didn’t work. Try again.'), findsOneWidget);
   });
 
   testWidgets('someone else\'s post offers the report actions', (tester) async {
@@ -239,9 +239,9 @@ void main() {
     await tester.tap(find.byIcon(Icons.more_horiz));
     await tester.pumpAndSettle();
 
-    expect(find.text('Αναφορά δημοσίευσης'), findsOneWidget);
-    expect(find.text('Αναφορά χρήστη'), findsOneWidget);
-    expect(find.text('Διαγραφή'), findsNothing);
+    expect(find.text('Report post'), findsOneWidget);
+    expect(find.text('Report user'), findsOneWidget);
+    expect(find.text('Delete'), findsNothing);
   });
 
   testWidgets('your own post offers delete instead', (tester) async {
@@ -254,8 +254,8 @@ void main() {
     await tester.tap(find.byIcon(Icons.more_horiz));
     await tester.pumpAndSettle();
 
-    expect(find.text('Διαγραφή'), findsOneWidget);
-    expect(find.text('Αναφορά δημοσίευσης'), findsNothing);
+    expect(find.text('Delete'), findsOneWidget);
+    expect(find.text('Report post'), findsNothing);
   });
 
   testWidgets('the second page is fetched by keyset cursor, never an offset', (tester) async {
