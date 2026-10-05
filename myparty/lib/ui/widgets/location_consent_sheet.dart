@@ -63,13 +63,13 @@ class _LocationConsentSheet extends StatelessWidget {
               ),
             ),
             const Text(
-              'Πάρτι κοντά σου',
+              'Parties near you',
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: -0.4),
             ),
             const SizedBox(height: 6),
             Text(
-              'Για να σου στέλνουμε ειδοποίηση όταν ανοίγει ένα πάρτι δίπλα σου, '
-              'χρειαζόμαστε την κατά προσέγγιση τοποθεσία σου. Να τι ακριβώς σημαίνει αυτό.',
+              'To notify you when a party opens up near you, '
+              'we need your approximate location. Here is exactly what that means.',
               style: TextStyle(fontSize: 13, height: 1.5, color: AppColors.textAlpha(0.62)),
             ),
             const SizedBox(height: 18),
@@ -80,35 +80,35 @@ class _LocationConsentSheet extends StatelessWidget {
             // If any of those changes, this copy is wrong and has to change too.
             const _ConsentPoint(
               icon: Icons.grid_on,
-              title: 'Περιοχή, όχι ακριβές σημείο',
-              body: 'Αποθηκεύουμε ένα τετράγωνο ~100 μέτρων, όχι τη διεύθυνσή σου. '
-                  'Το ακριβές στίγμα δεν φεύγει ποτέ από το κινητό σου.',
+              title: 'An area, not an exact spot',
+              body: 'We store a ~100 metre square, not your address. '
+                  'Your exact position never leaves your phone.',
             ),
             const _ConsentPoint(
               icon: Icons.schedule,
-              title: 'Σβήνεται μετά από 24 ώρες',
-              body: 'Κρατάμε μόνο την τελευταία τοποθεσία. Δεν υπάρχει ιστορικό '
-                  'των διαδρομών σου — πουθενά.',
+              title: 'Erased after 24 hours',
+              body: 'We keep only your latest location. There is no history '
+                  'of where you’ve been — anywhere.',
             ),
             const _ConsentPoint(
               icon: Icons.visibility_off_outlined,
-              title: 'Δεν τη βλέπει κανένας',
-              body: 'Ούτε οι διοργανωτές, ούτε άλλοι χρήστες. Χρησιμοποιείται μόνο '
-                  'από το σύστημα ειδοποιήσεων, που στέλνει πάρτι — ποτέ τοποθεσίες.',
+              title: 'Nobody can see it',
+              body: 'Not hosts, not other users. It is used only '
+                  'by the notification system, which sends parties — never locations.',
             ),
             const _ConsentPoint(
               icon: Icons.toggle_off_outlined,
-              title: 'Το κλείνεις όποτε θες',
-              body: 'Μόλις το απενεργοποιήσεις, ό,τι έχει αποθηκευτεί διαγράφεται '
-                  'αμέσως. Οι υπόλοιπες ειδοποιήσεις συνεχίζουν κανονικά.',
+              title: 'Turn it off whenever you want',
+              body: 'As soon as you turn it off, anything stored is deleted '
+                  'immediately. Your other notifications carry on as normal.',
             ),
 
             const SizedBox(height: 8),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 2),
               child: Text(
-                'Στη συνέχεια θα εμφανιστεί το παράθυρο του λειτουργικού. '
-                'Μπορείς να αρνηθείς και εκεί.',
+                'Next, your phone’s system prompt will appear. '
+                'You can say no there too.',
                 style: TextStyle(fontSize: 11.5, height: 1.45, color: AppColors.textAlpha(0.4)),
               ),
             ),
@@ -124,7 +124,7 @@ class _LocationConsentSheet extends StatelessWidget {
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: const Text(
-                  'Συμφωνώ, ενεργοποίησέ το',
+                  'I agree, turn it on',
                   style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
                 ),
               ),
@@ -144,7 +144,7 @@ class _LocationConsentSheet extends StatelessWidget {
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: Text(
-                  'Όχι τώρα',
+                  'Not now',
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
