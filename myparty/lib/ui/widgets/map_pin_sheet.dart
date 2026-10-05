@@ -4,6 +4,7 @@ import '../../data/party_repository.dart';
 import '../../models/feed_post.dart';
 import '../../models/map_party_pin.dart';
 import '../../state/mp_store.dart';
+import '../screens/chat_screen.dart';
 import '../../state/rsvp_changes.dart';
 import '../../utils/english_date.dart';
 import '../theme/app_theme.dart';
@@ -185,6 +186,26 @@ class _MapPinSheetState extends State<MapPinSheet> {
             ],
           ),
         ),
+        // PRIVATE only, and safe to offer to anyone who can see the pin: a
+        // private party is visible only to its host and invitees, who are
+        // exactly who can_chat_in_party admits. A public party has no chat
+        // since 20260825094044, and a public pin's viewer is the passer-by
+        // that rule exists to keep out — so no icon there.
+        if (pin.isPrivate)
+          IconButton(
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => ChatScreen(
+                partyId: pin.id,
+                partyTitle: pin.title,
+                isPrivate: true,
+                // Null on a private pin; the chat header then prints no count
+                // rather than a 0.
+                memberCount: pin.goingCount,
+              ),
+            )),
+            icon: Icon(Icons.forum_outlined, size: 20, color: AppColors.textAlpha(0.75)),
+            tooltip: 'Group chat',
+          ),
         // A party is UGC too, and this sheet — unlike the mock
         // PartyDetailSheet — is backed by a real `parties` row, so
         // pin.id is the uuid `reports.target_id` needs.

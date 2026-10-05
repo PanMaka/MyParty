@@ -1198,6 +1198,18 @@ void main() {
       expect(notified, 0);
     });
 
+    testWidgets('only a PRIVATE sheet offers the group chat icon', (tester) async {
+      // A public party has no chat (20260825094044), and a public pin is seen
+      // by passers-by who could never be admitted to one.
+      final repository = _FakePartyRepository(const []);
+
+      await pumpSheet(tester, full(isPrivate: true, goingCount: null, interestedCount: null), repository);
+      expect(find.byTooltip('Group chat'), findsOneWidget);
+
+      await pumpSheet(tester, full(isPrivate: false), repository);
+      expect(find.byTooltip('Group chat'), findsNothing);
+    });
+
     testWidgets('both public and private sheets carry a Directions button', (tester) async {
       // A placeholder for now -- present and tappable, wired to nothing.
       final repository = _FakePartyRepository(const []);

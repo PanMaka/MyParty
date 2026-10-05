@@ -365,9 +365,10 @@ affordance still on `comingSoon` is **Directions**, and for a reason `mpParties`
 was never responsible for — `get_parties_list` is not a spatial query, so the
 row carries no coordinates. Real chat entry points are now `MessagesScreen`,
 `EventsScreen`'s RSVP rows, the host wizard's done screen, **and both
-private-party doors on the parties tab**; `MapPinSheet` deliberately still has
-none, since a map-pin viewer is exactly the passer-by `can_chat_in_party`
-excludes.
+private-party doors on the parties tab**, and `MapPinSheet`'s header icon on
+**private** pins only. A public pin still has none — its viewer is exactly the
+passer-by `can_chat_in_party` excludes — while a private pin is visible only to
+its host and invitees, who are exactly who that helper admits.
 
 Phase 7 is complete end to end, and `scripts/verify_notification_delivery.sh`
 measures it: 1s from `insert into parties` to a delivered push, one
