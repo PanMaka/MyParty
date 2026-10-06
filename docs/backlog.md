@@ -183,21 +183,25 @@ party screen to put the button on; neither exists.
 
 *What it costs to leave:* a wrong cover stays until the party is cancelled.
 
-### 1.13 Party links open the browser until mypartycorp.com serves assetlinks.json
+### 1.13 Party links open the app only for builds signed with a listed key
 
-The app side of App Links is done (`autoVerify` filter, `PartyLinks`,
-`get_party`), but `mypartycorp.com` has no DNS record yet, so Android cannot
-verify the domain and a tapped link opens Chrome. `hosting/README.md` lists what
-the domain must serve and how to check it.
+`mypartycorp.com` is live on Cloudflare and serves `hosting/`'s
+`assetlinks.json` and fallback page byte-for-byte. Google's Digital Asset Links
+API answers `linked: true` for `com.example.myparty` with the one debug key the
+file lists, and on that emulator `pm get-app-links` reads `verified` and an
+ordinary tap on a party link opens the app (checked 2026-10-06).
 
-*Why it is still open:* needs hosting and DNS for the domain, and two release
-decisions: the app id is still Flutter's placeholder `com.example.myparty`
-(Play rejects `com.example.*`), and `assetlinks.json` lists one developer's
-debug-key fingerprint — teammates' debug builds and the Play signing key need
-theirs added.
+*Why it is still open:* the file lists ONE developer's debug-key fingerprint,
+so every other build — teammates' debug builds, a shared test build, the Play
+signing key — needs its SHA-256 added (command in `hosting/README.md`). And the
+app id is still Flutter's placeholder `com.example.myparty`, which Play rejects;
+changing it means changing the file too. `www.mypartycorp.com` has no DNS
+record, which is fine — the app and the manifest use the apex only.
 
-*What it costs to leave:* links work inside the app (share sheet, adb) but a
-friend tapping one in a chat lands on an unreachable page.
+*What it costs to leave:* on any phone whose build is not listed, a tapped link
+falls back to the static page instead of the app. Separately, links only work
+end to end against the local stack until the hosted Supabase project is caught
+up — a friend's phone cannot reach `10.0.2.2`.
 
 ---
 
