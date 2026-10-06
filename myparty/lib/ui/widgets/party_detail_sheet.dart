@@ -7,6 +7,7 @@ import '../screens/chat_screen.dart';
 import '../screens/story_viewer_screen.dart';
 import '../theme/app_theme.dart';
 import 'diagonal_placeholder.dart';
+import '../../utils/share_party.dart';
 import 'privacy_badge.dart';
 
 Future<void> showPartyDetailSheet(
@@ -81,11 +82,15 @@ class PartyDetailSheet extends StatelessWidget {
     required this.item,
     this.coverUrl,
     this.onRsvp,
+    this.share,
   });
 
   final PartyListItem item;
   final String? coverUrl;
   final ValueChanged<MpRsvp>? onRsvp;
+
+  /// The system share sheet by default; tests record instead.
+  final ShareText? share;
 
   @override
   Widget build(BuildContext context) {
@@ -283,6 +288,22 @@ class PartyDetailSheet extends StatelessWidget {
                 end: Alignment.topCenter,
                 colors: [AppColors.sheet, Colors.transparent],
                 stops: [0.03, 0.75],
+              ),
+            ),
+          ),
+          Positioned(
+            top: 12,
+            right: 50,
+            child: GestureDetector(
+              key: const Key('party-detail-share'),
+              onTap: () => (share ?? systemShare)(
+                partyShareText(partyId: item.partyId, title: item.title, isPrivate: item.isPrivate),
+              ),
+              child: Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.6), shape: BoxShape.circle),
+                child: const Icon(Icons.ios_share, size: 15, color: Colors.white),
               ),
             ),
           ),

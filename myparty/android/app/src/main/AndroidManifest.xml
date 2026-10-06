@@ -19,10 +19,17 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <!-- allowBackup false: the session (a long-lived refresh token) lives in
+         shared_prefs, unencrypted, and the default is to copy app data into
+         Google backups and device-to-device transfers. Everything worth
+         keeping is on the server; a restored phone signs in again. -->
     <application
         android:label="myparty"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules">
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -44,6 +51,23 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- Party links, https://mypartycorp.com/p/<id> (lib/utils/party_link.dart).
+                 autoVerify: Android checks https://mypartycorp.com/.well-known/
+                 assetlinks.json and, if this app's package and signing key are
+                 listed there, opens these links here without asking, and no
+                 other app can claim them, which a custom myparty:// scheme
+                 cannot promise. One host only: verification is per host, and
+                 the domain serves the file at its apex. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="mypartycorp.com" android:pathPrefix="/p/" />
+            </intent-filter>
+            <!-- Off: links are read by app_links (PartyLinks), not by Flutter's
+                 built-in deep linking, which would otherwise ALSO push "/p/<id>"
+                 as a named route on a Navigator that has none. -->
+            <meta-data android:name="flutter_deeplinking_enabled" android:value="false" />
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

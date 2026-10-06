@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/hosted_parties.dart';
@@ -46,6 +48,66 @@ class PartyRepository {
       'p_invitee_ids': inviteeIds,
     });
     return id as String;
+  }
+
+  /// Gives a party its cover: the `party-cover` edge function signs an upload
+  /// URL for the path `party_cover_upload_target` derives, the bytes go up,
+  /// and `confirm_party_cover` points `parties.cover_path` at them only once
+  /// Storage really has them. Host-only and one-shot, both decided in SQL.
+  ///
+  /// Called after [createPartyWithInvites] because the path is the party's own
+  /// `{party_id}/` folder. A failure here leaves the party without a cover —
+  /// the state every party was in before covers existed — so callers report
+  /// it rather than treat the party as not created.
+  ///
+  /// [bytes] must be a JPEG or a PNG — the only two types the bucket accepts,
+  /// and the only two the image picker emits (see [coverContentType]).
+  Future<String> uploadCover(String partyId, Uint8List bytes) async {
+    final contentType = coverContentType(bytes);
+    if (contentType == null) {
+      throw ArgumentError('A cover must be a JPEG or a PNG');
+    }
+
+    final signed = await _client.functions.invoke(
+      'party-cover/upload-url',
+      body: {'party_id': partyId},
+    );
+
+    final data = signed.data as Map?;
+    final path = data?['path'] as String?;
+    final token = data?['token'] as String?;
+    if (path == null || token == null) {
+      throw StateError('Could not get an upload URL for the cover');
+    }
+
+    // uploadBinaryToSignedUrl for the reason FeedRepository gives: the picker
+    // hands us bytes, and a dart:io File would tie this to a platform.
+    await _client.storage.from('party-covers').uploadBinaryToSignedUrl(
+          path,
+          token,
+          bytes,
+          FileOptions(contentType: contentType),
+        );
+
+    final confirmed = await _client.rpc('confirm_party_cover', params: {'p_party_id': partyId});
+    return confirmed as String;
+  }
+
+  /// The content-type a cover is uploaded with, read from its first bytes, or
+  /// null for anything the `party-covers` bucket would refuse.
+  ///
+  /// Sniffed rather than assumed: the picker re-encodes to JPEG EXCEPT when
+  /// the image has an alpha channel, which it keeps as PNG — and phone
+  /// screenshots usually have one. Labelling those bytes `image/jpeg` would
+  /// store a PNG that every reader is told is a JPEG.
+  static String? coverContentType(Uint8List bytes) {
+    bool startsWith(List<int> signature) =>
+        bytes.length >= signature.length &&
+        Iterable<int>.generate(signature.length).every((i) => bytes[i] == signature[i]);
+
+    if (startsWith(const [0xFF, 0xD8, 0xFF])) return 'image/jpeg';
+    if (startsWith(const [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])) return 'image/png';
+    return null;
   }
 
   /// Everything MY PARTIES lists: parties the current user RSVP'd to, hosts,
@@ -401,6 +463,19 @@ class PartyRepository {
   /// [cursor] null fetches the first page. The returned [PartyListPage.cursor]
   /// is null when the server returned a short page, which is the end of the
   /// list; callers page until it is null rather than counting rows.
+  /// One party by id, for a party link — or null when it is not available.
+  ///
+  /// Null covers four cases on purpose and the caller must not try to tell
+  /// them apart: no such party, a private party the caller is not invited to,
+  /// a cancelled one, and one that has ended. `get_party` returns the same
+  /// zero rows for all four, so a link reveals nothing about a party its
+  /// holder may not see — not even that it exists.
+  Future<PartyListItem?> fetchParty(String partyId) async {
+    final rows = await _client.rpc('get_party', params: {'p_party_id': partyId}) as List;
+    if (rows.isEmpty) return null;
+    return PartyListItem.fromRow(rows.first as Map<String, dynamic>);
+  }
+
   Future<PartyListPage> fetchPartiesList({
     PartySort sort = PartySort.soonest,
     int limit = 30,

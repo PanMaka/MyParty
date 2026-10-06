@@ -1,32 +1,62 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../../data/party_repository.dart';
 import '../../data/profile_repository.dart';
 import '../../data/social_repository.dart';
 import '../../models/profile.dart';
 import '../../utils/english_date.dart';
+import '../../utils/share_party.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
+import '../widgets/map_base.dart';
 import 'chat_screen.dart';
+import 'location_picker_screen.dart';
 
 /// The 4-step "host a party" wizard: details → public/private → invite → review.
 class HostWizardScreen extends StatefulWidget {
-  const HostWizardScreen({super.key});
+  const HostWizardScreen({
+    super.key,
+    this.repository,
+    this.social,
+    this.profiles,
+    this.picker,
+    this.locate,
+    this.share,
+  });
+
+  /// Injectable so widget tests can fake every repository, as the map and
+  /// profile screens do. Until the cover and the map picker arrived this was
+  /// the one screen with neither seams nor a test.
+  final PartyRepository? repository;
+  final SocialRepository? social;
+  final ProfileRepository? profiles;
+
+  /// The cover's photo picker — a seam for the same reason
+  /// [ProfileEditScreen.picker] is one.
+  final ImagePicker? picker;
+
+  /// Handed to [LocationPickerScreen]; geolocator never completes in tests.
+  final LocationFix? locate;
+
+  /// The done screen's share sheet; tests record instead of opening one.
+  final ShareText? share;
 
   @override
   State<HostWizardScreen> createState() => _HostWizardScreenState();
 }
 
 class _HostWizardScreenState extends State<HostWizardScreen> {
-  final _repository = PartyRepository();
-  final _social = SocialRepository();
-  final _profiles = ProfileRepository();
+  late final PartyRepository _repository = widget.repository ?? PartyRepository();
+  late final SocialRepository _social = widget.social ?? SocialRepository();
+  late final ProfileRepository _profiles = widget.profiles ?? ProfileRepository();
+  late final ImagePicker _picker = widget.picker ?? ImagePicker();
 
   int _step = 1;
   bool _private = true;
-  bool _copied = false;
   bool _submitting = false;
   String? _submitError;
 
@@ -43,10 +73,21 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
   final _addressController = TextEditingController();
   final _descController = TextEditingController();
 
-  /// Set when Continue is pressed on step 1 with no address; cleared as soon
-  /// as the host types one. The address is the only required field on the
-  /// step — a party nobody can find is not a party.
-  bool _addressMissing = false;
+  /// Set when Continue is pressed on step 1 with neither an address nor a
+  /// picked spot; cleared as soon as the host supplies either. "Where" is the
+  /// only required question on the step — a party nobody can find is not a
+  /// party — and either answer satisfies it.
+  bool _whereMissing = false;
+
+  /// The spot chosen on [LocationPickerScreen]. When null the pin falls back
+  /// to the host's own position at the moment of creating, which is what
+  /// every party got before the picker existed.
+  LatLng? _pickedPoint;
+
+  /// The cover, held in memory and uploaded only after the party exists —
+  /// its storage path is the party's own `{party_id}/` folder, and the id is
+  /// minted by create_party_with_invites.
+  Uint8List? _cover;
 
   DateTime _selectedDate = DateTime.now();
   TimeOfDay _selectedTime = const TimeOfDay(hour: 23, minute: 0);
@@ -102,7 +143,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
       case 2:
         return 'You can change this until it starts';
       case 3:
-        return '${_invited.length} invited + anyone who opens the link';
+        return '${_invited.length} invited';
       default:
         return 'Sent to ${_people(_invited.length)} and added to their map';
     }
@@ -113,8 +154,8 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
   Color get _accent => _private ? AppColors.pink : AppColors.purple;
 
   Future<void> _next() async {
-    if (_step == 1 && _addressController.text.trim().isEmpty) {
-      setState(() => _addressMissing = true);
+    if (_step == 1 && _addressController.text.trim().isEmpty && _pickedPoint == null) {
+      setState(() => _whereMissing = true);
       return;
     }
     if (_step < 4) {
@@ -127,15 +168,15 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
       _submitError = null;
     });
     try {
-      final position = await _resolveLocation();
+      final point = _pickedPoint ?? await _resolveLocation();
       final partyId = await _repository.createPartyWithInvites(
         party: {
           'title': _nameController.text.trim(),
           'description': [_addressController.text.trim(), _descController.text.trim()]
               .where((part) => part.isNotEmpty)
               .join('\n\n'),
-          'lat': position.latitude,
-          'lon': position.longitude,
+          'lat': point.latitude,
+          'lon': point.longitude,
           'starts_at': _startsAt.toUtc().toIso8601String(),
           'is_private': _private,
         },
@@ -144,9 +185,22 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
         // legitimately be higher than the invitations actually written.
         inviteeIds: _invited.toList(),
       );
+      // The party exists from here on, so nothing below may fail the submit.
+      // A cover that did not make it is reported on the done screen and the
+      // party stays exactly as live as one created with no cover at all.
+      var coverFailed = false;
+      if (_cover != null) {
+        try {
+          await _repository.uploadCover(partyId, _cover!);
+        } catch (_) {
+          coverFailed = true;
+        }
+      }
       if (!mounted) return;
       Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => _HostDoneScreen(
+          share: widget.share ?? systemShare,
+          coverFailed: coverFailed,
           invitedCount: _invited.length,
           // The real uuid create_party_with_invites just returned. The done
           // screen's "open the chat" button used to push a hardcoded mock
@@ -166,7 +220,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
     }
   }
 
-  Future<Position> _resolveLocation() async {
+  Future<LatLng> _resolveLocation() async {
     if (!await Geolocator.isLocationServiceEnabled()) {
       throw Exception('Location services disabled');
     }
@@ -177,7 +231,47 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
     if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
       throw Exception('Location permission denied');
     }
-    return Geolocator.getCurrentPosition();
+    final position = await Geolocator.getCurrentPosition();
+    return LatLng(position.latitude, position.longitude);
+  }
+
+  Future<void> _pickCover() async {
+    final picked = await _picker.pickImage(
+      source: ImageSource.gallery,
+      // A cover is a card header, never shown full-screen. 1600px keeps it
+      // sharp on any phone and a JPEG at 85 lands well under the bucket's 5MB.
+      maxWidth: 1600,
+      maxHeight: 1600,
+      imageQuality: 85,
+    );
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
+    if (!mounted) return;
+    // Checked now rather than discovered after the party exists: the bucket
+    // takes JPEG and PNG only, and saying so at pick time lets the host choose
+    // another picture instead of getting a party with a failed cover.
+    if (PartyRepository.coverContentType(bytes) == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('That image can’t be used as a cover. Try a JPEG or PNG photo.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    setState(() => _cover = bytes);
+  }
+
+  Future<void> _pickPoint() async {
+    final point = await Navigator.of(context).push<LatLng>(MaterialPageRoute(
+      builder: (_) => LocationPickerScreen(initial: _pickedPoint, locate: widget.locate),
+    ));
+    // Backing out of the picker keeps whatever was there before.
+    if (point == null || !mounted) return;
+    setState(() {
+      _pickedPoint = point;
+      _whereMissing = false;
+    });
   }
 
   void _back() {
@@ -187,14 +281,6 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
     } else {
       setState(() => _step -= 1);
     }
-  }
-
-  void _copyLink() {
-    Clipboard.setData(const ClipboardData(text: 'myparty.gr/p/taratsa-thanasi'));
-    setState(() => _copied = true);
-    Future.delayed(const Duration(milliseconds: 1800), () {
-      if (mounted) setState(() => _copied = false);
-    });
   }
 
   @override
@@ -317,9 +403,10 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
     String? hint,
     String? error,
     ValueChanged<String>? onChanged,
+    double bottomPadding = 13,
   }) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 13),
+      padding: EdgeInsets.only(bottom: bottomPadding),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -402,46 +489,18 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        GestureDetector(
-          onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Coming soon'), behavior: SnackBarBehavior.floating),
-          ),
-          child: Container(
-            height: 132,
-            margin: const EdgeInsets.only(bottom: 13),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(15),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.18), style: BorderStyle.solid),
-            ),
-            child: DiagonalStripePlaceholder(
-              colors: const [Color(0xFF171320), Color(0xFF12101A)],
-              borderRadius: BorderRadius.circular(15),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 32,
-                    height: 32,
-                    decoration: BoxDecoration(color: AppColors.purple.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(10)),
-                    child: const Icon(Icons.add, color: AppColors.purpleLight, size: 18),
-                  ),
-                  const SizedBox(height: 7),
-                  Text('cover · photo or video', style: AppTextStyles.mono(size: 9.5, color: AppColors.textAlpha(0.4))),
-                ],
-              ),
-            ),
-          ),
-        ),
+        _coverTile(),
         _field('NAME', _nameController),
         _field(
           'ADDRESS OR VENUE',
           _addressController,
           hint: 'e.g. 12 Example Street, Athens',
-          error: _addressMissing ? 'This field is necessary' : null,
-          onChanged: (_) {
-            if (_addressMissing) setState(() => _addressMissing = false);
-          },
+          error: _whereMissing ? 'This field is necessary' : null,
+          bottomPadding: 0,
+          onChanged: (_) => setState(() => _whereMissing = false),
         ),
+        _orDivider(),
+        _mapPickBox(),
         Row(
           children: [
             Expanded(child: _datePickerField()),
@@ -451,6 +510,164 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
         ),
         _field('DESCRIPTION (OPTIONAL)', _descController, maxLines: 4, hint: 'e.g. This is going to be fun!'),
       ],
+    );
+  }
+
+  Widget _coverTile() {
+    final cover = _cover;
+    return GestureDetector(
+      key: const Key('wizard-cover'),
+      onTap: _pickCover,
+      child: Container(
+        height: 132,
+        margin: const EdgeInsets.only(bottom: 13),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(15),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(15),
+          child: cover == null
+              ? DiagonalStripePlaceholder(
+                  colors: const [Color(0xFF171320), Color(0xFF12101A)],
+                  borderRadius: BorderRadius.circular(15),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(color: AppColors.purple.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(10)),
+                        child: const Icon(Icons.add, color: AppColors.purpleLight, size: 18),
+                      ),
+                      const SizedBox(height: 7),
+                      Text('cover · photo (optional)', style: AppTextStyles.mono(size: 9.5, color: AppColors.textAlpha(0.4))),
+                    ],
+                  ),
+                )
+              : Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.memory(cover, fit: BoxFit.cover),
+                    Positioned(
+                      right: 8,
+                      bottom: 8,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(9)),
+                        child: const Text('Change cover', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
+                      ),
+                    ),
+                    Positioned(
+                      right: 6,
+                      top: 6,
+                      child: GestureDetector(
+                        key: const Key('wizard-cover-remove'),
+                        onTap: () => setState(() => _cover = null),
+                        child: Container(
+                          width: 28,
+                          height: 28,
+                          decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.6), shape: BoxShape.circle),
+                          child: const Icon(Icons.close, size: 16),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
+
+  /// The "where" half of the review card's subtitle. Step 1 lets a picked
+  /// spot stand in for the address, so the address can be empty here.
+  String _reviewWhere() {
+    final address = _addressController.text.trim();
+    return address.isNotEmpty ? address : 'See map for location';
+  }
+
+  Widget _orDivider() {
+    Widget line() => Expanded(child: Container(height: 1, color: AppColors.hairline));
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 9),
+      child: Row(
+        children: [
+          line(),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Text('or', style: AppTextStyles.mono(size: 10, color: AppColors.textAlpha(0.45))),
+          ),
+          line(),
+        ],
+      ),
+    );
+  }
+
+  /// The second answer to "where": a spot on the map. Red alongside the
+  /// address field when neither is given, because either one would do.
+  Widget _mapPickBox() {
+    final point = _pickedPoint;
+    final borderColor = _whereMissing
+        ? AppColors.destructive
+        : point != null
+            ? AppColors.purple
+            : AppColors.hairline;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 13),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          GestureDetector(
+            key: const Key('wizard-pick-on-map'),
+            onTap: _pickPoint,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 14),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(13),
+                border: Border.all(color: borderColor),
+              ),
+              child: point == null
+                  ? const Text('📍 Pick point on map', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600))
+                  : Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('📍 Pinned on the map', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600)),
+                              const SizedBox(height: 2),
+                              Text(formatPickedPoint(point), style: AppTextStyles.mono(size: 11, color: AppColors.textAlpha(0.5))),
+                            ],
+                          ),
+                        ),
+                        const Text('Change', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.purpleLight)),
+                        const SizedBox(width: 6),
+                        GestureDetector(
+                          key: const Key('wizard-pick-clear'),
+                          onTap: () => setState(() => _pickedPoint = null),
+                          child: Icon(Icons.close, size: 18, color: AppColors.textAlpha(0.5)),
+                        ),
+                      ],
+                    ),
+            ),
+          ),
+          // Said out loud because nothing turns a typed address into a point
+          // (no geocoder — see LocationPickerScreen): without a picked spot
+          // the pin goes where the phone is, and a host writing an address
+          // across town would otherwise not find out until guests did.
+          if (point == null && !_whereMissing)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 7, 4, 0),
+              child: Text(
+                'No spot picked? The pin goes where you are when you create the party.',
+                style: TextStyle(fontSize: 11.5, height: 1.4, color: AppColors.textAlpha(0.4)),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -559,42 +776,33 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        GestureDetector(
-          onTap: _copyLink,
-          child: Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(15),
-              border: Border.all(color: AppColors.purple.withValues(alpha: 0.4)),
-              gradient: LinearGradient(colors: [AppColors.purpleDeep.withValues(alpha: 0.22), AppColors.pink.withValues(alpha: 0.14)]),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Invite link', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
-                          SizedBox(height: 3),
-                        ],
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
-                      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(10)),
-                      child: Text(_copied ? 'Copied ✓' : 'Copy', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
-                    ),
-                  ],
-                ),
-                Text('myparty.gr/p/taratsa-thanasi', style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.55))),
-                const SizedBox(height: 9),
-                Text('Send it to your group chat. Anyone who opens it joins the guest list and sees the party on the map.',
-                    style: TextStyle(fontSize: 11, height: 1.45, color: AppColors.textAlpha(0.5))),
-              ],
-            ),
+        // Explains the link rather than offering one: the real link is the
+        // party's id, which does not exist until create_party_with_invites
+        // returns, so the Share button lives on the done screen. This card
+        // used to copy a hardcoded `myparty.gr/p/taratsa-thanasi` and promise
+        // that opening it joined the guest list — an invite-link capability
+        // the app never had and, by decision, does not have: a link only
+        // OPENS a party, for people already allowed to see it.
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(15),
+            border: Border.all(color: AppColors.purple.withValues(alpha: 0.4)),
+            gradient: LinearGradient(colors: [AppColors.purpleDeep.withValues(alpha: 0.22), AppColors.pink.withValues(alpha: 0.14)]),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Party link', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 5),
+              Text(
+                _private
+                    ? 'You’ll get a link to share once the party is created. Only people you invite can open it.'
+                    : 'You’ll get a link to share once the party is created. Anyone can open it.',
+                style: TextStyle(fontSize: 11, height: 1.45, color: AppColors.textAlpha(0.5)),
+              ),
+            ],
           ),
         ),
         Padding(
@@ -710,7 +918,10 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    const DiagonalStripePlaceholder(colors: [Color(0xFF1C1622), Color(0xFF151020)], label: 'cover'),
+                    if (_cover != null)
+                      Image.memory(_cover!, fit: BoxFit.cover)
+                    else
+                      const DiagonalStripePlaceholder(colors: [Color(0xFF1C1622), Color(0xFF151020)], label: 'cover'),
                     Container(
                       decoration: const BoxDecoration(
                         gradient: LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter, colors: [Colors.black87, Colors.transparent]),
@@ -733,7 +944,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(_nameController.text, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
-                          Text('${formatPartyStartEn(_startsAt)} · ${_addressController.text}',
+                          Text('${formatPartyStartEn(_startsAt)} · ${_reviewWhere()}',
                               maxLines: 1, overflow: TextOverflow.ellipsis,
                               style: TextStyle(fontSize: 11.5, color: AppColors.textAlpha(0.65))),
                         ],
@@ -811,12 +1022,16 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
 }
 
 class _HostDoneScreen extends StatelessWidget {
+  final ShareText share;
+  final bool coverFailed;
   final int invitedCount;
   final String partyId;
   final String partyTitle;
   final bool isPrivate;
 
   const _HostDoneScreen({
+    required this.share,
+    required this.coverFailed,
     required this.invitedCount,
     required this.partyId,
     required this.partyTitle,
@@ -862,6 +1077,42 @@ class _HostDoneScreen extends StatelessWidget {
                         : 'It’s on the map. Anyone nearby can see it.',
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 13, height: 1.55, color: AppColors.textAlpha(0.6)),
+                  ),
+                ),
+                if (coverFailed)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: Text(
+                      'The cover didn’t upload, so the party is live without one.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 12.5, height: 1.5, color: AppColors.destructive.withValues(alpha: 0.9)),
+                    ),
+                  ),
+                // The real link, now that the party has an id. Both kinds get
+                // one: a public party's opens for anyone, a private party's
+                // only for the people invited to it (get_party under RLS).
+                Padding(
+                  padding: const EdgeInsets.only(top: 22),
+                  child: GestureDetector(
+                    key: const Key('host-done-share'),
+                    onTap: () => share(partyShareText(partyId: partyId, title: partyTitle, isPrivate: isPrivate)),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(15),
+                        border: Border.all(color: AppColors.purple.withValues(alpha: 0.5)),
+                        color: AppColors.purple.withValues(alpha: 0.12),
+                      ),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.ios_share, size: 17),
+                          SizedBox(width: 8),
+                          Text('Share link', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
                 // The wizard creates BOTH kinds, which makes this the entry

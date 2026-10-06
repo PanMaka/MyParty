@@ -407,6 +407,12 @@ verify_jwt = true
 enabled = true
 verify_jwt = true
 
+# Phase 25. post-media's twin for the party-covers bucket: one route, signs only
+# the path public.party_cover_upload_target hands back for the caller's own JWT.
+[functions.party-cover]
+enabled = true
+verify_jwt = true
+
 # Phase 7c. Drains notification_jobs and calls FCM HTTP v1. Woken by the insert
 # trigger on that table and by the every-minute cron, both over pg_net reading
 # vault (20260817083542) — never by a client.
