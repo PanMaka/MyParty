@@ -25,13 +25,16 @@ Uri partyLink(String partyId) => Uri(scheme: 'https', host: kPartyLinkHost, path
 /// The party id in [uri], or null when [uri] is not exactly a party link.
 ///
 /// Strict on purpose — a link arrives from outside the app and is untrusted
-/// input. https only, our host only, exactly `/p/<lowercase uuid>`, with an
+/// input. https only, our one host only, exactly `/p/<lowercase uuid>`, with an
 /// optional trailing slash. Query and fragment are IGNORED rather than read:
 /// nothing a link could carry there is ever acted on, so a link padded with
 /// tokens or parameters opens the same party as a clean one and nothing more.
 String? partyIdFromLink(Uri uri) {
   if (uri.scheme != 'https') return null;
-  if (uri.host != kPartyLinkHost && uri.host != 'www.$kPartyLinkHost') return null;
+  // Exactly the one host the manifest's intent filter verifies — a www link
+  // would never reach the app anyway, so accepting it here would only be a
+  // second definition of "our host" to keep in step.
+  if (uri.host != kPartyLinkHost) return null;
   if (uri.hasPort && uri.port != 443) return null;
   if (uri.userInfo.isNotEmpty) return null;
 

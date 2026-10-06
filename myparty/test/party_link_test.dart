@@ -16,7 +16,6 @@ void main() {
     for (final link in [
       'https://mypartycorp.com/p/$id',
       'https://mypartycorp.com/p/$id/',
-      'https://www.mypartycorp.com/p/$id',
       'https://mypartycorp.com:443/p/$id',
     ]) {
       test(link, () => expect(partyIdFromLink(Uri.parse(link)), id));
@@ -43,6 +42,7 @@ void main() {
       'https://evil.com/p/$id',
       'https://mypartycorp.com.evil.com/p/$id', // suffix trick
       'https://evilmypartycorp.com/p/$id',
+      'https://www.mypartycorp.com/p/$id', // the manifest verifies the apex only
       'https://user@mypartycorp.com/p/$id', // userinfo
       'https://mypartycorp.com:8443/p/$id',
       'https://mypartycorp.com/p/${id.toUpperCase()}',
