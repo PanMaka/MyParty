@@ -183,6 +183,22 @@ party screen to put the button on; neither exists.
 
 *What it costs to leave:* a wrong cover stays until the party is cancelled.
 
+### 1.13 Party links open the browser until mypartycorp.com serves assetlinks.json
+
+The app side of App Links is done (`autoVerify` filter, `PartyLinks`,
+`get_party`), but `mypartycorp.com` has no DNS record yet, so Android cannot
+verify the domain and a tapped link opens Chrome. `hosting/README.md` lists what
+the domain must serve and how to check it.
+
+*Why it is still open:* needs hosting and DNS for the domain, and two release
+decisions: the app id is still Flutter's placeholder `com.example.myparty`
+(Play rejects `com.example.*`), and `assetlinks.json` lists one developer's
+debug-key fingerprint — teammates' debug builds and the Play signing key need
+theirs added.
+
+*What it costs to leave:* links work inside the app (share sheet, adb) but a
+friend tapping one in a chat lands on an unreachable page.
+
 ---
 
 ## 2. Costed: should the map adopt `party_is_past()`?

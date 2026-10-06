@@ -304,6 +304,28 @@ pre-live (saturates at 100, so only parties under that move), and
 "12 here now" beside "46 interested" means 46 of whom 12 arrived, not 58. The
 doc comments on both were corrected; the UI was not.
 
+**Party links are pointers, not keys** (Phase 25). `https://mypartycorp.com/p/<id>`
+carries the party id and nothing else; opening it calls `get_party`, which is
+SECURITY INVOKER, so a private party opens only for its host and invitees and
+returns the *same* zero rows as an id that never existed — the client says
+"not available" for every refusal, and a failed fetch too, so a link cannot be
+used to probe which ids exist. A private party is shared **without its title**
+(`partyShareText`). An invite-link capability ("anyone with the link joins")
+was explicitly declined; if it ever comes it is a separate hashed, revocable
+token, never the id.
+
+**`detectSessionInUri` is OFF and must stay off** (`main.dart`). When on,
+supabase_flutter feeds every incoming link to gotrue's `getSessionFromUrl`,
+which saves ANY real user's `access_token`/`refresh_token` found in it as the
+session — PKCE flow or not. With party links opening the app that is one tap
+from login CSRF: a link built from the attacker's own tokens swaps the victim
+into the attacker's account. Measured on the emulator: a party link carrying
+host@myparty.local's real tokens opened the party and the auth server logged
+zero `/user` calls. If an email/OAuth callback is ever added, re-enable it only
+through `detectSessionInUriPredicate` scoped to that one path. Same review:
+`allowBackup`/`dataExtractionRules` keep the refresh token in `shared_prefs`
+out of cloud backup and device-to-device transfer.
+
 **Red means private; `AppColors.destructive` means destructive.** Private moved
 pink → `AppColors.private` (#F23557) across the map bubble, `PrivacyBadge` and
 every card accent, so one colour means private app-wide. It is a *separate
