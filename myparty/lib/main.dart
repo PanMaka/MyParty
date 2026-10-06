@@ -19,6 +19,19 @@ Future<void> main() async {
   await Supabase.initialize(
     url: dotenv.env['SUPABASE_URL']!,
     publishableKey: dotenv.env['SUPABASE_ANON_KEY']!,
+    // OFF, and this is a security setting rather than a preference. When on,
+    // supabase_flutter inspects EVERY link that opens the app, and a link
+    // carrying access_token/refresh_token/expires_in/token_type is validated
+    // only as "a real user's token" and then saved as the session (gotrue's
+    // getSessionFromUrl, PKCE or not). Once party links open the app, that
+    // is one tap from login CSRF: a link built from the attacker's own
+    // tokens silently swaps the victim into the attacker's account, and
+    // everything they post, upload or export afterwards lands where the
+    // attacker can read it. Nothing here signs in through a link (no email
+    // confirmation, password reset or OAuth), so this costs nothing today.
+    // If one of those arrives, re-enable it with detectSessionInUriPredicate
+    // restricted to that one callback path, never globally.
+    authOptions: const FlutterAuthClientOptions(detectSessionInUri: false),
   );
 
   // Phase 7c. Firebase, plus the background message handler — which has to be

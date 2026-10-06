@@ -19,10 +19,17 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <!-- allowBackup false: the session (a long-lived refresh token) lives in
+         shared_prefs, unencrypted, and the default is to copy app data into
+         Google backups and device-to-device transfers. Everything worth
+         keeping is on the server; a restored phone signs in again. -->
     <application
         android:label="myparty"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules">
         <activity
             android:name=".MainActivity"
             android:exported="true"
