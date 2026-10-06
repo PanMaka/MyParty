@@ -9,6 +9,7 @@ import '../../data/profile_repository.dart';
 import '../../data/social_repository.dart';
 import '../../models/profile.dart';
 import '../../utils/english_date.dart';
+import '../../utils/share_party.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
 import '../widgets/map_base.dart';
@@ -24,6 +25,7 @@ class HostWizardScreen extends StatefulWidget {
     this.profiles,
     this.picker,
     this.locate,
+    this.share,
   });
 
   /// Injectable so widget tests can fake every repository, as the map and
@@ -40,6 +42,9 @@ class HostWizardScreen extends StatefulWidget {
   /// Handed to [LocationPickerScreen]; geolocator never completes in tests.
   final LocationFix? locate;
 
+  /// The done screen's share sheet; tests record instead of opening one.
+  final ShareText? share;
+
   @override
   State<HostWizardScreen> createState() => _HostWizardScreenState();
 }
@@ -52,7 +57,6 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
 
   int _step = 1;
   bool _private = true;
-  bool _copied = false;
   bool _submitting = false;
   String? _submitError;
 
@@ -139,7 +143,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
       case 2:
         return 'You can change this until it starts';
       case 3:
-        return '${_invited.length} invited + anyone who opens the link';
+        return '${_invited.length} invited';
       default:
         return 'Sent to ${_people(_invited.length)} and added to their map';
     }
@@ -195,6 +199,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
       if (!mounted) return;
       Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => _HostDoneScreen(
+          share: widget.share ?? systemShare,
           coverFailed: coverFailed,
           invitedCount: _invited.length,
           // The real uuid create_party_with_invites just returned. The done
@@ -276,14 +281,6 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
     } else {
       setState(() => _step -= 1);
     }
-  }
-
-  void _copyLink() {
-    Clipboard.setData(const ClipboardData(text: 'myparty.gr/p/taratsa-thanasi'));
-    setState(() => _copied = true);
-    Future.delayed(const Duration(milliseconds: 1800), () {
-      if (mounted) setState(() => _copied = false);
-    });
   }
 
   @override
@@ -779,42 +776,33 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        GestureDetector(
-          onTap: _copyLink,
-          child: Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(15),
-              border: Border.all(color: AppColors.purple.withValues(alpha: 0.4)),
-              gradient: LinearGradient(colors: [AppColors.purpleDeep.withValues(alpha: 0.22), AppColors.pink.withValues(alpha: 0.14)]),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Invite link', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
-                          SizedBox(height: 3),
-                        ],
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
-                      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(10)),
-                      child: Text(_copied ? 'Copied ✓' : 'Copy', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
-                    ),
-                  ],
-                ),
-                Text('myparty.gr/p/taratsa-thanasi', style: AppTextStyles.mono(size: 10.5, color: AppColors.textAlpha(0.55))),
-                const SizedBox(height: 9),
-                Text('Send it to your group chat. Anyone who opens it joins the guest list and sees the party on the map.',
-                    style: TextStyle(fontSize: 11, height: 1.45, color: AppColors.textAlpha(0.5))),
-              ],
-            ),
+        // Explains the link rather than offering one: the real link is the
+        // party's id, which does not exist until create_party_with_invites
+        // returns, so the Share button lives on the done screen. This card
+        // used to copy a hardcoded `myparty.gr/p/taratsa-thanasi` and promise
+        // that opening it joined the guest list — an invite-link capability
+        // the app never had and, by decision, does not have: a link only
+        // OPENS a party, for people already allowed to see it.
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(15),
+            border: Border.all(color: AppColors.purple.withValues(alpha: 0.4)),
+            gradient: LinearGradient(colors: [AppColors.purpleDeep.withValues(alpha: 0.22), AppColors.pink.withValues(alpha: 0.14)]),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Party link', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 5),
+              Text(
+                _private
+                    ? 'You’ll get a link to share once the party is created. Only people you invite can open it.'
+                    : 'You’ll get a link to share once the party is created. Anyone can open it.',
+                style: TextStyle(fontSize: 11, height: 1.45, color: AppColors.textAlpha(0.5)),
+              ),
+            ],
           ),
         ),
         Padding(
@@ -1034,6 +1022,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
 }
 
 class _HostDoneScreen extends StatelessWidget {
+  final ShareText share;
   final bool coverFailed;
   final int invitedCount;
   final String partyId;
@@ -1041,6 +1030,7 @@ class _HostDoneScreen extends StatelessWidget {
   final bool isPrivate;
 
   const _HostDoneScreen({
+    required this.share,
     required this.coverFailed,
     required this.invitedCount,
     required this.partyId,
@@ -1098,6 +1088,33 @@ class _HostDoneScreen extends StatelessWidget {
                       style: TextStyle(fontSize: 12.5, height: 1.5, color: AppColors.destructive.withValues(alpha: 0.9)),
                     ),
                   ),
+                // The real link, now that the party has an id. Both kinds get
+                // one: a public party's opens for anyone, a private party's
+                // only for the people invited to it (get_party under RLS).
+                Padding(
+                  padding: const EdgeInsets.only(top: 22),
+                  child: GestureDetector(
+                    key: const Key('host-done-share'),
+                    onTap: () => share(partyShareText(partyId: partyId, title: partyTitle, isPrivate: isPrivate)),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(15),
+                        border: Border.all(color: AppColors.purple.withValues(alpha: 0.5)),
+                        color: AppColors.purple.withValues(alpha: 0.12),
+                      ),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.ios_share, size: 17),
+                          SizedBox(width: 8),
+                          Text('Share link', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
                 // The wizard creates BOTH kinds, which makes this the entry
                 // point most likely to strand someone: a public party has no
                 // chat since 20260825094044, so offering to open one would

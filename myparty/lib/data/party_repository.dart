@@ -463,6 +463,19 @@ class PartyRepository {
   /// [cursor] null fetches the first page. The returned [PartyListPage.cursor]
   /// is null when the server returned a short page, which is the end of the
   /// list; callers page until it is null rather than counting rows.
+  /// One party by id, for a party link — or null when it is not available.
+  ///
+  /// Null covers four cases on purpose and the caller must not try to tell
+  /// them apart: no such party, a private party the caller is not invited to,
+  /// a cancelled one, and one that has ended. `get_party` returns the same
+  /// zero rows for all four, so a link reveals nothing about a party its
+  /// holder may not see — not even that it exists.
+  Future<PartyListItem?> fetchParty(String partyId) async {
+    final rows = await _client.rpc('get_party', params: {'p_party_id': partyId}) as List;
+    if (rows.isEmpty) return null;
+    return PartyListItem.fromRow(rows.first as Map<String, dynamic>);
+  }
+
   Future<PartyListPage> fetchPartiesList({
     PartySort sort = PartySort.soonest,
     int limit = 30,

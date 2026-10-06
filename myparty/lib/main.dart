@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'services/notifications.dart';
+import 'services/party_links.dart';
 import 'state/mp_store.dart';
 import 'ui/screens/auth_gate.dart';
 import 'ui/theme/app_theme.dart';
@@ -39,6 +40,10 @@ Future<void> main() async {
   // where no widget has been built yet. Never throws: with no Firebase config
   // present this logs and the app runs with push unavailable.
   await Notifications.initialise();
+
+  // Before runApp: the link that launched the app arrives on the same stream
+  // as later ones and must be caught while the auth gate is still deciding.
+  PartyLinks.start();
 
   runApp(const MyPartyApp());
 }

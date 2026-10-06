@@ -7,6 +7,7 @@ import '../../state/mp_store.dart';
 import '../screens/chat_screen.dart';
 import '../../state/rsvp_changes.dart';
 import '../../utils/english_date.dart';
+import '../../utils/share_party.dart';
 import '../theme/app_theme.dart';
 import 'diagonal_placeholder.dart';
 import 'privacy_badge.dart';
@@ -41,10 +42,13 @@ Future<void> showMapPinSheet(
 }
 
 class MapPinSheet extends StatefulWidget {
-  const MapPinSheet({super.key, required this.pin, required this.repository});
+  const MapPinSheet({super.key, required this.pin, required this.repository, this.share});
 
   final MapPartyPin pin;
   final PartyRepository repository;
+
+  /// The system share sheet by default; tests record instead.
+  final ShareText? share;
 
   @override
   State<MapPinSheet> createState() => _MapPinSheetState();
@@ -206,6 +210,15 @@ class _MapPinSheetState extends State<MapPinSheet> {
             icon: Icon(Icons.forum_outlined, size: 20, color: AppColors.textAlpha(0.75)),
             tooltip: 'Group chat',
           ),
+        // Anyone who can see the pin may pass the link on; it opens the party
+        // only for people the parties policy already lets see it.
+        IconButton(
+          onPressed: () => (widget.share ?? systemShare)(
+            partyShareText(partyId: pin.id, title: pin.title, isPrivate: pin.isPrivate),
+          ),
+          icon: Icon(Icons.ios_share, size: 19, color: AppColors.textAlpha(0.75)),
+          tooltip: 'Share',
+        ),
         // A party is UGC too, and this sheet — unlike the mock
         // PartyDetailSheet — is backed by a real `parties` row, so
         // pin.id is the uuid `reports.target_id` needs.

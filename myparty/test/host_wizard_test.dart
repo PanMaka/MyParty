@@ -73,12 +73,16 @@ final _gif = Uint8List.fromList(utf8.encode('GIF89a') + List.filled(16, 0));
 
 const _picked = LatLng(37.96420, 23.72710);
 
+/// What the done screen handed to the share sheet, per test.
+final _shared = <String>[];
+
 Future<_FakePartyRepository> _pump(
   WidgetTester tester, {
   _FakePartyRepository? repository,
   Uint8List? pickerBytes,
 }) async {
   final repo = repository ?? _FakePartyRepository();
+  _shared.clear();
   await tester.pumpWidget(MaterialApp(
     home: HostWizardScreen(
       repository: repo,
@@ -88,6 +92,7 @@ Future<_FakePartyRepository> _pump(
       // The picker opens on this fix; the tests confirm without moving, so
       // whatever it returns is exactly this point.
       locate: () async => _picked,
+      share: (text) async => _shared.add(text),
     ),
   ));
   await tester.pumpAndSettle();
@@ -203,6 +208,29 @@ void main() {
 
       expect(find.textContaining('· 12 Example Street'), findsOneWidget);
       expect(find.textContaining('See map for location'), findsNothing);
+    });
+
+    testWidgets('step 3 explains the link instead of offering a fake one', (tester) async {
+      await _pump(tester);
+      await _pickOnMap(tester);
+      await _tap(tester, find.text('Continue'));
+      await _tap(tester, find.text('Private, continue'));
+
+      expect(find.textContaining('Only people you invite can open it'), findsOneWidget);
+      expect(find.textContaining('myparty.gr'), findsNothing);
+      expect(find.textContaining('joins the guest list'), findsNothing);
+      expect(find.text('Copy'), findsNothing);
+    });
+
+    testWidgets('the done screen shares the real link of the party just created', (tester) async {
+      await _pump(tester);
+      await _pickOnMap(tester);
+      await walkToCreate(tester);
+
+      await _tap(tester, find.byKey(const Key('host-done-share')));
+
+      // Private by default, so the link alone -- no title.
+      expect(_shared, ['https://mypartycorp.com/p/party-1']);
     });
 
     testWidgets('the name defaults to the host’s party', (tester) async {

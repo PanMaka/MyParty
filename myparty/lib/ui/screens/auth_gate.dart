@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../services/notifications.dart';
+import '../widgets/party_link_handler.dart';
 import 'login_screen.dart';
 import 'home_screen.dart';
 import 'username_setup_screen.dart';
@@ -108,7 +109,11 @@ class _ProfileGateState extends State<_ProfileGate> {
             }),
           );
         }
-        return snapshot.data! ? const UsernameSetupScreen() : const HomeScreen();
+        // PartyLinkHandler only around the signed-in, onboarded root: a link
+        // opened earlier waits in PartyLinks.pending until this exists.
+        return snapshot.data!
+            ? const UsernameSetupScreen()
+            : const PartyLinkHandler(child: HomeScreen());
       },
     );
   }
