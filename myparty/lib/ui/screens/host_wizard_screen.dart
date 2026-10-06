@@ -582,6 +582,13 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
     );
   }
 
+  /// The "where" half of the review card's subtitle. Step 1 lets a picked
+  /// spot stand in for the address, so the address can be empty here.
+  String _reviewWhere() {
+    final address = _addressController.text.trim();
+    return address.isNotEmpty ? address : 'See map for location';
+  }
+
   Widget _orDivider() {
     Widget line() => Expanded(child: Container(height: 1, color: AppColors.hairline));
     return Padding(
@@ -949,7 +956,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(_nameController.text, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
-                          Text('${formatPartyStartEn(_startsAt)} · ${_addressController.text}',
+                          Text('${formatPartyStartEn(_startsAt)} · ${_reviewWhere()}',
                               maxLines: 1, overflow: TextOverflow.ellipsis,
                               style: TextStyle(fontSize: 11.5, color: AppColors.textAlpha(0.65))),
                         ],

@@ -182,6 +182,29 @@ void main() {
       expect(find.text('Your party is live'), findsOneWidget);
     });
 
+    testWidgets('a spot with no address reads "See map for location" on the review card', (tester) async {
+      await _pump(tester);
+      await _pickOnMap(tester);
+
+      await _tap(tester, find.text('Continue'));
+      await _tap(tester, find.text('Private, continue'));
+      await _tap(tester, find.text('See what they’ll see'));
+
+      expect(find.textContaining('· See map for location'), findsOneWidget);
+    });
+
+    testWidgets('a typed address is shown as-is on the review card', (tester) async {
+      await _pump(tester);
+      await tester.enterText(find.byType(TextField).at(1), '12 Example Street');
+
+      await _tap(tester, find.text('Continue'));
+      await _tap(tester, find.text('Private, continue'));
+      await _tap(tester, find.text('See what they’ll see'));
+
+      expect(find.textContaining('· 12 Example Street'), findsOneWidget);
+      expect(find.textContaining('See map for location'), findsNothing);
+    });
+
     testWidgets('the name defaults to the host’s party', (tester) async {
       final repo = await _pump(tester);
       await _pickOnMap(tester);
