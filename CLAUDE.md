@@ -873,6 +873,24 @@ is therefore still blocked.
       about it. **§5 of `docs/phase-10-hardening-audit.md` goes before search,
       not after.** Sequencing decided 2026-08-21.
 
+23. **A grant is only the whole grant if the defaults grant nothing, and
+    Supabase's image decides that, not us.** The `postgres` image runs
+    `alter default privileges in schema public grant all on tables/functions/
+    sequences to anon, authenticated`. The image this schema was written
+    against did not apply it to our tables (`20260812115436` exists only to
+    grant `authenticated` access to `profiles`/`parties`); `17.11.0.002`, pulled
+    2026-10, does, and a fresh `db reset` handed anon full DML on 16 of 22
+    tables plus EXECUTE on every RPC. 26 pgTAP assertions went red, some on
+    their own birth commit. RLS still filtered rows, but the layer beneath it
+    (column-scoped writes, "no UPDATE grant at all", anon refused `get_feed`)
+    was gone. `20261004234903` closes the defaults, revokes everything anon/
+    authenticated hold in `public` and re-grants an allow-list captured from a
+    reset with the defaults off. **`27_explicit_grants.test.sql` holds that
+    allow-list and fails on any grant it does not name, in either direction,**
+    so a new `grant` in a migration needs its row there too. Note that
+    `revoke … on table` also drops that table's column grants, so anything
+    revoking at table level has to re-issue them.
+
 **Known gaps live in `docs/backlog.md`**, including what is deliberately not a
 gap. Sweep it when a phase ends; an item that turns out to be a decision moves
 to its §3 rather than being deleted.
