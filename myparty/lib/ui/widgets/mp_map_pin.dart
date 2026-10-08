@@ -217,7 +217,7 @@ class _MpMapPinState extends State<MpMapPin> with TickerProviderStateMixin {
     final live = pin.liveAt(widget.now);
     final count = pin.pinCount;
     final m = MpPinMetrics.forPin(pin, widget.now);
-    final accent = pin.isPrivate ? AppColors.private : AppColors.purple;
+    final accent = AppColors.partyAccent(isPrivate: pin.isPrivate);
     final pulse = _pulse;
 
     // The bare number, with no unit and no title — for a PUBLIC party. It is

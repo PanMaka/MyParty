@@ -35,6 +35,11 @@ class AppColors {
   static const privateDeep = Color(0xFFC4213C);
   static const privateLight = Color(0xFFFF9AAC);
 
+  /// The map's public/private accent: the pin's border and glow, and the map
+  /// legend's swatch. One definition so the legend cannot describe a colour
+  /// the pins do not use — it drifted to [pink] for private once already.
+  static Color partyAccent({required bool isPrivate}) => isPrivate ? private : purple;
+
   /// Destructive actions only: account deletion, and anything else that
   /// permanently removes data. Was an unnamed literal repeated four times in
   /// account_deletion_screen.dart.
