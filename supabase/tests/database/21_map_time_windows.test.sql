@@ -3,12 +3,14 @@
 -- Three properties this file exists to protect, in descending order of how
 -- expensive they are to get wrong:
 --
--- 1. THE DEFAULT MAP IS UNCHANGED. p_window defaults to 'all', and 'all' is an
---    unbounded range. Section 5 asserts the three-argument call and the
---    explicit 'all' call return identical sets, and that a null-ends_at party
---    from twenty days ago is STILL on the default map. gotcha 21 stays open on
---    purpose; if a later change closes it, it must be a decision taken here
---    and not a side effect of adding a chip.
+-- 1. THE DEFAULT MAP AGREES WITH THE LIST ABOUT WHAT IS OVER. p_window
+--    defaults to 'all', and 'all' is an unbounded range -- but since
+--    20261008150440 the grace period applies on every window, not only Τώρα,
+--    so a null-ends_at party from twenty days ago is GONE from the default map
+--    (gotcha 21, closed on purpose). Section 5 asserts that, asserts that a
+--    multi-day party with a stated end survives it, and asserts the map and
+--    get_parties_list return the same fixtures -- a pin with no card, or a
+--    card with no pin, is the bug that decision was taken to end.
 --
 -- 2. THE TWO SPELLINGS OF THE GRACE PERIOD CANNOT DRIFT. party_is_past() puts
 --    the interval on the row side; the map query MUST put it on the constant
@@ -33,7 +35,7 @@
 -- stranger 4444, blocked_user 5555, second_host 6666.
 begin;
 set search_path to public, extensions;
-select plan(42);
+select plan(45);
 
 
 -- ============================================================
@@ -260,15 +262,24 @@ values ('ffffffff-0000-0000-0000-000000000002',
         st_point(23.7349, 37.9756)::geography,
         now() - interval '1 hour', now() + interval '2 hours', false, 'published');
 
--- THE GOTCHA 21 FIXTURE. Started twenty days ago, no stated end, so the base
--- filter cannot tell it is over. It must still be on the default map and must
--- not be in Τώρα.
+-- THE GOTCHA 21 FIXTURE. Started twenty days ago, no stated end. Past the
+-- grace, so it is over -- on the default map as well as in Τώρα.
 insert into public.parties (id, host_id, title, area, location, starts_at, ends_at, is_private, status)
 values ('ffffffff-0000-0000-0000-000000000003',
         '11111111-1111-1111-1111-111111111111',
         'Ξεχασμένο Χωρίς Λήξη', 'Σύνταγμα',
         st_point(23.7349, 37.9756)::geography,
         now() - interval '20 days', null, false, 'published');
+
+-- Multi-day, with a stated end: started two days ago, ends tomorrow. The
+-- grace is for parties that do NOT say when they end, so this one is on the
+-- map and in the list. get_parties_list used to drop it six hours in.
+insert into public.parties (id, host_id, title, area, location, starts_at, ends_at, is_private, status)
+values ('ffffffff-0000-0000-0000-000000000008',
+        '11111111-1111-1111-1111-111111111111',
+        'Τριήμερο Φεστιβάλ', 'Σύνταγμα',
+        st_point(23.7349, 37.9756)::geography,
+        now() - interval '2 days', now() + interval '1 day', false, 'published');
 
 -- Inside "tonight", by construction.
 insert into public.parties (id, host_id, title, area, location, starts_at, ends_at, is_private, status)
@@ -314,12 +325,43 @@ values ('ffffffff-0000-0000-0000-000000000007',
 
 select tests.authenticate_as('44444444-4444-4444-4444-444444444444'); -- stranger
 
--- THE HEADLINE. The default map is untouched, and gotcha 21 is still open.
-select isnt_empty(
+-- THE HEADLINE. gotcha 21 is closed on the default map (20261008150440).
+select is_empty(
   $$ select 1 from public.get_parties_near_user(23.7348, 37.9755, 500)
      where party_id = 'ffffffff-0000-0000-0000-000000000003' $$,
-  'a null-ends_at party from 20 days ago is STILL on the default map -- '
-  'gotcha 21 stays open, deliberately, and this phase did not close it'
+  'a null-ends_at party from 20 days ago is NOT on the default map -- the '
+  'grace applies on every window, not only Τώρα (gotcha 21, closed)'
+);
+
+select isnt_empty(
+  $$ select 1 from public.get_parties_near_user(23.7348, 37.9755, 500)
+     where party_id = 'ffffffff-0000-0000-0000-000000000008' $$,
+  'a multi-day party with a stated end in the future IS on the default map '
+  '-- the grace never applies where ends_at is set'
+);
+
+-- MAP AND LIST AGREE. The fixtures all sit inside the 500m circle at the
+-- 15km-and-under tier, so the only thing that can separate the two sets is the
+-- "is it over" rule -- which is the rule this asserts is shared. Private
+-- fixture 6 is absent from both for the stranger.
+select results_eq(
+  $$ select party_id from public.get_parties_near_user(23.7348, 37.9755, 500)
+     where party_id::text like 'ffffffff-%' order by party_id $$,
+  $$ select party_id from public.get_parties_list('soonest', 100)
+     where party_id::text like 'ffffffff-%' order by party_id $$,
+  'the default map and ALL PARTIES return the same fixtures -- no pin '
+  'without a card, no card without a pin'
+);
+
+-- And both agree with party_is_past, the row-side definition, row by row.
+select results_eq(
+  $$ select party_id from public.get_parties_near_user(23.7348, 37.9755, 500)
+     where party_id::text like 'ffffffff-%' order by party_id $$,
+  $$ select id from public.parties
+     where id::text like 'ffffffff-%' and not is_private
+       and not public.party_is_past(starts_at, ends_at) order by id $$,
+  'the default map shows exactly the public fixtures party_is_past says are '
+  'not over -- three spellings, one definition'
 );
 
 select is_empty(
@@ -386,7 +428,7 @@ select results_eq(
   $$ select party_id from public.get_parties_near_user(23.7348, 37.9755, 500, 200, 'all')
      order by party_id $$,
   'the three-argument call and an explicit ''all'' return the same set -- the '
-  'new parameters are additive and every pre-Phase-15 caller is unaffected'
+  'default really is ''all'', not merely similar to it'
 );
 
 -- A WINDOW NARROWS. IT NEVER WIDENS.

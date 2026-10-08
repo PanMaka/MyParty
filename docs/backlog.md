@@ -97,9 +97,13 @@ this entry cannot be actioned or closed.
 
 ### 1.6 gotcha 21 — `ends_at` on the map
 
-Open since Phase 2. Search now has a definition (`public.party_is_past()`); the
-map still shows a party with a null `ends_at` forever. Costed in §2 below —
-short version: the *definition* is now free to adopt, the *number* is not.
+**Closed on the map 2026-10-08 (`20261008150440`)** by adopting the 6h grace
+on the map's default view and sharing one predicate with `get_parties_list`
+and `get_party` — the option §2 below argued against, taken knowingly because
+the zombie pins had made ALL PARTIES look broken. What remains open is the
+real fix §2 recommends: **require `ends_at` at party creation** (option 3),
+which retires the grace on every surface and stops live all-nighters with no
+stated end vanishing at +6h.
 
 ### 1.7 `mp_store.dart` still backs three surfaces
 

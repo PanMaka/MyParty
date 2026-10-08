@@ -26,13 +26,14 @@
 /// at exactly 04:00 local in Greece.
 enum MapTimeWindow {
   /// No time bound at all, and the default — the map behaves exactly as it did
-  /// before the chips existed. Notably this is the one window that still shows
-  /// a party with no stated `ends_at` forever (CLAUDE.md gotcha 21).
+  /// before the chips existed. Like every window, it drops a party with no
+  /// stated `ends_at` once the server's six-hour grace has passed, the same
+  /// rule ALL PARTIES uses (CLAUDE.md gotcha 21).
   all('all'),
 
   /// Already started and not over. The only window that looks backwards, and
-  /// so the only one with an opinion about a null `ends_at`: past the server's
-  /// six-hour grace, a party stops being "now" and drops to [all].
+  /// so the only one that has to think about a null `ends_at` beyond the
+  /// shared rule: past the server's six-hour grace it is off the map entirely.
   now('now'),
 
   /// Starts between now and the next local 04:00.
