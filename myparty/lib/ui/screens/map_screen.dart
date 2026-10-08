@@ -266,8 +266,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       ..showSnackBar(SnackBar(
         content: Text(message),
         behavior: SnackBarBehavior.floating,
-        // Clear of the bottom nav, which overlays this screen from the edge.
-        margin: const EdgeInsets.fromLTRB(14, 0, 14, 104),
+        // Above the recenter button (bottom 104 + 44 tall), so a retry is
+        // still one tap away while the message shows — and so clear of the
+        // bottom nav, which overlays this screen from the edge.
+        margin: const EdgeInsets.fromLTRB(14, 0, 14, 160),
         action: remedy == null ? null : SnackBarAction(label: 'Settings', onPressed: remedy),
       ));
   }
