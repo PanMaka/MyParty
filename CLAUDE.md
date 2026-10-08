@@ -387,11 +387,19 @@ placeholders (group chat, story tiles) open the real screens; the one
 affordance still on `comingSoon` is **Directions**, and for a reason `mpParties`
 was never responsible for — `get_parties_list` is not a spatial query, so the
 row carries no coordinates. Real chat entry points are now `MessagesScreen`,
-`EventsScreen`'s RSVP rows, the host wizard's done screen, **and both
+the host wizard's done screen, **and both
 private-party doors on the parties tab**, and `MapPinSheet`'s header icon on
 **private** pins only. A public pin still has none — its viewer is exactly the
 passer-by `can_chat_in_party` excludes — while a private pin is visible only to
 its host and invitees, who are exactly who that helper admits.
+
+**A MY PARTIES row opens `MapPinSheet`** — the sheet a pin and a search hit
+open, not a third one (`20261008152601`). `get_my_parties` carries the full
+pin payload and is the third function in `20_party_search`'s column-parity
+assertion, so a column the sheet renders cannot go missing from one door. The
+row's old direct-to-chat tap is gone; on a private party the sheet's header
+icon is that door now. Counters are NULL on a private row there too — the
+sheet decides whether to print them from the NULL.
 
 Phase 7 is complete end to end, and `scripts/verify_notification_delivery.sh`
 measures it: 1s from `insert into parties` to a delivered push, one

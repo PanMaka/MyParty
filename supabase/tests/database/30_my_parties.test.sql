@@ -10,7 +10,7 @@
 -- 'dddddddd-' ids.
 begin;
 set search_path to public, extensions;
-select plan(16);
+select plan(20);
 
 select is(
   (select prosecdef from pg_proc where oid = 'public.get_my_parties()'::regprocedure),
@@ -141,6 +141,39 @@ select is(
     where party_id = 'dddddddd-0000-0000-0000-000000000001'),
   'interested'::public.rsvp_status,
   'the caller''s own status comes through as recorded'
+);
+
+-- ===========================================================================
+-- 3b. The MapPinSheet payload (20261008152601)
+-- ===========================================================================
+select is(
+  (select row(going_count, interested_count)::text from public.get_my_parties()
+    where party_id = 'dddddddd-0000-0000-0000-000000000005'),
+  row(null::int, null::int)::text,
+  'a PRIVATE row carries NULL for both counters -- MapPinSheet hides the '
+  'counts row on the null, so a number here would print attendance'
+);
+
+select is(
+  (select interested_count from public.get_my_parties()
+    where party_id = 'dddddddd-0000-0000-0000-000000000001'),
+  1,
+  'a PUBLIC row carries the real counter'
+);
+
+select is(
+  (select row(round(lat::numeric, 4), round(lon::numeric, 4))::text from public.get_my_parties()
+    where party_id = 'dddddddd-0000-0000-0000-000000000001'),
+  row(37.9756, 23.7349)::text,
+  'lat/lon are the party''s location, the right way round -- the sheet hands '
+  'them to Directions'
+);
+
+select is(
+  (select host_username from public.get_my_parties()
+    where party_id = 'dddddddd-0000-0000-0000-000000000001'),
+  'second_host',
+  'and the host is named, as on the map'
 );
 
 -- ===========================================================================
