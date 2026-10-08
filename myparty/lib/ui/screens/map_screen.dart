@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -366,7 +367,12 @@ class _MapScreenState extends State<MapScreen> {
 
   Widget _legend() {
     return Positioned(
-      bottom: 104,
+      // ~1cm above the recenter button's baseline (104). The bottom nav is
+      // fixed-height and overlays from the screen bottom without reading the
+      // safe-area inset, so an offset from the same edge stays clear of it on
+      // every device; adding the inset here alone would only desync the legend
+      // from the recenter button. Left side, so it never meets that button.
+      bottom: 142,
       left: 14,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -378,26 +384,25 @@ class _MapScreenState extends State<MapScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _legendRow(AppColors.purple, dashed: false, label: 'Public · anyone can see it'),
+            _legendRow(isPrivate: false, label: 'Public · anyone can see it'),
             const SizedBox(height: 7),
-            _legendRow(AppColors.pink, dashed: true, label: 'Private · invited only'),
+            _legendRow(isPrivate: true, label: 'Private · invited only'),
           ],
         ),
       ),
     );
   }
 
-  Widget _legendRow(Color color, {required bool dashed, required String label}) {
+  // Same accent and same solid/dashed split as the pin (MpMapPin), so the
+  // legend describes exactly what is drawn. The dashed swatch used to be a
+  // fill with no border at all, which is why private read as "dark".
+  Widget _legendRow({required bool isPrivate, required String label}) {
+    final color = AppColors.partyAccent(isPrivate: isPrivate).withValues(alpha: 0.95);
     return Row(
       children: [
-        Container(
-          width: 20,
-          height: 14,
-          decoration: BoxDecoration(
-            color: const Color(0xFF0E0C14).withValues(alpha: 0.9),
-            borderRadius: BorderRadius.circular(5),
-            border: dashed ? null : Border.all(color: color.withValues(alpha: 0.95), width: 1.5),
-          ),
+        CustomPaint(
+          size: const Size(20, 14),
+          painter: _LegendSwatchPainter(color: color, dashed: isPrivate),
         ),
         const SizedBox(width: 8),
         Text(label, style: TextStyle(fontSize: 11, color: AppColors.textAlpha(0.72))),
@@ -424,4 +429,48 @@ class _MapScreenState extends State<MapScreen> {
       ),
     );
   }
+}
+
+/// The legend's swatch: a small rounded rect in the pin's dark fill, bordered
+/// solid (public) or dashed (private) in the pin's accent. The dash spacing
+/// matches MpDropPainter so the two read as the same mark.
+class _LegendSwatchPainter extends CustomPainter {
+  const _LegendSwatchPainter({required this.color, required this.dashed});
+
+  final Color color;
+  final bool dashed;
+
+  static const double _stroke = 1.5;
+  static const double _dash = 5;
+  static const double _gap = 3.5;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rrect = RRect.fromRectAndRadius(
+      (Offset.zero & size).deflate(_stroke / 2),
+      const Radius.circular(5),
+    );
+    canvas.drawRRect(rrect, Paint()..color = const Color(0xFF0E0C14).withValues(alpha: 0.9));
+
+    final stroke = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = _stroke
+      ..color = color;
+    final path = ui.Path()..addRRect(rrect);
+    if (!dashed) {
+      canvas.drawPath(path, stroke);
+      return;
+    }
+    for (final metric in path.computeMetrics()) {
+      var distance = 0.0;
+      while (distance < metric.length) {
+        final next = (distance + _dash).clamp(0.0, metric.length);
+        canvas.drawPath(metric.extractPath(distance, next), stroke);
+        distance = next + _gap;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_LegendSwatchPainter old) => old.color != color || old.dashed != dashed;
 }
