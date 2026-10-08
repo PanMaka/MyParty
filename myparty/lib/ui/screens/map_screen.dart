@@ -32,18 +32,34 @@ class MapScreen extends StatefulWidget {
   /// Injectable for a sharper reason than the repository is, and the seam is
   /// not optional: geolocator's platform channel never completes inside
   /// `testWidgets`' fake-async zone. It does not throw — it hangs — so the
-  /// try/catch in [deviceLocation] cannot rescue a test, and any widget test
+  /// try/catch in [locateDevice] cannot rescue a test, and any widget test
   /// of this screen would sit on the loading spinner until it timed out.
   /// Measured, not assumed: the same call resolves to a MissingPluginException
   /// immediately under a plain `test()`.
-  final LocationFix? locate;
+  ///
+  /// Called once on open and again on EVERY recenter tap, and it carries the
+  /// failure reason because the button has to say which one it hit.
+  final LocationLookup? locate;
 
   @override
   State<MapScreen> createState() => _MapScreenState();
 }
 
-class _MapScreenState extends State<MapScreen> {
+/// The recenter button's zoom: a few blocks around the user. 15 is also what
+/// the map opens at, so "take me back" returns to the opening view.
+const _kLocateZoom = 15.0;
+
+class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   final MapController _mapController = MapController();
+
+  /// The recenter flight in progress, if any. Replaced on every tap and
+  /// stopped by any gesture, so a user grabbing the map wins over the
+  /// animation instead of being dragged back mid-pan.
+  AnimationController? _flight;
+
+  /// True while a recenter tap is waiting on the OS for a fix, which can take
+  /// seconds; the button shows a spinner and further taps are ignored.
+  bool _locating = false;
   late final PartyRepository _repository = widget.repository ?? PartyRepository();
   Timer? _debounce;
   LatLng? _currentPosition;
@@ -88,7 +104,7 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _initializeMap() async {
-    _currentPosition = await (widget.locate ?? deviceLocation)();
+    _currentPosition = (await (widget.locate ?? locateDevice)()).point;
     if (mounted) setState(() => _isLoading = false);
   }
 
@@ -179,19 +195,88 @@ class _MapScreenState extends State<MapScreen> {
     return ordered;
   }
 
-  void _recenter() {
-    if (_pins.isEmpty) return;
-    final points = _pins.map((p) => LatLng(p.lat, p.lng)).toList();
-    if (_currentPosition != null) points.add(_currentPosition!);
-    _mapController.fitCamera(
-      CameraFit.coordinates(coordinates: points, padding: const EdgeInsets.fromLTRB(34, 116, 34, 152)),
-    );
+  /// Centres the map on where the user is NOW, at [_kLocateZoom].
+  ///
+  /// Asks the OS on every tap rather than reusing the fix from opening: that
+  /// one is as old as the session, and is null for good if the first answer
+  /// was a refusal the user has since reversed. The fresh fix also moves the
+  /// blue dot, which otherwise never moves either.
+  Future<void> _recenter() async {
+    if (_locating) return;
+    setState(() => _locating = true);
+    final fix = await (widget.locate ?? locateDevice)();
+    if (!mounted) return;
+    final point = fix.point;
+    setState(() {
+      _locating = false;
+      if (point != null) _currentPosition = point;
+    });
+    if (point == null) {
+      _explainNoFix(fix.failure!);
+      return;
+    }
+    if (_mapReady) _flyTo(point, _kLocateZoom);
+  }
+
+  /// Animates the camera to [target] at [zoom], ending with [target] exactly
+  /// at the centre.
+  ///
+  /// A target more than a few screens away is jumped to instead: a linear
+  /// tween at street zoom would sweep through every tile row in between and
+  /// request all of them from CARTO for a frame each.
+  void _flyTo(LatLng target, double zoom) {
+    _stopFlight();
+    final camera = _mapController.camera;
+    final travelled = (camera.projectAtZoom(target) - camera.projectAtZoom(camera.center)).distance;
+    if (travelled > camera.nonRotatedSize.longestSide * 3) {
+      _mapController.move(target, zoom);
+      return;
+    }
+
+    final flight = AnimationController(vsync: this, duration: const Duration(milliseconds: 650));
+    final t = CurvedAnimation(parent: flight, curve: Curves.easeInOutCubic);
+    final lat = Tween(begin: camera.center.latitude, end: target.latitude);
+    final lng = Tween(begin: camera.center.longitude, end: target.longitude);
+    final z = Tween(begin: camera.zoom, end: zoom);
+    flight.addListener(() {
+      // The last tick lands on t = 1 exactly, so the tweens return [target]
+      // and [zoom] themselves rather than something a rounding error away.
+      _mapController.move(LatLng(lat.evaluate(t), lng.evaluate(t)), z.evaluate(t));
+    });
+    _flight = flight..forward();
+  }
+
+  void _stopFlight() {
+    _flight
+      ?..stop()
+      ..dispose();
+    _flight = null;
+  }
+
+  void _explainNoFix(LocationFailure failure) {
+    final message = switch (failure) {
+      LocationFailure.servicesOff => 'Location is turned off. Turn it on to see where you are.',
+      LocationFailure.denied => 'MyParty needs location access to show where you are.',
+      LocationFailure.deniedForever => 'Location access is off for MyParty. You can allow it in Settings.',
+      LocationFailure.unavailable => 'Couldn’t find your location right now. Try again in a moment.',
+    };
+    final remedy = locationRemedy(failure);
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        // Clear of the bottom nav, which overlays this screen from the edge.
+        margin: const EdgeInsets.fromLTRB(14, 0, 14, 104),
+        action: remedy == null ? null : SnackBarAction(label: 'Settings', onPressed: remedy),
+      ));
   }
 
   @override
   void dispose() {
     rsvpChanges.removeListener(_onRsvpChanged);
     _debounce?.cancel();
+    _stopFlight();
     super.dispose();
   }
 
@@ -226,6 +311,7 @@ class _MapScreenState extends State<MapScreen> {
                 _fetchEventsInBounds();
               },
               onPositionChanged: (position, hasGesture) {
+                if (hasGesture) _stopFlight();
                 if (_debounce?.isActive ?? false) _debounce!.cancel();
                 _debounce = Timer(const Duration(milliseconds: 500), _fetchEventsInBounds);
               },
@@ -410,6 +496,7 @@ class _MapScreenState extends State<MapScreen> {
       bottom: 104,
       right: 14,
       child: GestureDetector(
+        key: const Key('map-recenter'),
         onTap: _recenter,
         child: Container(
           width: 44,
@@ -419,7 +506,15 @@ class _MapScreenState extends State<MapScreen> {
             borderRadius: BorderRadius.circular(15),
             border: Border.all(color: AppColors.hairline),
           ),
-          child: const Icon(Icons.my_location, size: 18, color: AppColors.purple),
+          child: _locating
+              ? const Center(
+                  child: SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.purple),
+                  ),
+                )
+              : const Icon(Icons.my_location, size: 18, color: AppColors.purple),
         ),
       ),
     );

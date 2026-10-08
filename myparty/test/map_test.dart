@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -11,6 +12,7 @@ import 'package:myparty/state/mp_store.dart';
 import 'package:myparty/state/rsvp_changes.dart';
 import 'package:myparty/ui/screens/map_screen.dart';
 import 'package:myparty/ui/screens/search_screen.dart';
+import 'package:myparty/ui/widgets/map_base.dart';
 import 'package:myparty/ui/widgets/map_pin_sheet.dart';
 import 'package:myparty/ui/widgets/mp_drop_shape.dart';
 import 'package:myparty/ui/widgets/mp_map_pin.dart';
@@ -136,9 +138,14 @@ Future<void> _mount(
   WidgetTester tester,
   _FakePartyRepository repository, {
   LatLng? fix,
+  LocationLookup? locate,
 }) async {
   await tester.pumpWidget(MaterialApp(
-    home: MapScreen(repository: repository, locate: () async => fix),
+    home: MapScreen(
+      repository: repository,
+      locate: locate ??
+          () async => fix == null ? const DeviceFix.failed(LocationFailure.denied) : DeviceFix.at(fix),
+    ),
   ));
   // initState -> locate -> setState(_isLoading = false) -> FlutterMap ->
   // onMapReady -> the fetch. Pumped rather than settled: a live pin's pulse
@@ -850,6 +857,94 @@ void main() {
       expect(find.text('Search parties or people'), findsOneWidget);
 
       await _teardown(tester);
+    });
+  });
+
+  group('recenter button', () {
+    MapCamera camera(WidgetTester tester) =>
+        tester.widget<FlutterMap>(find.byType(FlutterMap)).mapController!.camera;
+
+    Future<void> tapRecenter(WidgetTester tester) async {
+      await tester.tap(find.byKey(const Key('map-recenter')));
+      await tester.pump(); // the lookup resolves
+      await tester.pump(const Duration(milliseconds: 700)); // the flight lands
+    }
+
+    const kifisia = LatLng(38.0736, 23.8113);
+    const koukaki = LatLng(37.9655, 23.7262);
+
+    testWidgets('asks for a FRESH fix on every tap and centres on it at street zoom', (tester) async {
+      // Both regressions at once. The old button returned early with no pins
+      // on screen — so this map, which has none, did nothing at all — and when
+      // it did act it fitted every pin plus the fix captured on open, which
+      // centred the user nowhere and zoomed to whatever the pins spanned.
+      var lookups = 0;
+      final answers = [LatLng(_athens.lat, _athens.lon), kifisia, koukaki];
+      await _mount(tester, _FakePartyRepository(const []), locate: () async {
+        return DeviceFix.at(answers[lookups++]);
+      });
+      final controller = tester.widget<FlutterMap>(find.byType(FlutterMap)).mapController!;
+
+      // The user wanders off and zooms out to the city.
+      controller.move(const LatLng(37.99, 23.70), 11);
+      await tapRecenter(tester);
+
+      expect(lookups, 2, reason: 'the tap must ask again, not reuse the fix from opening');
+      expect(camera(tester).center.latitude, closeTo(kifisia.latitude, 1e-9));
+      expect(camera(tester).center.longitude, closeTo(kifisia.longitude, 1e-9));
+      expect(camera(tester).zoom, 15);
+
+      // And again, after zooming right in somewhere else.
+      controller.move(const LatLng(38.05, 23.80), 18);
+      await tapRecenter(tester);
+
+      expect(lookups, 3);
+      expect(camera(tester).center.latitude, closeTo(koukaki.latitude, 1e-9));
+      expect(camera(tester).center.longitude, closeTo(koukaki.longitude, 1e-9));
+      expect(camera(tester).zoom, 15);
+
+      await _teardown(tester);
+    });
+
+    testWidgets('a refusal on open does not disable the button for the session', (tester) async {
+      // The old button read the fix captured in initState, so one "Don't
+      // allow" at launch made it useless until the app was killed.
+      var granted = false;
+      await _mount(tester, _FakePartyRepository(const []), locate: () async {
+        return granted ? const DeviceFix.at(kifisia) : const DeviceFix.failed(LocationFailure.denied);
+      });
+
+      granted = true;
+      await tapRecenter(tester);
+
+      expect(camera(tester).center.latitude, closeTo(kifisia.latitude, 1e-9));
+      expect(camera(tester).center.longitude, closeTo(kifisia.longitude, 1e-9));
+
+      await _teardown(tester);
+    });
+
+    testWidgets('each failure says what went wrong and leaves the camera alone', (tester) async {
+      final cases = {
+        LocationFailure.servicesOff: ('Location is turned off', true),
+        LocationFailure.denied: ('needs location access', false),
+        LocationFailure.deniedForever: ('allow it in Settings', true),
+        LocationFailure.unavailable: ('Try again in a moment', false),
+      };
+      for (final MapEntry(key: failure, value: (text, offersSettings)) in cases.entries) {
+        await _mount(tester, _FakePartyRepository(const []),
+            locate: () async => DeviceFix.failed(failure));
+        final before = camera(tester);
+
+        await tapRecenter(tester);
+
+        expect(find.textContaining(text), findsOneWidget, reason: '$failure');
+        expect(find.widgetWithText(SnackBarAction, 'Settings'), offersSettings ? findsOneWidget : findsNothing,
+            reason: '$failure');
+        expect(camera(tester).center, before.center, reason: '$failure');
+        expect(camera(tester).zoom, before.zoom, reason: '$failure');
+
+        await _teardown(tester);
+      }
     });
   });
 
