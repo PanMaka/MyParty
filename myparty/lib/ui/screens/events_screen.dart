@@ -10,12 +10,12 @@ import '../../utils/english_date.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
 import '../widgets/host_post_strip.dart';
+import '../widgets/map_pin_sheet.dart';
 import '../widgets/mp_bottom_nav.dart';
 import '../../state/mp_store.dart' show MpRsvp;
 import '../../state/rsvp_changes.dart';
 import '../widgets/party_card.dart';
 import '../widgets/privacy_badge.dart';
-import 'chat_screen.dart';
 import 'host_wizard_screen.dart';
 
 class EventsScreen extends StatefulWidget {
@@ -554,32 +554,27 @@ class _EventsScreenState extends State<EventsScreen> {
 
   Widget _rsvpRow(BuildContext context, RsvpParty rsvp) {
     final accent = rsvp.isPrivate ? AppColors.private : AppColors.purple;
-    // Attendance, so a private party has none to show. Computed inside the
-    // guard rather than blanked afterwards: an unused `crowd` string built
-    // from two counts is exactly the value a later edit renders by accident.
-    final crowd = rsvp.isPrivate
+    // Attendance, so a private party has none to show -- and the server sends
+    // none (both counters NULL), so the guard is the payload itself, the same
+    // rule MapPartyPin.hasCounts applies. Computed inside the guard rather
+    // than blanked afterwards: an unused `crowd` string built from two counts
+    // is exactly the value a later edit renders by accident.
+    final going = rsvp.goingCount;
+    final interested = rsvp.interestedCount;
+    final crowd = (going == null || interested == null)
         ? null
-        : (rsvp.goingCount > 0 ? '${rsvp.goingCount} going' : '${rsvp.interestedCount} interested');
+        : (going > 0 ? '$going going' : '$interested interested');
     return Padding(
       padding: const EdgeInsets.only(bottom: 9),
       child: GestureDetector(
-        // PRIVATE parties only. A public party has no group chat since
-        // 20260825094044, so there is nothing for this row to open and it is
-        // inert rather than opening a screen that would come back empty.
-        //
-        // The button being absent is the courtesy; the rule is that
-        // can_chat_in_party returns false, and the messages policy would
-        // refuse the write even if this tap were restored by hand.
-        onTap: rsvp.isPrivate
-            ? () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => ChatScreen(
-                    partyId: rsvp.partyId,
-                    partyTitle: rsvp.title,
-                    isPrivate: rsvp.isPrivate,
-                    memberCount: rsvp.goingCount,
-                  ),
-                ))
-            : null,
+        // The party sheet -- the SAME one a map pin opens, public or private,
+        // with every action on it: the RSVP answers, share, report, and the
+        // group chat icon on a private party (which is how this row's old
+        // direct-to-chat tap is still one tap away). An answer given there is
+        // published on rsvpChanges, which [_onRsvpChanged] already reloads
+        // this list on. Closing it lands back here: it is a modal over this
+        // screen, not a route away from it.
+        onTap: () => showMapPinSheet(context, rsvp.pin, repository: _repository),
         // The rounding moved from the BoxDecoration onto a ClipRRect; the
         // asymmetric border below is unchanged.
         //

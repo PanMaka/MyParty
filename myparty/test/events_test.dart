@@ -3,11 +3,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
 import 'package:myparty/data/party_repository.dart';
+import 'package:myparty/models/map_party_pin.dart';
 import 'package:myparty/models/party_list_item.dart';
 import 'package:myparty/models/rsvp_party.dart';
 import 'package:myparty/state/mp_store.dart';
 import 'package:myparty/state/rsvp_changes.dart';
 import 'package:myparty/ui/screens/events_screen.dart';
+import 'package:myparty/ui/widgets/map_pin_sheet.dart';
 import 'package:myparty/ui/widgets/party_card.dart';
 import 'package:myparty/ui/widgets/party_detail_sheet.dart';
 
@@ -123,6 +125,12 @@ PartyListItem _item({
   );
 }
 
+/// A row of MY PARTIES.
+///
+/// A PRIVATE row is built with both counters null, as get_my_parties sends it
+/// since 20261008152601 -- numbers on a private fixture would let a sheet or
+/// row that forgot to hide them pass. [pin] is built from the same values,
+/// as RsvpParty.fromRow builds it from the same row.
 RsvpParty _rsvp({
   required String title,
   required DateTime startsAt,
@@ -134,8 +142,9 @@ RsvpParty _rsvp({
   int going = 4,
   int interested = 0,
 }) {
+  final id = '00000000-0000-0000-0000-00000000000${title.length % 10}';
   return RsvpParty(
-    partyId: '00000000-0000-0000-0000-00000000000${title.length % 10}',
+    partyId: id,
     title: title,
     startsAt: startsAt,
     endsAt: endsAt,
@@ -143,8 +152,23 @@ RsvpParty _rsvp({
     rsvpStatus: status,
     isHost: isHost,
     isInvited: isInvited,
-    goingCount: going,
-    interestedCount: interested,
+    goingCount: isPrivate ? null : going,
+    interestedCount: isPrivate ? null : interested,
+    pin: MapPartyPin(
+      id: id,
+      lat: 37.9755,
+      lng: 23.7348,
+      title: title,
+      isPrivate: isPrivate,
+      goingCount: isPrivate ? null : going,
+      interestedCount: isPrivate ? null : interested,
+      startsAt: startsAt,
+      endsAt: endsAt,
+      area: 'Koukaki',
+      description: 'Bring ice.',
+      hostUsername: 'thanasis',
+      myRsvpStatus: status,
+    ),
   );
 }
 
@@ -510,30 +534,120 @@ void main() {
       expect(find.text('Going ✓'), findsOneWidget);
     });
 
-    testWidgets('only a PRIVATE rsvp row opens a chat', (tester) async {
-      // A public party has no group chat since 20260825094044. The row is
-      // inert rather than opening a screen that could never load a message --
-      // and the rule behind it is can_chat_in_party, not this guard: a
-      // hand-rolled insert is refused by the messages policy either way.
+    // A MY PARTIES row opens the MAP's sheet -- MapPinSheet, the one a pin and
+    // a search hit open -- not a lookalike. Asserted by type, so a second
+    // sheet built to resemble it fails here.
+    Future<void> openRow(WidgetTester tester, String title) async {
+      await tester.tap(find.text('MY PARTIES'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(title));
+      await tester.pumpAndSettle();
+    }
+
+    Finder inSheet(Finder f) => find.descendant(of: find.byType(MapPinSheet), matching: f);
+
+    testWidgets('tapping a PUBLIC row opens the map pin sheet, public variant', (tester) async {
+      final now = DateTime.now();
+      await tester.pumpWidget(_host(_FakePartyRepository([
+        _rsvp(title: 'Public one', startsAt: now.add(const Duration(hours: 2)),
+            status: 'interested', going: 3, interested: 9),
+      ])));
+      await tester.pumpAndSettle();
+      await openRow(tester, 'Public one');
+
+      expect(find.byType(MapPinSheet), findsOneWidget);
+      expect(inSheet(find.text('PUBLIC')), findsOneWidget);
+      expect(inSheet(find.text('Public one')), findsOneWidget);
+      expect(inSheet(find.text('@thanasis')), findsOneWidget);
+      expect(inSheet(find.text('Koukaki')), findsOneWidget);
+      expect(inSheet(find.text('Bring ice.')), findsOneWidget);
+      expect(inSheet(find.text('9 interested')), findsOneWidget);
+      expect(inSheet(find.text('Going')), findsOneWidget);
+      expect(inSheet(find.text('Interested ✓')), findsOneWidget);
+      expect(inSheet(find.text('Directions')), findsOneWidget);
+      expect(inSheet(find.text('Coming')), findsNothing);
+      // No chat on a public party (20260825094044), exactly as from a pin.
+      expect(inSheet(find.byTooltip('Group chat')), findsNothing);
+      expect(inSheet(find.byTooltip('Share')), findsOneWidget);
+    });
+
+    testWidgets('tapping a PRIVATE row opens the map pin sheet, private variant', (tester) async {
+      final now = DateTime.now();
+      await tester.pumpWidget(_host(_FakePartyRepository([
+        _rsvp(title: 'Private one', startsAt: now.add(const Duration(hours: 3)),
+            isPrivate: true, status: null, isInvited: true),
+      ])));
+      await tester.pumpAndSettle();
+      await openRow(tester, 'Private one');
+
+      expect(find.byType(MapPinSheet), findsOneWidget);
+      expect(inSheet(find.text('PRIVATE')), findsOneWidget);
+      expect(inSheet(find.byTooltip('Group chat')), findsOneWidget);
+      expect(inSheet(find.byTooltip('Share')), findsOneWidget);
+      expect(inSheet(find.byTooltip('Report')), findsOneWidget);
+      expect(inSheet(find.text('Coming')), findsOneWidget);
+      expect(inSheet(find.text('Directions')), findsOneWidget);
+      expect(inSheet(find.text('Going')), findsNothing);
+      expect(inSheet(find.text('Interested')), findsNothing);
+      // No attendance on a private party, in any wording.
+      expect(inSheet(find.textContaining('interested')), findsNothing);
+      expect(inSheet(find.textContaining('here now')), findsNothing);
+    });
+
+    testWidgets('answering in the sheet writes the RSVP and reloads MY PARTIES', (tester) async {
+      final now = DateTime.now();
+      final repo = _FakePartyRepository([
+        _rsvp(title: 'Private one', startsAt: now.add(const Duration(hours: 3)),
+            isPrivate: true, status: null, isInvited: true),
+      ]);
+      await tester.pumpWidget(_host(repo));
+      await tester.pumpAndSettle();
+      await openRow(tester, 'Private one');
+      final fetchesBefore = repo.rsvpFetches;
+
+      // The sheet is taller than the 800x600 test surface; scroll the button in
+      // as a thumb would rather than tapping off-screen.
+      await tester.ensureVisible(inSheet(find.text('Coming')));
+      await tester.pumpAndSettle();
+      await tester.tap(inSheet(find.text('Coming')));
+      await tester.pumpAndSettle();
+
+      expect(repo.rsvpWrites.single.status, MpRsvp.going);
+      expect(repo.rsvpWrites.single.current, isNull);
+      expect(inSheet(find.text('You are coming ✓')), findsOneWidget);
+      expect(repo.rsvpFetches, greaterThan(fetchesBefore));
+    });
+
+    testWidgets('the sheet chat icon is live on a private party, as from a pin', (tester) async {
+      final now = DateTime.now();
+      await tester.pumpWidget(_host(_FakePartyRepository([
+        _rsvp(title: 'Private one', startsAt: now.add(const Duration(hours: 3)), isPrivate: true),
+      ])));
+      await tester.pumpAndSettle();
+      await openRow(tester, 'Private one');
+
+      final chat = tester.widget<IconButton>(
+        find.ancestor(of: inSheet(find.byIcon(Icons.forum_outlined)), matching: find.byType(IconButton)),
+      );
+      expect(chat.onPressed, isNotNull);
+    });
+
+    testWidgets('closing the sheet returns to MY PARTIES', (tester) async {
       final now = DateTime.now();
       await tester.pumpWidget(_host(_FakePartyRepository([
         _rsvp(title: 'Public one', startsAt: now.add(const Duration(hours: 2))),
-        _rsvp(
-          title: 'Private one',
-          startsAt: now.add(const Duration(hours: 3)),
-          isPrivate: true,
-        ),
       ])));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('MY PARTIES'));
+      await openRow(tester, 'Public one');
+      expect(find.byType(MapPinSheet), findsOneWidget);
+
+      // A tap on the barrier above the sheet, as a user dismisses it.
+      await tester.tapAt(const Offset(20, 20));
       await tester.pumpAndSettle();
 
-      GestureDetector rowFor(String title) => tester.widget<GestureDetector>(
-            find.ancestor(of: find.text(title), matching: find.byType(GestureDetector)).first,
-          );
-
-      expect(rowFor('Public one').onTap, isNull);
-      expect(rowFor('Private one').onTap, isNotNull);
+      expect(find.byType(MapPinSheet), findsNothing);
+      expect(find.byType(EventsScreen), findsOneWidget);
+      expect(find.text('Public one'), findsOneWidget);
     });
 
     testWidgets('the group chat entry is absent on a public detail sheet', (tester) async {

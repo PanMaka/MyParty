@@ -598,13 +598,14 @@ select is_empty(
               ('going_count'), ('interested_count'), ('my_rsvp_status'),
               ('lat'), ('lon')
      ),
-     fns(name) as (values ('search_parties'), ('get_parties_near_user')),
+     -- get_my_parties since 20261008152601: MY PARTIES opens the same sheet.
+     fns(name) as (values ('search_parties'), ('get_parties_near_user'), ('get_my_parties')),
      have as (
        select p.proname, unnest(p.proargnames) as col
        from pg_proc p
        join pg_namespace n on n.oid = p.pronamespace
        where n.nspname = 'public'
-         and p.proname in ('search_parties', 'get_parties_near_user')
+         and p.proname in ('search_parties', 'get_parties_near_user', 'get_my_parties')
      )
      select fns.name || '.' || needed.col
      from fns cross join needed
@@ -612,9 +613,9 @@ select is_empty(
        select 1 from have
        where have.proname = fns.name and have.col = needed.col
      ) $$,
-  'every column MapPinSheet renders exists in BOTH payloads -- the map and '
-  'search open the same sheet, so a column in only one of them is a blank '
-  'section depending on which screen you came from'
+  'every column MapPinSheet renders exists in ALL THREE payloads -- the map, '
+  'search and MY PARTIES open the same sheet, so a column missing from one is '
+  'a blank section depending on which screen you came from'
 );
 
 
