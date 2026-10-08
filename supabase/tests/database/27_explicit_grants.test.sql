@@ -88,6 +88,7 @@ insert into allowed_grants values
   ('function', 'get_feed(timestamp with time zone,uuid,integer)', 'authenticated', 'EXECUTE', null),
   ('function', 'get_messages(uuid,timestamp with time zone,uuid,integer)', 'authenticated', 'EXECUTE', null),
   ('function', 'get_my_hosted_parties(integer)', 'authenticated', 'EXECUTE', null),
+  ('function', 'get_my_parties()', 'authenticated', 'EXECUTE', null),
   ('function', 'get_parties_list(party_sort,integer,integer,bigint,timestamp with time zone,uuid)', 'authenticated', 'EXECUTE', null),
   ('function', 'get_parties_near_user(double precision,double precision,double precision,integer,text,text)', 'authenticated', 'EXECUTE', null),
   ('function', 'get_party(uuid)', 'authenticated', 'EXECUTE', null),

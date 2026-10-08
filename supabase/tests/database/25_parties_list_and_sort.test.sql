@@ -51,8 +51,8 @@ values ('eeeeeeee-0000-0000-0000-000000000001', '11111111-1111-1111-1111-1111111
         now() - interval '1 hour', now() + interval '3 hours', false, false, 'standard', 'Σύνταγμα');
 
 -- Two parties that are OVER, one of each shape. The second is the gotcha 21
--- zombie -- a finished party with no end time, which the map still pins
--- forever and this list deliberately does not.
+-- zombie -- a finished party with no end time, which the map pinned forever
+-- until 20261008150440 and this list never did.
 insert into public.parties (id, host_id, title, description, location, starts_at, ends_at, is_private, is_sponsored, party_tier, area)
 values
   ('eeeeeeee-0000-0000-0000-000000000002', '11111111-1111-1111-1111-111111111111',
@@ -219,7 +219,7 @@ select is_empty(
   $$ select party_id from public.get_parties_list('soonest', 100)
      where party_id in ('eeeeeeee-0000-0000-0000-000000000002',
                         'eeeeeeee-0000-0000-0000-000000000003') $$,
-  'finished parties are absent, including the null-ends_at one the map still pins'
+  'finished parties are absent, including the null-ends_at one -- the map drops it too since 20261008150440'
 );
 
 -- ===========================================================================

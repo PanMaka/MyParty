@@ -20,8 +20,10 @@ tests must keep working), with the DOB stored owner-read-only in
 `p_window` since `20260823091942`), called live from
 `MapScreen` through `PartyRepository.fetchPartiesNearUser`;
 `party_time_window` and `party_end_grace` (the map's Όλα/Τώρα/Αργότερα απόψε/
-Το ΣΚ chips, filtered server-side — see `docs/phase-15-map-time-filters.md`);
-`create_party_with_invites`; `get_feed`, `get_post_comments`, `get_messages`,
+Το ΣΚ chips, filtered server-side — see `docs/phase-15-map-time-filters.md`;
+the grace now applies to every window and to the list, gotcha 21);
+`create_party_with_invites`; `get_my_parties` (MY PARTIES, finished parties
+excluded by gotcha 21's shared predicate); `get_feed`, `get_post_comments`, `get_messages`,
 `get_party_chats` and `get_party_stories`/`get_story_rails` (all
 keyset-paginated or time-bounded, all invoker-rights so RLS does the
 filtering); `hide_post`/`hide_comment`/`hide_message`/`hide_story`; the
@@ -200,12 +202,11 @@ and therefore knows it. `MpStore` is now only `flashCopied`; **RSVP writes are
 real** (`PartyRepository.setRsvp`, with the un-RSVP as the DELETE it always
 described itself as being).
 
-Two things the list decides for itself, neither of which changes an existing
-surface: it filters out finished parties using the leakproof
-`starts_at > now() - party_end_grace()` shape (gotcha 22), which means the
-gotcha-21 zombie is absent *here* while the map still pins it — that decision
-stays open — and the sort control lives **outside** the scroll view, so an empty
-or failed list still offers the way back to "soonest".
+Two things about the list worth knowing: it filters out finished parties with
+**the same predicate as the map** (gotcha 21, shared since `20261008150440` —
+before that the map pinned zombies the list correctly hid, which read as an
+empty list), and the sort control lives **outside** the scroll view, so an
+empty or failed list still offers the way back to "soonest".
 
 **A private party holds no attendance, and that is enforced in three places
 because one would not hold.** Decided Phase 16b.
@@ -773,37 +774,51 @@ is therefore still blocked.
     all eight for free: it forecloses inlining, and there was none to lose.
     Worth re-pricing if gotcha 19's fix ever lands.
 
-21. **`get_parties_near_user` filters on `ends_at` and never on `starts_at`,
-    so a party with a null `ends_at` is on the map forever.** The predicate is
-    `p.status = 'published' and (p.ends_at is null or p.ends_at > now())`.
+21. **A party with a null `ends_at` used to be on the map forever. Closed
+    2026-10-08 (`20261008150440`), and the cost was accepted, not avoided.**
     `ends_at` is nullable with no default and the host wizard does not require
-    it, so "a party that already happened" is not a state the map query can
-    currently recognise — a finished party with no end time keeps its pin, and
-    keeps it at full tier weight, indefinitely.
-    **Open decision, deliberately not fixed.** The obvious repair — `or
-    (p.ends_at is null and p.starts_at > now() - interval 'N hours')` — needs
-    a number nobody has chosen, and it is the wrong kind of guess: an
-    all-nighter and a Sunday afternoon barbecue disagree about N by a factor
-    of six, and picking wrong either drops live parties off the map or leaves
-    dead ones on it. The honest fixes are to make `ends_at` required at
-    creation, or to add an explicit lifecycle transition to `party_status`
-    (there is already a `cancelled` value and no `ended` one) — both are
-    product decisions with a migration behind them, not a where-clause tweak.
-    Until then: **anything that writes a past party must set `ends_at`**, which
-    is why every past party in `seed.sql` carries one and says so in a comment.
-    The failure is silent and cumulative — nothing errors, the map just slowly
-    fills with parties that are over.
+    it, so for most parties "it already happened" is a guess. The map,
+    `get_parties_list` and `get_party` now share ONE predicate, spelled
+    identically in all three bodies:
 
-    **Phase 15 adopted the grace in ONE window and left this open.** The Τώρα
-    chip drops a null-`ends_at` party once it is older than
-    `party_end_grace()` — the same six hours `party_is_past` groups by — and
-    nothing else changed: the base filter is untouched, Όλα is the default, so
-    **the default map still pins a finished party forever.** That is not
-    timidity, it is the asymmetry above: on the base filter, being wrong
-    *removes a live party*; inside a chip, being wrong costs a tap, because
-    Όλα is one tap away. `21_map_time_windows.test.sql` asserts the default
-    view still shows it, so closing this stays a decision somebody takes
-    rather than a side effect somebody causes.
+    ```
+    p.status = 'published'
+    and (p.ends_at is null or p.ends_at > now())
+    and (p.ends_at is not null
+         or p.starts_at > (select now() - public.party_end_grace()))
+    ```
+
+    which is exactly `not party_is_past(starts_at, ends_at)` — asserted row by
+    row in `21_map_time_windows.test.sql`, alongside a map-vs-list parity
+    assertion. **MY PARTIES** carries it too, through `get_my_parties`
+    (`20261008151908`), which replaced three PostgREST selects and a Dart
+    `ends_at == null || ends_at > now` filter — that filter was the old map
+    rule copied client-side, and kept a no-end-time party forever after the
+    map dropped it. Do not reintroduce an "is it over" check in Dart: the
+    grace cannot be expressed through PostgREST without the client computing
+    the cutoff itself, which is a second copy of the number. It cannot just *call* `party_is_past` (gotchas 20, 22).
+
+    **What triggered it:** ALL PARTIES showed nothing while the map was full of
+    pins. The list had always applied the grace; the map's Όλα had not, so on a
+    DB seeded weeks earlier the map was entirely zombies and the list was
+    correctly empty. "A pin with no card" was the symptom of two rules.
+
+    **The cost, chosen knowingly:** an all-nighter with no stated end drops off
+    the map six hours after it starts, while it is happening. That is the
+    asymmetry Phase 15 refused to take on the base filter, and
+    `docs/backlog.md` §2 recommended against adopting the 6h number wholesale.
+    The trade was: a map that silently fills with parties that are over,
+    versus a host who wants a long party on the map having to say when it
+    ends. The honest path — an explicit `ends_at` — is untouched by the grace,
+    and since this change the list keeps a multi-day party with a stated end
+    too (it used to drop it at +6h while the map kept it). **The real fix is
+    still to require `ends_at` at creation**; that would make the grace dead
+    code on all three surfaces.
+
+    Still true: **anything that writes a past party must set `ends_at`**, which
+    is why every past party in `seed.sql` carries one. Seed's *future*
+    parties carry none, so a local DB older than their start + 6h now shows an
+    empty map and list — `supabase db reset` refreshes it.
 
 22. **Leakproofness decides which of your filters run before the policy, and
     it is the single fact that prices every new predicate on `parties`.**
