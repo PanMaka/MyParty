@@ -50,6 +50,10 @@ class MapScreen extends StatefulWidget {
 /// the map opens at, so "take me back" returns to the opening view.
 const _kLocateZoom = 15.0;
 
+/// How far the legend/recenter row sits above the screen's bottom edge: clear
+/// of the bottom nav, with the ~1cm of air the legend was given in phase 30.
+const double _kControlsBottom = 142;
+
 class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   final MapController _mapController = MapController();
 
@@ -267,10 +271,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       ..showSnackBar(SnackBar(
         content: Text(message),
         behavior: SnackBarBehavior.floating,
-        // Above the recenter button (bottom 104 + 44 tall), so a retry is
-        // still one tap away while the message shows — and so clear of the
-        // bottom nav, which overlays this screen from the edge.
-        margin: const EdgeInsets.fromLTRB(14, 0, 14, 160),
+        // Above the legend/recenter row (~58 tall at its bottom offset), so a
+        // retry is still one tap away while the message shows — and so clear
+        // of the bottom nav, which overlays this screen from the edge.
+        margin: const EdgeInsets.fromLTRB(14, 0, 14, _kControlsBottom + 68),
         action: remedy == null ? null : SnackBarAction(label: 'Settings', onPressed: remedy),
       ));
   }
@@ -343,8 +347,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             ],
           ),
           _topOverlay(),
-          _legend(),
-          _recenterButton(),
+          _bottomControls(),
         ],
       ),
     );
@@ -453,30 +456,38 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _legend() {
+  /// The legend and the recenter button as ONE row, the button centred on the
+  /// legend box's height — so the two line up whatever the legend's text
+  /// measures, and cannot drift apart the way two separate `bottom:` offsets
+  /// did when phase 30 raised the legend alone. The bottom nav is fixed-height
+  /// and overlays from the screen edge without reading the safe-area inset, so
+  /// an offset from that same edge stays clear of it on every device.
+  Widget _bottomControls() {
     return Positioned(
-      // ~1cm above the recenter button's baseline (104). The bottom nav is
-      // fixed-height and overlays from the screen bottom without reading the
-      // safe-area inset, so an offset from the same edge stays clear of it on
-      // every device; adding the inset here alone would only desync the legend
-      // from the recenter button. Left side, so it never meets that button.
-      bottom: 142,
+      bottom: _kControlsBottom,
       left: 14,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: AppColors.chipFill,
-          borderRadius: BorderRadius.circular(13),
-          border: Border.all(color: AppColors.hairline),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _legendRow(isPrivate: false, label: 'Public · anyone can see it'),
-            const SizedBox(height: 7),
-            _legendRow(isPrivate: true, label: 'Private · invited only'),
-          ],
-        ),
+      right: 14,
+      child: Row(
+        children: [_legend(), const Spacer(), _recenterButton()],
+      ),
+    );
+  }
+
+  Widget _legend() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.chipFill,
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(color: AppColors.hairline),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _legendRow(isPrivate: false, label: 'Public · anyone can see it'),
+          const SizedBox(height: 7),
+          _legendRow(isPrivate: true, label: 'Private · invited only'),
+        ],
       ),
     );
   }
@@ -499,30 +510,26 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   }
 
   Widget _recenterButton() {
-    return Positioned(
-      bottom: 104,
-      right: 14,
-      child: GestureDetector(
-        key: const Key('map-recenter'),
-        onTap: _recenter,
-        child: Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            color: AppColors.chipFill,
-            borderRadius: BorderRadius.circular(15),
-            border: Border.all(color: AppColors.hairline),
-          ),
-          child: _locating
-              ? const Center(
-                  child: SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.purple),
-                  ),
-                )
-              : const Icon(Icons.my_location, size: 18, color: AppColors.purple),
+    return GestureDetector(
+      key: const Key('map-recenter'),
+      onTap: _recenter,
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: AppColors.chipFill,
+          borderRadius: BorderRadius.circular(15),
+          border: Border.all(color: AppColors.hairline),
         ),
+        child: _locating
+            ? const Center(
+                child: SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.purple),
+                ),
+              )
+            : const Icon(Icons.my_location, size: 18, color: AppColors.purple),
       ),
     );
   }
