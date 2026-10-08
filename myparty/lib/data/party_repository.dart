@@ -119,55 +119,22 @@ class PartyRepository {
   /// party you hosted or were invited to had a chat but no row until you
   /// pressed Coming, which read as a chat you had no business in.
   ///
-  /// Three plain selects rather than an RPC: each is answered by an existing
-  /// policy (`rsvps` own rows; `parties` via can_access_party; `invitations`
-  /// lets a guest read their own), so nothing here decides visibility. Each
-  /// is bounded rather than keyset-paginated: a personal list, not a feed.
-  /// `published` only — a draft is not something you are part of yet, and a
-  /// cancelled party is something you are not part of any more.
+  /// **An RPC because "is it over" has to be the server's.** `get_my_parties`
+  /// (20261008151908) applies the same predicate as the map and ALL PARTIES,
+  /// six-hour grace for a party with no stated end included — PostgREST cannot
+  /// express `starts_at > now() - grace` without this side computing the
+  /// timestamp, which would be a second copy of the number. It also merges the
+  /// three sources into one row per party, which used to happen here.
+  ///
+  /// SECURITY INVOKER, so the `parties` policy still decides visibility and
+  /// nothing here does. Bounded rather than keyset-paginated: a personal list,
+  /// not a feed. `published` only — a draft is not something you are part of
+  /// yet, and a cancelled party is something you are not part of any more.
   Future<List<RsvpParty>> fetchMyParties() async {
-    final userId = _client.auth.currentUser?.id;
-    if (userId == null) return [];
+    if (_client.auth.currentUser == null) return [];
 
-    const columns = 'id, title, starts_at, ends_at, is_private, going_count, interested_count, status';
-
-    final results = await Future.wait([
-      _client
-          .from('rsvps')
-          .select('status, parties!inner($columns)')
-          .eq('user_id', userId)
-          .eq('parties.status', 'published')
-          .order('created_at', ascending: false)
-          .limit(200),
-      _client
-          .from('parties')
-          .select(columns)
-          .eq('host_id', userId)
-          .eq('status', 'published')
-          .limit(200),
-      _client
-          .from('invitations')
-          .select('parties!inner($columns)')
-          .eq('guest_id', userId)
-          .eq('parties.status', 'published')
-          .limit(200),
-    ]);
-
-    final byId = <String, RsvpParty>{};
-    void add(RsvpParty row) =>
-        byId.update(row.partyId, (seen) => seen.mergedWith(row), ifAbsent: () => row);
-
-    for (final row in results[0] as List) {
-      add(RsvpParty.fromRow(row as Map<String, dynamic>));
-    }
-    for (final row in results[1] as List) {
-      add(RsvpParty.fromParty(row as Map<String, dynamic>, isHost: true));
-    }
-    for (final row in results[2] as List) {
-      add(RsvpParty.fromParty((row as Map<String, dynamic>)['parties'] as Map<String, dynamic>,
-          isInvited: true));
-    }
-    return byId.values.toList();
+    final rows = await _client.rpc('get_my_parties') as List;
+    return rows.map((row) => RsvpParty.fromRow(row as Map<String, dynamic>)).toList();
   }
 
   /// Parties hosted by [hostId], or by the current user when it is null.

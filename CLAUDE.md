@@ -22,7 +22,8 @@ tests must keep working), with the DOB stored owner-read-only in
 `party_time_window` and `party_end_grace` (the map's Όλα/Τώρα/Αργότερα απόψε/
 Το ΣΚ chips, filtered server-side — see `docs/phase-15-map-time-filters.md`;
 the grace now applies to every window and to the list, gotcha 21);
-`create_party_with_invites`; `get_feed`, `get_post_comments`, `get_messages`,
+`create_party_with_invites`; `get_my_parties` (MY PARTIES, finished parties
+excluded by gotcha 21's shared predicate); `get_feed`, `get_post_comments`, `get_messages`,
 `get_party_chats` and `get_party_stories`/`get_story_rails` (all
 keyset-paginated or time-bounded, all invoker-rights so RLS does the
 filtering); `hide_post`/`hide_comment`/`hide_message`/`hide_story`; the
@@ -789,7 +790,13 @@ is therefore still blocked.
 
     which is exactly `not party_is_past(starts_at, ends_at)` — asserted row by
     row in `21_map_time_windows.test.sql`, alongside a map-vs-list parity
-    assertion. It cannot just *call* `party_is_past` (gotchas 20, 22).
+    assertion. **MY PARTIES** carries it too, through `get_my_parties`
+    (`20261008151908`), which replaced three PostgREST selects and a Dart
+    `ends_at == null || ends_at > now` filter — that filter was the old map
+    rule copied client-side, and kept a no-end-time party forever after the
+    map dropped it. Do not reintroduce an "is it over" check in Dart: the
+    grace cannot be expressed through PostgREST without the client computing
+    the cutoff itself, which is a second copy of the number. It cannot just *call* `party_is_past` (gotchas 20, 22).
 
     **What triggered it:** ALL PARTIES showed nothing while the map was full of
     pins. The list had always applied the grace; the map's Όλα had not, so on a

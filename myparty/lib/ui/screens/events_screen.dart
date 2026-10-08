@@ -341,13 +341,12 @@ class _EventsScreenState extends State<EventsScreen> {
                         final now = widget.clock();
                         final todayEnd = DateTime(now.year, now.month, now.day + 1);
                         final weekEnd = now.add(const Duration(days: 7));
-                        // "Not over" is the MAP's rule, `ends_at is null or
-                        // ends_at > now()`, not "has not started": a party you
-                        // RSVP'd to from its pin while it was under way has to
-                        // show up here, or the answer looks like it was lost.
-                        final current = snapshot.data!
-                            .where((r) => r.endsAt == null || r.endsAt!.isAfter(now))
-                            .toList()
+                        // No "is it over" filter here: get_my_parties already
+                        // applied the map's rule, six-hour grace included
+                        // (gotcha 21). A second copy in Dart is exactly how
+                        // this list once kept a party with no end time
+                        // forever after the map had dropped it.
+                        final current = snapshot.data!.toList()
                           ..sort((a, b) => a.startsAt.compareTo(b.startsAt));
                         final happening = current.where((r) => !r.startsAt.isAfter(now)).toList();
                         final upcoming = current.where((r) => r.startsAt.isAfter(now)).toList();

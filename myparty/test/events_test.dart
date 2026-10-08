@@ -442,17 +442,18 @@ void main() {
       expect(repo.rsvpWrites.single.current, MpRsvp.going);
     });
 
-    testWidgets('MY PARTIES keeps a party that has STARTED, and drops one that is over', (tester) async {
-      // The map pins anything whose ends_at is null or still ahead, so a party
-      // answered from its pin while under way must be listed here too -- it
-      // used to be filtered on starts_at alone and vanished, which read as the
-      // RSVP not having saved.
+    testWidgets('MY PARTIES lists what the server returned and does not re-decide "over"', (tester) async {
+      // get_my_parties applies the map's rule, grace included (gotcha 21), so
+      // whatever reaches the screen is not over by definition. A Dart filter
+      // here was once a second definition: it kept a party with no end time
+      // forever after the map had dropped it. A row the clock would call
+      // "over" is therefore still rendered -- that is the server's question.
       final now = DateTime(2030, 6, 14, 20);
       await tester.pumpWidget(_host(_FakePartyRepository([
         _rsvp(title: 'Under way', startsAt: now.subtract(const Duration(hours: 2)),
             endsAt: now.add(const Duration(hours: 3))),
-        _rsvp(title: 'Started, no end time', startsAt: now.subtract(const Duration(days: 40))),
-        _rsvp(title: 'Already over', startsAt: now.subtract(const Duration(hours: 9)),
+        _rsvp(title: 'Started, no end time', startsAt: now.subtract(const Duration(hours: 1))),
+        _rsvp(title: 'Clock says over', startsAt: now.subtract(const Duration(hours: 9)),
             endsAt: now.subtract(const Duration(hours: 1))),
         _rsvp(title: 'Tonight one', startsAt: now.add(const Duration(hours: 2))),
       ]), clock: () => now));
@@ -463,8 +464,8 @@ void main() {
       expect(find.text('HAPPENING NOW'), findsOneWidget);
       expect(find.text('Under way'), findsOneWidget);
       expect(find.text('Started, no end time'), findsOneWidget);
+      expect(find.text('Clock says over'), findsOneWidget);
       expect(find.text('TONIGHT'), findsOneWidget);
-      expect(find.text('Already over'), findsNothing);
     });
 
     testWidgets('MY PARTIES lists parties you HOST and are INVITED to, before any answer', (tester) async {

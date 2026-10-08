@@ -13,9 +13,9 @@ class RsvpParty {
   final String title;
   final DateTime startsAt;
 
-  /// Null when the host gave no end time — which the map treats as "not over"
-  /// (gotcha 21), and so does MY PARTIES, so a party you can still see and
-  /// answer on the map is also in your list.
+  /// Null when the host gave no end time. Whether such a party is over is the
+  /// server's call (the six-hour grace, gotcha 21), made in `get_my_parties`
+  /// by the same rule as the map — never re-decided from this field.
   final DateTime? endsAt;
   final bool isPrivate;
   final int goingCount;
@@ -40,43 +40,24 @@ class RsvpParty {
     this.isInvited = false,
   });
 
-  /// A row of `rsvps` with its party embedded as `parties`.
-  factory RsvpParty.fromRow(Map<String, dynamic> row) =>
-      RsvpParty.fromParty(row['parties'] as Map<String, dynamic>, rsvpStatus: row['status'] as String);
-
-  /// A `parties` row, from whichever of the three sources found it.
-  factory RsvpParty.fromParty(
-    Map<String, dynamic> party, {
-    String? rsvpStatus,
-    bool isHost = false,
-    bool isInvited = false,
-  }) {
+  /// One row of `get_my_parties`, which merges the three sources server-side
+  /// — one row per party, flags already combined.
+  ///
+  /// The counters are `int?` on the wire only defensively: the RPC passes
+  /// them through for every row, private included, as the table selects it
+  /// replaced did. A private row renders no count either way.
+  factory RsvpParty.fromRow(Map<String, dynamic> row) {
     return RsvpParty(
-      partyId: party['id'] as String,
-      title: party['title'] as String,
-      startsAt: DateTime.parse(party['starts_at'] as String).toLocal(),
-      endsAt: party['ends_at'] == null ? null : DateTime.parse(party['ends_at'] as String).toLocal(),
-      isPrivate: party['is_private'] as bool,
-      goingCount: party['going_count'] as int,
-      interestedCount: party['interested_count'] as int,
-      rsvpStatus: rsvpStatus,
-      isHost: isHost,
-      isInvited: isInvited,
+      partyId: row['party_id'] as String,
+      title: row['title'] as String,
+      startsAt: DateTime.parse(row['starts_at'] as String).toLocal(),
+      endsAt: row['ends_at'] == null ? null : DateTime.parse(row['ends_at'] as String).toLocal(),
+      isPrivate: row['is_private'] as bool,
+      goingCount: (row['going_count'] as int?) ?? 0,
+      interestedCount: (row['interested_count'] as int?) ?? 0,
+      rsvpStatus: row['my_rsvp_status'] as String?,
+      isHost: (row['is_host'] as bool?) ?? false,
+      isInvited: (row['is_invited'] as bool?) ?? false,
     );
   }
-
-  /// This row with what [other] — the same party, found by another source —
-  /// knows about the viewer's part in it.
-  RsvpParty mergedWith(RsvpParty other) => RsvpParty(
-        partyId: partyId,
-        title: title,
-        startsAt: startsAt,
-        endsAt: endsAt,
-        isPrivate: isPrivate,
-        goingCount: goingCount,
-        interestedCount: interestedCount,
-        rsvpStatus: rsvpStatus ?? other.rsvpStatus,
-        isHost: isHost || other.isHost,
-        isInvited: isInvited || other.isInvited,
-      );
 }
