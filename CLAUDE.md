@@ -9,7 +9,8 @@ Session-by-session task scripts: `docs/MyParty-ClaudeCode-Prompts.md`.
 **Real today:** `profiles`/`parties`/`invitations`/`rsvps`/`follows`/`blocks`/
 `party_posts`/`post_likes`/`post_comments`/`reports`/`messages`/`party_reads`/
 `stories`/`story_views`/`user_devices`/`sent_notifications`/
-`notification_jobs`/`user_birthdates` tables with RLS;
+`notification_jobs`/`user_birthdates`/`direct_threads`/`direct_messages`/
+`direct_reads` tables with RLS;
 the **13+ age gate** — `before_user_created_age_gate`, a Supabase Auth
 `before_user_created` hook (not a trigger: raw `auth.users` inserts in seed and
 tests must keep working), with the DOB stored owner-read-only in
@@ -82,6 +83,48 @@ messages were hidden with `hidden_reason` naming the migration rather than left
 to fall out of the policy silently — a moderator asking "what was taken down"
 has to find them. Guarded at all three client entry points; `MessagesScreen`
 needs none because `get_party_chats` already filters on the helper.
+
+**Direct messages are their own three tables, not a `type` on `messages`**
+(Phase 33, `20261009095551`). There is no conversation table in group chat to
+put a type on, because the party IS the conversation. Making `messages.party_id`
+nullable would turn every chat policy, the topic policy, the rate limit and the
+export into two-armed ORs around a helper whose revert warning is already
+load-bearing. So DMs reuse the *shapes* and the client's chat UI, and share no
+rows. Five things worth knowing:
+
+- **One thread per pair, by construction.** `direct_threads` stores
+  `(user_low, user_high)` with `check (user_low < user_high)` and a unique key,
+  so A→B and B→A are the same row and a thread with yourself is
+  unrepresentable. The client has no write grant at all:
+  `get_or_create_direct_thread` is the only door, and it does
+  `on conflict do nothing` then re-reads, so two simultaneous taps return one
+  id. A thread with `last_message_at is null` (opened, never written in) is not
+  listed.
+- **`dm_policy` (everyone / following / nobody, default everyone)** points the
+  same way as `invite_policy`: 'following' means people *I* follow (gotcha 14,
+  asserted both ways). It gates new threads, and `can_send_direct_message`
+  re-asks it on **every send until the peer has written in the thread**. With
+  that arm, 'nobody' stops strangers without silencing conversations you are in.
+  Without it, a thread opened while you were 'everyone' would stay a standing
+  licence to message you.
+- **A block overrides everything, in existing threads too.** No new thread, no
+  send in either direction, the peer's lines leave the SELECT policy (gotcha 2's
+  author term: in a two-person thread the peer IS the other author), the
+  `dm:{uuid}` topic refuses the join (`can_view_direct_thread`), and the list
+  drops the thread. Every refusal from `get_or_create_direct_thread` is the same
+  `'cannot message this user'`, 42501, whether the cause is self, unknown,
+  deleted, blocked or policy. Do not make them distinguishable, or the RPC
+  becomes a block oracle.
+- **Realtime is a second SELECT policy on `realtime.messages`**, beside the party
+  one. Each topic parser accepts only its own prefix, so neither policy can
+  admit the other's channel (asserted). Still no INSERT policy.
+- **Hiding is author-only.** A DM has no host, and a recipient hiding the
+  sender's line would delete it from the sender's history too. Erasure keeps the
+  lines under the tombstone and deletes `direct_reads`; the export carries the
+  DMs the user wrote and their `dm_policy`.
+
+No push for DMs yet. If it comes, gotcha 11 applies: the DM helpers are bound to
+`auth.uid()` and would need per-user variants before a fan-out could call them.
 
 **Party posts are HOST-ONLY, and the rule lives in the INSERT policy** —
 `is_party_host` in the `party_posts` INSERT policy, with **no** matching

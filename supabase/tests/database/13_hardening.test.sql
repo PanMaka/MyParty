@@ -128,6 +128,7 @@ select is_empty(
      )
      select fk.conname from fk
      where fk.conname not in (
+       'direct_messages_hidden_by_fkey',
        'messages_hidden_by_fkey',
        'party_posts_hidden_by_fkey',
        'post_comments_hidden_by_fkey',

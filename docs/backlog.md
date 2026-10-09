@@ -231,6 +231,30 @@ a failing run with `pg_stat_activity`/lock diagnostics, which nobody has had yet
 *What it costs to leave:* a red CI run now and then that a rerun clears, which
 trains people to rerun red runs. That is the real cost.
 
+### 1.15 Party chat delivers a blocked author's lines live
+
+Found 2026-10-09 while planning Phase 33. The `realtime.messages` policy on
+`party:{uuid}` authorizes the TOPIC (`can_chat_in_party`), not each event, and
+`broadcast_message` writes one row per message for every subscriber. So if B
+has blocked A and both are on the same private party, A's new lines still
+arrive on B's open chat over the socket, with the username the definer trigger
+resolved. History is correct: the `messages` SELECT policy's author
+`is_blocked` term drops A's lines from `get_messages` and the reconnect gap-fill.
+Only the live stream leaks, and only until the screen is reopened.
+
+*Why it is still open:* deliberately kept out of Phase 33, so the DM branch
+does not also touch group-chat behaviour. The fix is client-side, because
+realtime authorizes subscribers and not individual events: `ChatScreen` drops
+`new_message` events whose `author_id` is blocked with the viewer. That needs
+the viewer's block set, both directions, which nothing on the client loads yet.
+A server-side fix would mean per-viewer topics, which gives up the
+one-write-per-message property the broadcast design exists for.
+
+*What it costs to leave:* a user who blocked someone in a shared private party
+still sees that person's new lines while the chat is open. DMs do not have this
+gap: a block refuses the send itself, so no event is ever written
+(`31_direct_messages.test.sql`, section E).
+
 ---
 
 ## 2. Costed: should the map adopt `party_is_past()`?
