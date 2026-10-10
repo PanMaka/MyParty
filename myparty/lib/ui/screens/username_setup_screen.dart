@@ -149,7 +149,7 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
                 imageScale: 1.0,
                 semanticLabel: 'Friends at a party',
                 caption:
-                    "What's your name? People need it to find you in the party!",
+                    "What's your name? People need it to find you in a party!",
               ),
               const SizedBox(height: 32),
               AuthFieldsBox(
@@ -175,16 +175,13 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
                       if (_lastNameError != null) setState(() => _lastNameError = null);
                     },
                   ),
-                  const SizedBox(height: 28),
-                  Text(
-                    usernameCaption,
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                        ),
-                  ),
-                  const SizedBox(height: 4),
+                ],
+              ),
+              const SizedBox(height: 32),
+              const AuthCaption(usernameCaption),
+              const SizedBox(height: 20),
+              AuthFieldsBox(
+                children: [
                   TextField(
                     controller: _usernameController,
                     onChanged: (v) => _drafts.username = v,

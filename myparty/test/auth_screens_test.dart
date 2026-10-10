@@ -365,7 +365,7 @@ void main() {
 
       expect(_headerAsset(tester), 'assets/images/username_party.png');
       _expectCircularHeader(tester);
-      expect(find.text("What's your name? People need it to find you in the party!"), findsOneWidget);
+      expect(find.text("What's your name? People need it to find you in a party!"), findsOneWidget);
       expect(
         find.descendant(of: find.byType(AuthFieldsBox), matching: find.widgetWithText(TextField, 'Username')),
         findsOneWidget,
@@ -373,21 +373,45 @@ void main() {
       expect(find.text('Are you ready to party?'), findsNothing);
     });
 
-    testWidgets('first name, last name, the caption, then the username -- in that order',
+    testWidgets('names in one box, the username in another, the caption between them',
         (tester) async {
       await tester.pumpWidget(screen(_FakeProfileRepository()));
 
       const caption = 'And what about the name for people to find you within the app?';
       double top(Finder f) => tester.getTopLeft(f).dy;
-      final first = find.widgetWithText(TextField, 'First name');
-      final last = find.widgetWithText(TextField, 'Last name');
-      final username = find.widgetWithText(TextField, 'Username');
-      expect(find.descendant(of: find.byType(AuthFieldsBox), matching: find.text(caption)),
-          findsOneWidget);
-      expect(top(find.byType(AuthHeader)), lessThan(top(first)));
-      expect(top(first), lessThan(top(last)));
-      expect(top(last), lessThan(top(find.text(caption))));
-      expect(top(find.text(caption)), lessThan(top(username)));
+      double bottom(Finder f) => tester.getBottomLeft(f).dy;
+      final boxes = find.byType(AuthFieldsBox);
+      expect(boxes, findsNWidgets(2));
+      final namesBox = boxes.first;
+      final usernameBox = boxes.last;
+
+      Finder inBox(Finder box, String label) =>
+          find.descendant(of: box, matching: find.widgetWithText(TextField, label));
+      expect(inBox(namesBox, 'First name'), findsOneWidget);
+      expect(inBox(namesBox, 'Last name'), findsOneWidget);
+      expect(inBox(namesBox, 'Username'), findsNothing);
+      expect(inBox(usernameBox, 'Username'), findsOneWidget);
+      expect(inBox(usernameBox, 'First name'), findsNothing);
+
+      // The caption is outside both boxes, between them.
+      final captionText = find.text(caption);
+      expect(find.descendant(of: boxes, matching: captionText), findsNothing);
+      expect(top(find.byType(AuthHeader)), lessThan(top(namesBox)));
+      expect(bottom(namesBox), lessThan(top(captionText)));
+      expect(bottom(captionText), lessThan(top(usernameBox)));
+    });
+
+    testWidgets('the second caption has the format of the first', (tester) async {
+      await tester.pumpWidget(screen(_FakeProfileRepository()));
+
+      TextStyle? styleOf(String text) => tester.widget<Text>(find.text(text)).style;
+      final header = styleOf("What's your name? People need it to find you in a party!");
+      final second = styleOf('And what about the name for people to find you within the app?');
+      expect(second, header);
+      expect(
+        tester.widget<Text>(find.text('And what about the name for people to find you within the app?')).textAlign,
+        TextAlign.center,
+      );
     });
 
     testWidgets('missing names are named under their fields and nothing is written', (tester) async {

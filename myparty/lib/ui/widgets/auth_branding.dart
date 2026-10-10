@@ -49,15 +49,28 @@ class AuthHeader extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 20),
-        Text(
-          caption,
-          textAlign: TextAlign.center,
-          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                color: AppColors.text,
-                fontWeight: FontWeight.w700,
-              ),
-        ),
+        AuthCaption(caption),
       ],
+    );
+  }
+}
+
+/// The large centred line the auth screens speak in: [AuthHeader]'s caption,
+/// and any caption between two [AuthFieldsBox]es, so they always match.
+class AuthCaption extends StatelessWidget {
+  final String text;
+
+  const AuthCaption(this.text, {super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      textAlign: TextAlign.center,
+      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+            color: AppColors.text,
+            fontWeight: FontWeight.w700,
+          ),
     );
   }
 }
