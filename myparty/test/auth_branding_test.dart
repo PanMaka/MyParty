@@ -69,23 +69,62 @@ void main() {
     expect(controller.text, 'secret', reason: 'toggling never touches the value');
   });
 
-  testWidgets('date of birth: tapping opens a calendar, and a pick is reported', (tester) async {
-    DateTime? picked;
-    await tester.pumpWidget(_host(AuthDateOfBirthField(value: null, onChanged: (d) => picked = d)));
-
-    await tester.tap(find.byType(AuthDateOfBirthField));
+  Future<void> pick(WidgetTester tester, String hint, String item) async {
+    await tester.tap(
+      find.ancestor(of: find.text(hint), matching: find.byType(DropdownButton<int>)),
+    );
     await tester.pumpAndSettle();
-    expect(find.byType(DatePickerDialog), findsOneWidget);
-
-    await tester.tap(find.text('OK'));
+    await tester.scrollUntilVisible(
+      find.text(item).hitTestable(),
+      100,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.text(item).hitTestable().last);
     await tester.pumpAndSettle();
-    expect(picked, isNotNull);
+  }
+
+  testWidgets('date of birth: day, month and year dropdowns report the date once all are set', (
+    tester,
+  ) async {
+    final picked = <DateTime>[];
+    await tester.pumpWidget(
+      _host(
+        AuthDateOfBirthField(value: null, onChanged: picked.add, today: DateTime(2026, 10, 10)),
+      ),
+    );
+
+    await pick(tester, 'Day', '9');
+    await pick(tester, 'Month', 'March');
+    expect(picked, isEmpty);
+
+    // 2001 sits 25 rows down a newest-first list: it has to be reachable
+    // without a calendar's year grid.
+    await pick(tester, 'Year', '2001');
+
+    expect(picked, [DateTime(2001, 3, 9)]);
   });
 
-  testWidgets('date of birth: shows dd/MM/yyyy, and no error by default', (tester) async {
-    await tester.pumpWidget(_host(AuthDateOfBirthField(value: DateTime(2001, 3, 9), onChanged: (_) {})));
+  testWidgets('date of birth: a day the new month lacks is clamped, not rolled over', (
+    tester,
+  ) async {
+    DateTime? picked;
+    await tester.pumpWidget(
+      _host(AuthDateOfBirthField(value: DateTime(2001, 3, 31), onChanged: (d) => picked = d)),
+    );
 
-    expect(find.text('09/03/2001'), findsOneWidget);
+    await pick(tester, 'March', 'February');
+
+    expect(picked, DateTime(2001, 2, 28));
+  });
+
+  testWidgets('date of birth: shows the given date, and no error by default', (tester) async {
+    await tester.pumpWidget(
+      _host(AuthDateOfBirthField(value: DateTime(2001, 3, 9), onChanged: (_) {})),
+    );
+
+    expect(find.text('9'), findsOneWidget);
+    expect(find.text('March'), findsOneWidget);
+    expect(find.text('2001'), findsOneWidget);
     final decoration = tester.widget<InputDecorator>(find.byType(InputDecorator)).decoration;
     expect(decoration.errorText, isNull);
   });
@@ -103,6 +142,38 @@ void main() {
     final decoration = tester.widget<InputDecorator>(find.byType(InputDecorator)).decoration;
     expect((decoration.errorBorder! as OutlineInputBorder).borderSide.color, AppColors.formError);
     expect(decoration.errorStyle!.color, AppColors.formError);
+  });
+
+  testWidgets('gender offers the four options and reports the choice', (tester) async {
+    Gender? picked;
+    await tester.pumpWidget(_host(AuthGenderField(value: null, onChanged: (g) => picked = g)));
+
+    await tester.tap(find.byType(AuthGenderField));
+    await tester.pumpAndSettle();
+    for (final label in ['Male', 'Female', 'Non-binary', 'Prefer not to say']) {
+      expect(find.text(label), findsWidgets);
+    }
+    await tester.tap(find.text('Non-binary').last);
+    await tester.pumpAndSettle();
+
+    expect(picked, Gender.nonBinary);
+    expect(picked!.value, 'non_binary');
+  });
+
+  testWidgets('date of birth and gender fit a narrow phone without overflow', (tester) async {
+    await tester.pumpWidget(
+      _host(
+        Column(
+          children: [
+            AuthDateOfBirthField(value: DateTime(2001, 9, 30), onChanged: (_) {}),
+            AuthGenderField(value: Gender.preferNotToSay, onChanged: (_) {}),
+          ],
+        ),
+        width: 288,
+      ),
+    );
+
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('header and box fit a narrow phone without overflow', (tester) async {

@@ -1,19 +1,32 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../data/profile_repository.dart';
+import '../../services/auth_drafts.dart';
 import '../../services/auth_service.dart';
 import '../widgets/auth_branding.dart';
-import 'home_screen.dart';
 import 'register_screen.dart';
 
 class UsernameSetupScreen extends StatefulWidget {
-  const UsernameSetupScreen({super.key, this.repository, this.authService});
+  const UsernameSetupScreen({
+    super.key,
+    required this.onOnboarded,
+    this.repository,
+    this.authService,
+  });
+
+  /// Called once the username is written. AuthGate swaps itself to HomeScreen
+  /// in response; this screen must not navigate there itself. It is built
+  /// INSIDE AuthGate's route, so a pushReplacement would replace AuthGate —
+  /// the only listener on auth state — and every later sign-out would clear
+  /// the session while leaving the user on HomeScreen.
+  final VoidCallback onOnboarded;
 
   /// Injectable so the screen builds under `flutter test`; null means the real
   /// [ProfileRepository].
   final ProfileRepository? repository;
 
-  /// Same, for the sign-out behind the back arrow; null means [AuthService].
+  /// Same, for saving the names and for the undo behind the back arrow; null
+  /// means [AuthService].
   final AuthService? authService;
 
   @override
@@ -21,19 +34,30 @@ class UsernameSetupScreen extends StatefulWidget {
 }
 
 class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
-  final _usernameController = TextEditingController();
+  final _drafts = AuthDrafts.instance;
+  late final _firstNameController = TextEditingController(text: _drafts.firstName);
+  late final _lastNameController = TextEditingController(text: _drafts.lastName);
+  late final _usernameController = TextEditingController(text: _drafts.username);
   late final ProfileRepository _profiles =
       widget.repository ?? ProfileRepository();
   late final AuthService _auth = widget.authService ?? AuthService();
   bool _isLoading = false;
   String? _errorText;
+  String? _firstNameError;
+  String? _lastNameError;
+
+  static const usernameCaption = 'And what about the name for people to find you within the app?';
 
   Future<void> _submit() async {
+    final firstName = _firstNameController.text.trim();
+    final lastName = _lastNameController.text.trim();
     final username = _usernameController.text.trim();
-    if (username.length < 3) {
-      setState(() => _errorText = 'Username must be at least 3 characters');
-      return;
-    }
+    setState(() {
+      _firstNameError = firstName.isEmpty ? 'Please enter your first name.' : null;
+      _lastNameError = lastName.isEmpty ? 'Please enter your last name.' : null;
+      _errorText = username.length < 3 ? 'Username must be at least 3 characters' : null;
+    });
+    if (_firstNameError != null || _lastNameError != null || _errorText != null) return;
 
     setState(() {
       _isLoading = true;
@@ -48,35 +72,49 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
         return;
       }
 
+      // Names first: completeOnboarding is what makes AuthGate stop showing
+      // this screen, so anything after it might never run.
+      await _auth.saveNames(firstName: firstName, lastName: lastName);
       await _profiles.completeOnboarding(username);
+      _drafts.clear();
 
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const HomeScreen()),
-        );
-      }
+      if (mounted) widget.onOnboarded();
     } on PostgrestException catch (e) {
       setState(() => _errorText = e.message);
+    } on AuthException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  /// The way out of a half-finished sign-up. Popping alone is not enough:
-  /// this screen is AuthGate's answer to "signed in, no username", so while
-  /// the session lives the gate would only rebuild it. Signing out swaps the
-  /// gate to LoginScreen, and register is pushed on top of that, so its own
-  /// back arrow lands on login as usual.
+  /// The way out of a half-finished sign-up: UNDOES it. Create Account has
+  /// already made the account, so merely signing out would leave its email
+  /// taken by an account the user cannot see, and the refilled register form
+  /// could never be sent again. [AuthService.abandonSignup] deletes it and
+  /// signs out, which swaps AuthGate to LoginScreen; register is pushed on top
+  /// of that, refilled from [AuthDrafts], so its own back arrow lands on login.
+  ///
+  /// If the undo is refused, nothing has changed and the user stays here, told
+  /// why — going back with the account still standing is the trap this exists
+  /// to remove.
   Future<void> _backToRegister() async {
     if (_isLoading) return;
     final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
     setState(() => _isLoading = true);
     try {
-      await _auth.signOut();
-    } finally {
+      await _auth.abandonSignup();
+    } catch (e) {
       if (mounted) setState(() => _isLoading = false);
+      messenger.showSnackBar(
+        SnackBar(content: Text('Could not undo the sign-up. Please try again. ($e)')),
+      );
+      return;
     }
+    if (mounted) setState(() => _isLoading = false);
     navigator.push(
       MaterialPageRoute(
         builder: (context) => RegisterScreen(authService: widget.authService),
@@ -86,6 +124,8 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
 
   @override
   void dispose() {
+    _firstNameController.dispose();
+    _lastNameController.dispose();
     _usernameController.dispose();
     super.dispose();
   }
@@ -115,13 +155,42 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
                 imageScale: 1.0,
                 semanticLabel: 'Friends at a party',
                 caption:
-                    "What's your name? People need it to find you in the party!",
+                    "What's your name? People need it to find you in a party!",
               ),
               const SizedBox(height: 32),
               AuthFieldsBox(
                 children: [
+                  AuthNameField(
+                    controller: _firstNameController,
+                    label: 'First name',
+                    autofillHint: AutofillHints.givenName,
+                    errorText: _firstNameError,
+                    onChanged: (v) {
+                      _drafts.firstName = v;
+                      if (_firstNameError != null) setState(() => _firstNameError = null);
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  AuthNameField(
+                    controller: _lastNameController,
+                    label: 'Last name',
+                    autofillHint: AutofillHints.familyName,
+                    errorText: _lastNameError,
+                    onChanged: (v) {
+                      _drafts.lastName = v;
+                      if (_lastNameError != null) setState(() => _lastNameError = null);
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 32),
+              const AuthCaption(usernameCaption),
+              const SizedBox(height: 20),
+              AuthFieldsBox(
+                children: [
                   TextField(
                     controller: _usernameController,
+                    onChanged: (v) => _drafts.username = v,
                     style: const TextStyle(color: Colors.white),
                     cursorColor: Colors.white,
                     decoration: InputDecoration(
