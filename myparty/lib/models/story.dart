@@ -43,7 +43,7 @@ class Story {
       mediaPath: row['media_path'] as String,
       contentType: (row['content_type'] as String?) ?? 'image/jpeg',
       // Kept in UTC: this doubles as the keyset cursor and has to go back to
-      // the RPC exactly as it came out. Same rule as PartyMessage.createdAt.
+      // the RPC exactly as it came out. Same rule as ChatMessage.createdAt.
       createdAt: DateTime.parse(row['created_at'] as String).toUtc(),
       expiresAt: DateTime.parse(row['expires_at'] as String).toUtc(),
       viewCount: (row['view_count'] as int?) ?? 0,

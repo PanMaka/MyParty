@@ -5,7 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' show RealtimeSubscribeStatus;
 
 import 'package:myparty/data/chat_repository.dart';
-import 'package:myparty/models/party_message.dart';
+import 'package:myparty/data/chat_source.dart';
+import 'package:myparty/models/chat_message.dart';
 import 'package:myparty/ui/screens/chat_screen.dart';
 import 'package:myparty/ui/screens/messages_screen.dart';
 
@@ -17,21 +18,21 @@ import 'package:myparty/ui/screens/messages_screen.dart';
 /// under `flutter test`.
 class _FakeChatRepository extends ChatRepository {
   _FakeChatRepository({
-    List<PartyMessage> history = const [],
+    List<ChatMessage> history = const [],
     List<PartyChatSummary> chats = const [],
     this.uid = 'me',
     this.failSends = false,
   })  : _history = List.of(history),
         _chats = List.of(chats);
 
-  final List<PartyMessage> _history;
+  final List<ChatMessage> _history;
   final List<PartyChatSummary> _chats;
   final String? uid;
   final bool failSends;
 
   /// Every cursor `fetchMessages` was called with, so a test can prove the
   /// screen pages by keyset row and never by offset.
-  final List<PartyMessage?> cursors = [];
+  final List<ChatMessage?> cursors = [];
   final List<DateTime> gapFillsSince = [];
   int markReadCalls = 0;
   int subscribeCalls = 0;
@@ -39,7 +40,7 @@ class _FakeChatRepository extends ChatRepository {
   /// Lets a test hold a send open and assert on what is rendered mid-flight.
   Completer<void>? sendGate;
 
-  final messageEvents = StreamController<PartyMessage>.broadcast();
+  final messageEvents = StreamController<ChatMessage>.broadcast();
   final hiddenEvents = StreamController<String>.broadcast();
   final statusEvents = StreamController<RealtimeSubscribeStatus>.broadcast();
 
@@ -47,9 +48,9 @@ class _FakeChatRepository extends ChatRepository {
   String? get currentUserId => uid;
 
   @override
-  Future<List<PartyMessage>> fetchMessages(
+  Future<List<ChatMessage>> fetchMessages(
     String partyId, {
-    PartyMessage? before,
+    ChatMessage? before,
     int limit = 30,
   }) async {
     cursors.add(before);
@@ -65,7 +66,7 @@ class _FakeChatRepository extends ChatRepository {
   }
 
   @override
-  Future<List<PartyMessage>> fetchMessagesSince(
+  Future<List<ChatMessage>> fetchMessagesSince(
     String partyId,
     DateTime since, {
     int maxPages = 5,
@@ -76,15 +77,15 @@ class _FakeChatRepository extends ChatRepository {
   }
 
   @override
-  Future<PartyMessage> sendMessage({
+  Future<ChatMessage> sendMessage({
     required String partyId,
     required String body,
   }) async {
     if (sendGate != null) await sendGate!.future;
     if (failSends) throw Exception('42501');
-    return PartyMessage(
+    return ChatMessage(
       id: 'stored-$body',
-      partyId: partyId,
+      conversationId: partyId,
       authorId: uid!,
       authorUsername: '',
       body: body,
@@ -102,9 +103,9 @@ class _FakeChatRepository extends ChatRepository {
   Future<void> hideMessage(String messageId, {String? reason}) async {}
 
   @override
-  PartyChatChannel subscribe(String partyId) {
+  ChatChannel subscribe(String partyId) {
     subscribeCalls += 1;
-    return PartyChatChannel(
+    return ChatChannel(
       messages: messageEvents.stream,
       hiddenMessageIds: hiddenEvents.stream,
       status: statusEvents.stream,
@@ -115,16 +116,16 @@ class _FakeChatRepository extends ChatRepository {
 
 final _epoch = DateTime.utc(2026, 8, 15, 20);
 
-PartyMessage _msg({
+ChatMessage _msg({
   required String id,
   String body = 'γεια',
   String authorId = 'them',
   String authorUsername = 'zoi',
   int minute = 0,
 }) {
-  return PartyMessage(
+  return ChatMessage(
     id: id,
-    partyId: 'party1',
+    conversationId: 'party1',
     authorId: authorId,
     authorUsername: authorUsername,
     body: body,
@@ -247,9 +248,9 @@ void main() {
     expect(find.text('μια φορά'), findsOneWidget);
 
     // The trigger broadcasts the row we just inserted, back to us as well.
-    repo.messageEvents.add(PartyMessage(
+    repo.messageEvents.add(ChatMessage(
       id: 'stored-μια φορά',
-      partyId: 'party1',
+      conversationId: 'party1',
       authorId: 'me',
       authorUsername: 'me',
       body: 'μια φορά',

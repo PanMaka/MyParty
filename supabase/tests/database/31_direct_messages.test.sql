@@ -18,13 +18,18 @@
 --   G. Lifecycle: deleted peers cannot be messaged, erasure keeps the lines
 --      and drops the read state, export carries them.
 --
+-- Plus the two functions the client needed (20261010095848,
+-- 20261010100148): mark_direct_thread_read in F, get_my_blocked_accounts in
+-- E -- the latter's headline is the negative, that the BLOCKED side learns
+-- nothing from it.
+--
 -- Personas (seed.sql): host 1111, invitee 2222, friend_not_invited 3333,
 -- stranger 4444, blocked_user 5555, second_host 6666. Seeded follows that
 -- matter here: host follows 2222/3333/6666; stranger has no edges at all.
 -- Everything else is built inside this transaction.
 begin;
 set search_path to public, extensions;
-select plan(78);
+select plan(85);
 
 -- Thread ids come back from the RPC, so they are parked here. Created as
 -- postgres and granted out, so every persona can read the names back.
@@ -130,6 +135,20 @@ select throws_ok(
   '42501',
   null,
   'anon cannot list threads'
+);
+
+select throws_ok(
+  $$ select public.mark_direct_thread_read('aaaaaaaa-0000-0000-0000-000000000001') $$,
+  '42501',
+  null,
+  'anon cannot mark a thread read'
+);
+
+select throws_ok(
+  $$ select * from public.get_my_blocked_accounts() $$,
+  '42501',
+  null,
+  'anon cannot list blocks'
 );
 
 
@@ -413,7 +432,28 @@ select is_empty(
   'block: the thread drops out of the blocker''s list'
 );
 
+-- The undo has to be reachable. The profiles policy now hides the blocked
+-- account from the blocker too -- asserted first, as the CONTROL that makes
+-- the next assertion mean something (a definer read of a row the caller could
+-- see anyway proves nothing).
+select is_empty(
+  $$ select 1 from public.profiles where id = '22222222-2222-2222-2222-222222222222' $$,
+  'CONTROL: once blocked, the account is hidden from the blocker by the profiles policy'
+);
+
+select is(
+  (select username from public.get_my_blocked_accounts()
+   where user_id = '22222222-2222-2222-2222-222222222222'),
+  'invitee',
+  'get_my_blocked_accounts still names the account the caller blocked -- the only way back to Unblock'
+);
+
 select tests.authenticate_as('22222222-2222-2222-2222-222222222222'); -- the blocked side
+
+select is_empty(
+  $$ select 1 from public.get_my_blocked_accounts() $$,
+  'the BLOCKED side learns nothing from it -- it lists blocks you made, never who blocked you'
+);
 
 select throws_ok(
   $$ insert into public.direct_messages (thread_id, author_id, body) values
@@ -512,9 +552,15 @@ select is(
 );
 
 select lives_ok(
-  $$ insert into public.direct_reads (thread_id, user_id) values
-       ((select id from dm_ids where name = 't1'), '22222222-2222-2222-2222-222222222222') $$,
-  'a member marks the thread read'
+  $$ select public.mark_direct_thread_read((select id from dm_ids where name = 't1')) $$,
+  'a member marks the thread read through mark_direct_thread_read'
+);
+
+-- The second call is the one a PostgREST upsert can never make: it reaches
+-- ON CONFLICT DO UPDATE, and only last_read_at may be updated (gotcha 12).
+select lives_ok(
+  $$ select public.mark_direct_thread_read((select id from dm_ids where name = 't1')) $$,
+  'and again -- the conflict path, which only touches last_read_at'
 );
 
 select is(
@@ -522,6 +568,17 @@ select is(
   0,
   'and the badge clears'
 );
+
+select tests.authenticate_as('33333333-3333-3333-3333-333333333333');
+
+select throws_ok(
+  $$ select public.mark_direct_thread_read((select id from dm_ids where name = 't1')) $$,
+  '42501',
+  null,
+  'a non-member cannot create read state through the function either -- it is invoker, the policy decides'
+);
+
+select tests.authenticate_as('22222222-2222-2222-2222-222222222222'); -- invitee
 
 -- Keyset. All three t1 lines share now(), so the id is the tiebreak.
 select results_eq(

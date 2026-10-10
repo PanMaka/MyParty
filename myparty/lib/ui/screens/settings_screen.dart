@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../../data/profile_repository.dart';
+import '../../data/social_repository.dart';
 import '../../models/profile_privacy.dart';
 import '../../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import 'account_deletion_screen.dart';
+import 'blocked_accounts_screen.dart';
 import 'notification_settings_screen.dart';
 
 /// Everything that used to hang off the bottom of the profile tab.
@@ -24,11 +26,14 @@ import 'notification_settings_screen.dart';
 /// preferences, and ACCOUNT is separate from both because everything above
 /// it is reversible and it is not.
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key, this.repository});
+  const SettingsScreen({super.key, this.repository, this.social});
 
   /// Injectable so widget tests can subclass [ProfileRepository] without a
   /// Supabase client ever existing, the same way `ProfileScreen` does.
   final ProfileRepository? repository;
+
+  /// Handed to [BlockedAccountsScreen]; injectable for the same reason.
+  final SocialRepository? social;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -145,6 +150,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _privacy?.invitePolicy.label ?? _pending,
               chevron: true,
               onTap: _privacy == null ? null : _pickInvitePolicy,
+            ),
+            _divider(),
+            _settingsRow(
+              'Who can message me',
+              _privacy?.dmPolicy.label ?? _pending,
+              chevron: true,
+              onTap: _privacy == null ? null : _pickDmPolicy,
+            ),
+            _divider(),
+            _settingsRow(
+              'Blocked accounts',
+              'People you have blocked',
+              chevron: true,
+              onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                builder: (_) => BlockedAccountsScreen(social: widget.social),
+              )),
             ),
           ]),
           _note(
@@ -284,6 +305,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (chosen == null || chosen == _privacy!.invitePolicy) return;
     await _mutate(() => _profiles.updatePrivacy(invitePolicy: chosen));
+  }
+
+  Future<void> _pickDmPolicy() async {
+    final chosen = await _pickTier<DmPolicy>(
+      title: 'Who can message me',
+      options: DmPolicy.values,
+      current: _privacy!.dmPolicy,
+      labelOf: (v) => v.label,
+      explanationOf: (v) => v.explanation,
+      // The two things the tiers do NOT do, stated where the choice is made.
+      footnote:
+          'Conversations the other person has already replied in stay open. '
+          'Blocking someone always stops them, whatever this is set to.',
+    );
+    if (chosen == null || chosen == _privacy!.dmPolicy) return;
+    await _mutate(() => _profiles.updatePrivacy(dmPolicy: chosen));
   }
 
   Future<T?> _pickTier<T>({

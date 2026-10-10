@@ -63,8 +63,8 @@ messages (20/10s per user+party), stories (10/h), posts (30/h), comments
 (100/h) and invitations (500 per party, 1000/h per host, statement-level);
 `AuthService` (email signup/signin/signout via `supabase_flutter`);
 `PartyRepository`, `SocialRepository`, `FeedRepository`, `ChatRepository`,
-`StoryRepository`, `DeviceRepository`, `ProfileRepository` and
-`AccountRepository` (all
+`DirectChatRepository`, `StoryRepository`, `DeviceRepository`,
+`ProfileRepository` and `AccountRepository` (all
 widget-level Supabase calls go
 through these — a widget reaching for `Supabase.instance` directly is a bug,
 and also unbuildable under `flutter test`); `PushService`, `LocationReporter`
@@ -125,6 +125,36 @@ rows. Five things worth knowing:
 
 No push for DMs yet. If it comes, gotcha 11 applies: the DM helpers are bound to
 `auth.uid()` and would need per-user variants before a fan-out could call them.
+
+**Client side.** One `ChatScreen`, two constructors (`ChatScreen(partyId: …)`
+and `ChatScreen.direct(threadId: …)`), over a `ChatSource` interface
+(`lib/data/chat_source.dart`) with a party and a direct implementation. The
+screen's behaviour (optimistic send, echo dedupe, keyset paging, reconnect
+gap-fill) exists once. The message model is `ChatMessage` with a
+`conversationId`; it was `PartyMessage`. `MessagesScreen` has **Parties** and
+**Direct** tabs, because the Direct list is keyset-paginated
+(`get_direct_chats`) and the party list is not. The profile's Message button
+calls `get_or_create_direct_thread` every time and caches nothing, and it shows
+one sentence for every refusal.
+
+Two more functions came with the client, each fixing a hole the client exposed:
+
+- **`mark_direct_thread_read`**, because a PostgREST upsert into `direct_reads`
+  is refused **on the first call**, not just the second (gotcha 12 is worse
+  than it says). `ON CONFLICT DO UPDATE` needs UPDATE privilege on every
+  SET-listed column at plan time, and PostgREST SETs every body key.
+  `party_reads` has the same grants and the same client call, and it returns
+  403 today: see `docs/backlog.md` §1.16.
+- **`get_my_blocked_accounts`** (definer). A block hides the pair from each
+  other in the `profiles` policy, so a blocked account vanishes from search,
+  from the Direct list and from its own profile. The old
+  `SocialRepository.fetchBlocked` embed went through that same policy and had
+  returned zero rows for every block ever made. The function lists only blocks
+  the caller made, so it is not an oracle. Unblock is reachable from Settings →
+  Blocked accounts, and from the profile itself, which shows "You blocked this
+  account" via `SocialRepository.isBlocking`. That check reads only the
+  viewer's own `blocks` rows. A profile hidden by the OTHER side's block still
+  reads "not available", and a test asserts it.
 
 **Party posts are HOST-ONLY, and the rule lives in the INSERT policy** —
 `is_party_host` in the `party_posts` INSERT policy, with **no** matching

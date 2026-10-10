@@ -17,22 +17,29 @@ enum MessageStatus {
   sent,
 }
 
-/// One row of `public.messages`, or one `new_message` broadcast payload —
-/// they carry the same fields on purpose, so the live path and the history
-/// path produce identical objects and the UI never has to care which one a
-/// bubble came from.
-class PartyMessage {
+/// One message in a conversation — a party chat or a direct thread.
+///
+/// One row of `get_messages` or `get_direct_messages`, or one `new_message`
+/// broadcast payload from either topic. They carry the same fields on
+/// purpose, so the live path and the history path produce identical objects
+/// and the UI never has to care which one a bubble came from — nor, since
+/// Phase 33, which kind of conversation it belongs to.
+class ChatMessage {
   final String id;
-  final String partyId;
+
+  /// The party id for a party chat, the thread id for a direct message. The
+  /// screen only ever compares it with the conversation it is showing, so it
+  /// does not need to know which.
+  final String conversationId;
   final String authorId;
   final String authorUsername;
   final String body;
   final DateTime createdAt;
   final MessageStatus status;
 
-  const PartyMessage({
+  const ChatMessage({
     required this.id,
-    required this.partyId,
+    required this.conversationId,
     required this.authorId,
     required this.authorUsername,
     required this.body,
@@ -40,11 +47,12 @@ class PartyMessage {
     this.status = MessageStatus.sent,
   });
 
-  /// A row from `public.get_messages`.
-  factory PartyMessage.fromRow(Map<String, dynamic> row) {
-    return PartyMessage(
+  /// A row from `get_messages` (keyed `party_id`) or `get_direct_messages`
+  /// (keyed `thread_id`).
+  factory ChatMessage.fromRow(Map<String, dynamic> row) {
+    return ChatMessage(
       id: row['id'] as String,
-      partyId: row['party_id'] as String,
+      conversationId: (row['party_id'] ?? row['thread_id']) as String,
       authorId: row['author_id'] as String,
       authorUsername: (row['author_username'] as String?) ?? '',
       body: row['body'] as String,
@@ -55,15 +63,16 @@ class PartyMessage {
     );
   }
 
-  /// A `new_message` broadcast payload. Shaped by `public.broadcast_message`,
-  /// which builds it with the same keys `get_messages` returns.
-  factory PartyMessage.fromBroadcast(Map<String, dynamic> payload) =>
-      PartyMessage.fromRow(payload);
+  /// A `new_message` broadcast payload. Shaped by `broadcast_message` and
+  /// `broadcast_direct_message`, which build it with the same keys the read
+  /// RPCs return.
+  factory ChatMessage.fromBroadcast(Map<String, dynamic> payload) =>
+      ChatMessage.fromRow(payload);
 
-  PartyMessage copyWith({MessageStatus? status}) {
-    return PartyMessage(
+  ChatMessage copyWith({MessageStatus? status}) {
+    return ChatMessage(
       id: id,
-      partyId: partyId,
+      conversationId: conversationId,
       authorId: authorId,
       authorUsername: authorUsername,
       body: body,
@@ -76,7 +85,7 @@ class PartyMessage {
   /// paginates on. Several people hitting send in the same instant is the
   /// normal busy-party pattern, so the timestamp alone is not a total order
   /// and the id is what breaks the tie, on both sides of the wire.
-  int compareTo(PartyMessage other) {
+  int compareTo(ChatMessage other) {
     final byTime = createdAt.compareTo(other.createdAt);
     return byTime != 0 ? byTime : id.compareTo(other.id);
   }
@@ -122,6 +131,59 @@ class PartyChatSummary {
       lastMessageBody: row['last_message_body'] as String?,
       lastMessageAuthorUsername: row['last_message_author_username'] as String?,
       lastMessageAt: lastAt == null ? null : DateTime.parse(lastAt).toLocal(),
+      unreadCount: (row['unread_count'] as int?) ?? 0,
+    );
+  }
+
+  String get unreadLabel => unreadCount >= 100 ? '99+' : '$unreadCount';
+}
+
+/// One row of `public.get_direct_chats` — a 1-on-1 thread as it appears in the
+/// Direct tab.
+class DirectChatSummary {
+  final String threadId;
+  final String peerId;
+  final String peerUsername;
+  final String? peerAvatarPath;
+  final String? lastMessageBody;
+  final String? lastMessageAuthorId;
+
+  /// The newest VISIBLE line, for the preview. Null when every line in the
+  /// thread has been hidden.
+  final DateTime? lastMessageAt;
+
+  /// The thread's `last_message_at`, in UTC, exactly as the server sent it —
+  /// the keyset cursor, echoed back with [threadId] to fetch the next page.
+  /// Can be later than [lastMessageAt] when the newest line was hidden.
+  final DateTime activityAt;
+
+  /// Capped at 100 server-side, like [PartyChatSummary.unreadCount]. Counts
+  /// only the peer's lines.
+  final int unreadCount;
+
+  const DirectChatSummary({
+    required this.threadId,
+    required this.peerId,
+    required this.peerUsername,
+    required this.peerAvatarPath,
+    required this.lastMessageBody,
+    required this.lastMessageAuthorId,
+    required this.lastMessageAt,
+    required this.activityAt,
+    required this.unreadCount,
+  });
+
+  factory DirectChatSummary.fromRow(Map<String, dynamic> row) {
+    final lastAt = row['last_message_at'] as String?;
+    return DirectChatSummary(
+      threadId: row['thread_id'] as String,
+      peerId: row['peer_id'] as String,
+      peerUsername: row['peer_username'] as String,
+      peerAvatarPath: row['peer_avatar_path'] as String?,
+      lastMessageBody: row['last_message_body'] as String?,
+      lastMessageAuthorId: row['last_message_author_id'] as String?,
+      lastMessageAt: lastAt == null ? null : DateTime.parse(lastAt).toLocal(),
+      activityAt: DateTime.parse(row['activity_at'] as String).toUtc(),
       unreadCount: (row['unread_count'] as int?) ?? 0,
     );
   }

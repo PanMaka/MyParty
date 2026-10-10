@@ -82,23 +82,57 @@ enum InvitePolicy {
   }
 }
 
+/// Who may START a direct-message thread with this user (Phase 33).
+///
+/// Same direction as [InvitePolicy]: [following] means people **I** follow.
+/// Enforced by `get_or_create_direct_thread` and `can_send_direct_message`; a
+/// block overrides every value. Once the other person has written in a
+/// thread, it stays open whatever this says — the setting gates strangers,
+/// not conversations you are already in.
+enum DmPolicy {
+  everyone('everyone', 'Everyone', 'Anybody can start a conversation with you'),
+  following('following', 'Only people I follow', 'Only people you follow can start a conversation with you'),
+  nobody('nobody', 'Nobody', 'Nobody can start a new conversation with you');
+
+  const DmPolicy(this.wire, this.label, this.explanation);
+
+  final String wire;
+  final String label;
+  final String explanation;
+
+  static DmPolicy fromWire(Object? value) {
+    return DmPolicy.values.firstWhere(
+      (v) => v.wire == value,
+      // Unknown falls to the restrictive end, like the other two tiers.
+      orElse: () => DmPolicy.nobody,
+    );
+  }
+}
+
 class ProfilePrivacy {
-  const ProfilePrivacy({required this.mapVisibility, required this.invitePolicy});
+  const ProfilePrivacy({
+    required this.mapVisibility,
+    required this.invitePolicy,
+    required this.dmPolicy,
+  });
 
   final MapVisibility mapVisibility;
   final InvitePolicy invitePolicy;
+  final DmPolicy dmPolicy;
 
   factory ProfilePrivacy.fromRow(Map<String, dynamic> row) {
     return ProfilePrivacy(
       mapVisibility: MapVisibility.fromWire(row['map_visibility']),
       invitePolicy: InvitePolicy.fromWire(row['invite_policy']),
+      dmPolicy: DmPolicy.fromWire(row['dm_policy']),
     );
   }
 
-  ProfilePrivacy copyWith({MapVisibility? mapVisibility, InvitePolicy? invitePolicy}) {
+  ProfilePrivacy copyWith({MapVisibility? mapVisibility, InvitePolicy? invitePolicy, DmPolicy? dmPolicy}) {
     return ProfilePrivacy(
       mapVisibility: mapVisibility ?? this.mapVisibility,
       invitePolicy: invitePolicy ?? this.invitePolicy,
+      dmPolicy: dmPolicy ?? this.dmPolicy,
     );
   }
 }
