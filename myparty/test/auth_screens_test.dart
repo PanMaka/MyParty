@@ -36,14 +36,16 @@ class _FakeAuthService extends AuthService {
 
 /// Answers the availability check from [taken] and records onboarding writes.
 class _FakeProfileRepository extends ProfileRepository {
-  _FakeProfileRepository({this.taken = const {}});
+  _FakeProfileRepository({this.taken = const {}, this.completes = false});
+
+  /// Lets onboarding finish, for the test that checks what happens next.
+  final bool completes;
 
   final Set<String> taken;
   final List<String> checked = [];
   final List<String> onboarded = [];
 
-  /// Never completes, so a successful submit stops short of navigating to
-  /// HomeScreen, which needs a real Supabase.
+  /// Never completes unless [completes], so a submit can be observed mid-flight.
   final _parked = Completer<void>();
 
   @override
@@ -55,11 +57,25 @@ class _FakeProfileRepository extends ProfileRepository {
   @override
   Future<void> completeOnboarding(String username) {
     onboarded.add(username);
-    return _parked.future;
+    return completes ? Future.value() : _parked.future;
   }
 }
 
 Widget _app(Widget home) => MaterialApp(home: home);
+
+/// Records every push/replace/remove, so a test can assert none happened.
+class _RouteRecorder extends NavigatorObserver {
+  final List<String> events = [];
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) => events.add('push');
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) => events.add('replace');
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) => events.add('remove');
+}
 
 String _headerAsset(WidgetTester tester) {
   final image = tester.widget<Image>(
@@ -176,6 +192,29 @@ void main() {
 
       expect(repo.onboarded, ['maria']);
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    });
+
+    testWidgets('finishing hands control back to the gate and navigates nowhere', (tester) async {
+      // Regression: the screen used to pushReplacement(HomeScreen), which
+      // replaced AuthGate's route -- the app's first route -- so nothing was
+      // left listening for signedOut and Sign out stopped working for the rest
+      // of any session that began with sign-up.
+      final repo = _FakeProfileRepository(completes: true);
+      var completed = 0;
+      final observer = _RouteRecorder();
+      await tester.pumpWidget(MaterialApp(
+        navigatorObservers: [observer],
+        home: UsernameSetupScreen(repository: repo, onCompleted: () => completed++),
+      ));
+      observer.events.clear();
+
+      await tester.enterText(find.byType(TextField), 'maria');
+      await tester.tap(find.text('Continue'));
+      await tester.pumpAndSettle();
+
+      expect(repo.onboarded, ['maria']);
+      expect(completed, 1);
+      expect(observer.events, isEmpty, reason: 'the root route must survive -- it is AuthGate');
     });
 
     testWidgets('the back arrow signs out and opens register', (tester) async {

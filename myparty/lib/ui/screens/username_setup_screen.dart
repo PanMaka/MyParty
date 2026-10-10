@@ -3,11 +3,22 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../data/profile_repository.dart';
 import '../../services/auth_service.dart';
 import '../widgets/auth_branding.dart';
-import 'home_screen.dart';
 import 'register_screen.dart';
 
 class UsernameSetupScreen extends StatefulWidget {
-  const UsernameSetupScreen({super.key, this.repository, this.authService});
+  const UsernameSetupScreen({super.key, this.repository, this.authService, this.onCompleted});
+
+  /// Called once the username is stored. [AuthGate] passes one that swaps its
+  /// own child to the home screen.
+  ///
+  /// The screen deliberately does NOT navigate. It used to
+  /// `Navigator.pushReplacement(HomeScreen)`, and since this screen is the
+  /// content of AuthGate's route — the app's first route — that REPLACED the
+  /// gate. Nothing was left listening to `onAuthStateChange`, so for the rest
+  /// of a session that began with sign-up, Sign out cleared the session and
+  /// the screen never changed. It also skipped the `PartyLinkHandler` the gate
+  /// wraps the home screen in.
+  final VoidCallback? onCompleted;
 
   /// Injectable so the screen builds under `flutter test`; null means the real
   /// [ProfileRepository].
@@ -50,12 +61,7 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
 
       await _profiles.completeOnboarding(username);
 
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const HomeScreen()),
-        );
-      }
+      if (mounted) widget.onCompleted?.call();
     } on PostgrestException catch (e) {
       setState(() => _errorText = e.message);
     } finally {
