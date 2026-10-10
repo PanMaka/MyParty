@@ -68,6 +68,46 @@ const authErrorUnderline = UnderlineInputBorder(
   borderSide: BorderSide(color: AppColors.formError),
 );
 
+/// A first- or last-name input: capitalises words, and when [errorText] is set
+/// the underline turns red and the message is shown under the field.
+class AuthNameField extends StatelessWidget {
+  final TextEditingController controller;
+  final String label;
+  final String autofillHint;
+  final String? errorText;
+  final ValueChanged<String>? onChanged;
+
+  const AuthNameField({
+    super.key,
+    required this.controller,
+    required this.label,
+    required this.autofillHint,
+    this.errorText,
+    this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      style: const TextStyle(color: Colors.white),
+      cursorColor: Colors.white,
+      textCapitalization: TextCapitalization.words,
+      autofillHints: [autofillHint],
+      onChanged: onChanged,
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: const TextStyle(color: Colors.white70),
+        focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.white)),
+        errorText: errorText,
+        errorStyle: authErrorStyle,
+        errorBorder: authErrorUnderline,
+        focusedErrorBorder: authErrorUnderline,
+      ),
+    );
+  }
+}
+
 /// Password input with an eye toggle to show/hide what was typed. When
 /// [errorText] is set, the underline turns red and the message is shown under
 /// the field.

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../services/auth_drafts.dart';
 import '../../services/auth_service.dart';
 import '../../utils/age.dart';
 import '../../utils/password.dart';
@@ -17,31 +18,26 @@ class RegisterScreen extends StatefulWidget {
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
-  final _firstNameController = TextEditingController();
-  final _lastNameController = TextEditingController();
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
+  // Seeded from, and written back to, AuthDrafts: this screen is rebuilt from
+  // scratch whenever the username screen's back arrow brings the user here.
+  final _drafts = AuthDrafts.instance;
+  late final _emailController = TextEditingController(text: _drafts.registerEmail);
+  late final _passwordController = TextEditingController(text: _drafts.registerPassword);
   late final AuthService _authService = widget.authService ?? AuthService();
   bool _isLoading = false;
-  DateTime? _dateOfBirth;
+  late DateTime? _dateOfBirth = _drafts.registerDateOfBirth;
   String? _dateOfBirthError;
-  Gender? _gender;
+  late Gender? _gender = _drafts.registerGender;
   String? _genderError;
-  String? _firstNameError;
-  String? _lastNameError;
   String? _emailError;
   String? _passwordError;
 
-  static const _missingFirstName = 'Please enter your first name.';
-  static const _missingLastName = 'Please enter your last name.';
   static const _missingGender = 'Please choose an option.';
   static const emailTakenMessage =
       'There is already an account that is linked with this email.';
 
   @override
   void dispose() {
-    _firstNameController.dispose();
-    _lastNameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
@@ -50,6 +46,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   void _onDateOfBirthPicked(DateTime dob) {
     setState(() {
       _dateOfBirth = dob;
+      _drafts.registerDateOfBirth = dob;
       _dateOfBirthError = dateOfBirthError(dob);
     });
   }
@@ -57,21 +54,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Future<void> _register() async {
     // Checked here first so the user gets the red field rather than a
     // round trip; the server's age gate refuses the same cases regardless.
-    final firstName = _firstNameController.text.trim();
-    final lastName = _lastNameController.text.trim();
     final password = _passwordController.text;
     final dobError = dateOfBirthError(_dateOfBirth);
     setState(() {
       _emailError = null;
       _passwordError = passwordError(password);
-      _firstNameError = firstName.isEmpty ? _missingFirstName : null;
-      _lastNameError = lastName.isEmpty ? _missingLastName : null;
       _dateOfBirthError = dobError;
       _genderError = _gender == null ? _missingGender : null;
     });
-    if (_firstNameError != null ||
-        _lastNameError != null ||
-        _passwordError != null ||
+    if (_passwordError != null ||
         dobError != null ||
         _genderError != null) {
       return;
@@ -85,8 +76,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
         // the stored password differ from the one that was checked.
         password: password,
         dateOfBirth: _dateOfBirth!,
-        firstName: firstName,
-        lastName: lastName,
         gender: _gender!.value,
       );
       // With email confirmation on, GoTrue does not refuse a taken address: it
@@ -116,34 +105,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
-  Widget _nameField(
-    TextEditingController controller,
-    String label,
-    String autofillHint,
-    String? errorText,
-    VoidCallback onEdited,
-  ) {
-    return TextField(
-      controller: controller,
-      style: const TextStyle(color: Colors.white),
-      cursorColor: Colors.white,
-      textCapitalization: TextCapitalization.words,
-      autofillHints: [autofillHint],
-      onChanged: (_) {
-        if (errorText != null) onEdited();
-      },
-      decoration: InputDecoration(
-        labelText: label,
-        labelStyle: const TextStyle(color: Colors.white70),
-        focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.white)),
-        errorText: errorText,
-        errorStyle: authErrorStyle,
-        errorBorder: authErrorUnderline,
-        focusedErrorBorder: authErrorUnderline,
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -156,27 +117,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
             const SizedBox(height: 32),
             AuthFieldsBox(
               children: [
-                _nameField(
-                  _firstNameController,
-                  'First name',
-                  AutofillHints.givenName,
-                  _firstNameError,
-                  () => setState(() => _firstNameError = null),
-                ),
-                const SizedBox(height: 16),
-                _nameField(
-                  _lastNameController,
-                  'Last name',
-                  AutofillHints.familyName,
-                  _lastNameError,
-                  () => setState(() => _lastNameError = null),
-                ),
-                const SizedBox(height: 16),
                 TextField(
                   controller: _emailController,
                   style: const TextStyle(color: Colors.white),
                   cursorColor: Colors.white,
-                  onChanged: (_) {
+                  onChanged: (v) {
+                    _drafts.registerEmail = v;
                     if (_emailError != null) setState(() => _emailError = null);
                   },
                   decoration: InputDecoration(
@@ -197,7 +143,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 AuthPasswordField(
                   controller: _passwordController,
                   errorText: _passwordError,
-                  onChanged: (_) {
+                  onChanged: (v) {
+                    _drafts.registerPassword = v;
                     if (_passwordError != null) setState(() => _passwordError = null);
                   },
                 ),
@@ -213,6 +160,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   errorText: _genderError,
                   onChanged: (g) => setState(() {
                     _gender = g;
+                    _drafts.registerGender = g;
                     _genderError = null;
                   }),
                 ),

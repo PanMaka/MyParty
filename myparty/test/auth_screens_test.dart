@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:myparty/data/profile_repository.dart';
+import 'package:myparty/services/auth_drafts.dart';
 import 'package:myparty/services/auth_service.dart';
 import 'package:myparty/ui/screens/login_screen.dart';
 import 'package:myparty/ui/screens/register_screen.dart';
@@ -26,6 +27,23 @@ class _FakeAuthService extends AuthService {
   final List<String> signIns = [];
   final List<Map<String, Object>> signUps = [];
   int signOuts = 0;
+  int abandons = 0;
+  final List<(String, String)> savedNames = [];
+
+  /// When true, abandonSignup fails the way the server refuses it.
+  bool refuseAbandon = false;
+
+  @override
+  Future<void> abandonSignup() async {
+    if (refuseAbandon) {
+      throw const PostgrestException(message: 'sign-up is already complete', code: '55000');
+    }
+    abandons++;
+  }
+
+  @override
+  Future<void> saveNames({required String firstName, required String lastName}) async =>
+      savedNames.add((firstName, lastName));
 
   @override
   Future<void> signOut() async => signOuts++;
@@ -41,8 +59,6 @@ class _FakeAuthService extends AuthService {
     required String email,
     required String password,
     required DateTime dateOfBirth,
-    required String firstName,
-    required String lastName,
     required String gender,
   }) async {
     if (signUpError != null) {
@@ -52,8 +68,6 @@ class _FakeAuthService extends AuthService {
       'email': email,
       'password': password,
       'dateOfBirth': dateOfBirth,
-      'firstName': firstName,
-      'lastName': lastName,
       'gender': gender,
     });
     if (answerTaken) {
@@ -74,7 +88,11 @@ class _FakeAuthService extends AuthService {
 
 /// Answers the availability check from [taken] and records onboarding writes.
 class _FakeProfileRepository extends ProfileRepository {
-  _FakeProfileRepository({this.taken = const {}});
+  _FakeProfileRepository({this.taken = const {}, this.parkOnboarding = true});
+
+  /// When false, completeOnboarding completes and the screen goes on to
+  /// navigate — which a test can only allow if it never pumps that far.
+  final bool parkOnboarding;
 
   final Set<String> taken;
   final List<String> checked = [];
@@ -93,7 +111,7 @@ class _FakeProfileRepository extends ProfileRepository {
   @override
   Future<void> completeOnboarding(String username) {
     onboarded.add(username);
-    return _parked.future;
+    return parkOnboarding ? _parked.future : Future.value();
   }
 }
 
@@ -139,8 +157,6 @@ Future<void> _fillRegister(WidgetTester tester, {String password = 'Party!Time9'
     await tester.pumpAndSettle();
   }
 
-  await tester.enterText(find.widgetWithText(TextField, 'First name'), ' Maria ');
-  await tester.enterText(find.widgetWithText(TextField, 'Last name'), ' Papadopoulou ');
   await tester.enterText(find.widgetWithText(TextField, 'Email'), 'm@p.gr');
   await tester.enterText(find.widgetWithText(TextField, 'Password'), password);
   await pick(dob('Day'), '9');
@@ -175,6 +191,9 @@ void _expectCircularHeader(WidgetTester tester) {
 }
 
 void main() {
+  // The drafts outlive widgets by design, so they would leak between tests.
+  setUp(AuthDrafts.instance.clear);
+
   group('login', () {
     testWidgets('shows the logo in a circle, the caption and the boxed fields', (tester) async {
       await tester.pumpWidget(_app(LoginScreen(authService: _FakeAuthService())));
@@ -231,17 +250,12 @@ void main() {
       );
     });
 
-    testWidgets('first and last name are the first fields, right below the picture', (
-      tester,
-    ) async {
+    testWidgets('names are not asked here any more: they moved to the username screen',
+        (tester) async {
       await tester.pumpWidget(_app(RegisterScreen(authService: _FakeAuthService())));
 
-      final first = find.widgetWithText(TextField, 'First name');
-      final last = find.widgetWithText(TextField, 'Last name');
-      final email = find.widgetWithText(TextField, 'Email');
-      expect(tester.getTopLeft(find.byType(AuthHeader)).dy, lessThan(tester.getTopLeft(first).dy));
-      expect(tester.getTopLeft(first).dy, lessThan(tester.getTopLeft(last).dy));
-      expect(tester.getTopLeft(last).dy, lessThan(tester.getTopLeft(email).dy));
+      expect(find.widgetWithText(TextField, 'First name'), findsNothing);
+      expect(find.widgetWithText(TextField, 'Last name'), findsNothing);
     });
 
     testWidgets('an empty form names every missing field and sends nothing', (tester) async {
@@ -252,14 +266,12 @@ void main() {
       await tester.tap(find.text('Create Account'));
       await tester.pump();
 
-      expect(find.text('Please enter your first name.'), findsOneWidget);
-      expect(find.text('Please enter your last name.'), findsOneWidget);
       expect(find.text('Please enter your date of birth.'), findsOneWidget);
       expect(find.text('Please choose an option.'), findsOneWidget);
       expect(auth.signUps, isEmpty);
     });
 
-    testWidgets('a complete form sends trimmed names and the gender value', (tester) async {
+    testWidgets('a complete form sends the password untrimmed and the gender value', (tester) async {
       final auth = _FakeAuthService();
       await _openRegister(tester, auth);
       await _fillRegister(tester);
@@ -267,8 +279,6 @@ void main() {
       await _submitRegister(tester);
 
       expect(auth.signUps, hasLength(1));
-      expect(auth.signUps.single['firstName'], 'Maria');
-      expect(auth.signUps.single['lastName'], 'Papadopoulou');
       expect(auth.signUps.single['gender'], 'prefer_not_to_say');
       expect(auth.signUps.single['password'], 'Party!Time9');
       expect(auth.signUps.single['dateOfBirth'], DateTime(DateTime.now().year - 20, 3, 9));
@@ -335,8 +345,23 @@ void main() {
   });
 
   group('username setup', () {
+    Widget screen(_FakeProfileRepository repo, [_FakeAuthService? auth]) =>
+        _app(UsernameSetupScreen(repository: repo, authService: auth ?? _FakeAuthService()));
+
+    Future<void> fillNames(WidgetTester tester) async {
+      await tester.enterText(find.widgetWithText(TextField, 'First name'), ' Maria ');
+      await tester.enterText(find.widgetWithText(TextField, 'Last name'), ' Papadopoulou ');
+    }
+
+    Future<void> submit(WidgetTester tester, String username) async {
+      await tester.enterText(find.widgetWithText(TextField, 'Username'), username);
+      await tester.ensureVisible(find.text('Continue'));
+      await tester.tap(find.text('Continue'));
+      await tester.pump();
+    }
+
     testWidgets('shows the party picture in a circle, its caption and the boxed field', (tester) async {
-      await tester.pumpWidget(_app(UsernameSetupScreen(repository: _FakeProfileRepository())));
+      await tester.pumpWidget(screen(_FakeProfileRepository()));
 
       expect(_headerAsset(tester), 'assets/images/username_party.png');
       _expectCircularHeader(tester);
@@ -348,13 +373,42 @@ void main() {
       expect(find.text('Are you ready to party?'), findsNothing);
     });
 
+    testWidgets('first name, last name, the caption, then the username -- in that order',
+        (tester) async {
+      await tester.pumpWidget(screen(_FakeProfileRepository()));
+
+      const caption = 'And what about the name for people to find you within the app?';
+      double top(Finder f) => tester.getTopLeft(f).dy;
+      final first = find.widgetWithText(TextField, 'First name');
+      final last = find.widgetWithText(TextField, 'Last name');
+      final username = find.widgetWithText(TextField, 'Username');
+      expect(find.descendant(of: find.byType(AuthFieldsBox), matching: find.text(caption)),
+          findsOneWidget);
+      expect(top(find.byType(AuthHeader)), lessThan(top(first)));
+      expect(top(first), lessThan(top(last)));
+      expect(top(last), lessThan(top(find.text(caption))));
+      expect(top(find.text(caption)), lessThan(top(username)));
+    });
+
+    testWidgets('missing names are named under their fields and nothing is written', (tester) async {
+      final repo = _FakeProfileRepository();
+      final auth = _FakeAuthService();
+      await tester.pumpWidget(screen(repo, auth));
+
+      await submit(tester, 'maria');
+
+      expect(find.text('Please enter your first name.'), findsOneWidget);
+      expect(find.text('Please enter your last name.'), findsOneWidget);
+      expect(repo.checked, isEmpty);
+      expect(auth.savedNames, isEmpty);
+    });
+
     testWidgets('a username under 3 characters never reaches the server', (tester) async {
       final repo = _FakeProfileRepository();
-      await tester.pumpWidget(_app(UsernameSetupScreen(repository: repo)));
+      await tester.pumpWidget(screen(repo));
+      await fillNames(tester);
 
-      await tester.enterText(find.byType(TextField), 'ab');
-      await tester.tap(find.text('Continue'));
-      await tester.pump();
+      await submit(tester, 'ab');
 
       expect(find.text('Username must be at least 3 characters'), findsOneWidget);
       expect(repo.checked, isEmpty);
@@ -363,53 +417,64 @@ void main() {
 
     testWidgets('a taken username shows the error and writes nothing', (tester) async {
       final repo = _FakeProfileRepository(taken: {'nikos'});
-      await tester.pumpWidget(_app(UsernameSetupScreen(repository: repo)));
+      final auth = _FakeAuthService();
+      await tester.pumpWidget(screen(repo, auth));
+      await fillNames(tester);
 
-      await tester.enterText(find.byType(TextField), 'nikos');
-      await tester.tap(find.text('Continue'));
-      await tester.pump();
+      await submit(tester, 'nikos');
 
       expect(find.text('That username is already taken'), findsOneWidget);
       expect(repo.checked, ['nikos']);
       expect(repo.onboarded, isEmpty);
+      expect(auth.savedNames, isEmpty);
     });
 
-    testWidgets('a free username is trimmed and written', (tester) async {
+    testWidgets('a free username is trimmed and written, with the trimmed names', (tester) async {
       final repo = _FakeProfileRepository();
-      await tester.pumpWidget(_app(UsernameSetupScreen(repository: repo)));
+      final auth = _FakeAuthService();
+      await tester.pumpWidget(screen(repo, auth));
+      await fillNames(tester);
 
-      await tester.enterText(find.byType(TextField), ' maria ');
-      await tester.tap(find.text('Continue'));
-      await tester.pump();
+      await submit(tester, ' maria ');
 
+      expect(auth.savedNames, [('Maria', 'Papadopoulou')]);
       expect(repo.onboarded, ['maria']);
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
     });
 
-    testWidgets('the back arrow signs out and opens register', (tester) async {
+    testWidgets('the back arrow undoes the sign-up and opens register', (tester) async {
       final auth = _FakeAuthService();
-      await tester.pumpWidget(_app(
-        UsernameSetupScreen(repository: _FakeProfileRepository(), authService: auth),
-      ));
+      await tester.pumpWidget(screen(_FakeProfileRepository(), auth));
 
       await tester.tap(find.byTooltip('Back to sign up'));
       await tester.pumpAndSettle();
 
-      expect(auth.signOuts, 1, reason: 'with the session alive AuthGate would only rebuild this screen');
+      expect(auth.abandons, 1,
+          reason: 'a plain sign-out would leave the email taken by an invisible account');
       expect(find.byType(RegisterScreen), findsOneWidget);
     });
 
     testWidgets('the system back button does the same, and never pops a bare route', (tester) async {
       final auth = _FakeAuthService();
-      await tester.pumpWidget(_app(
-        UsernameSetupScreen(repository: _FakeProfileRepository(), authService: auth),
-      ));
+      await tester.pumpWidget(screen(_FakeProfileRepository(), auth));
 
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
 
-      expect(auth.signOuts, 1);
+      expect(auth.abandons, 1);
       expect(find.byType(RegisterScreen), findsOneWidget);
+    });
+
+    testWidgets('a refused undo stays here and says so, rather than going back', (tester) async {
+      final auth = _FakeAuthService()..refuseAbandon = true;
+      await tester.pumpWidget(screen(_FakeProfileRepository(), auth));
+
+      await tester.tap(find.byTooltip('Back to sign up'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(RegisterScreen), findsNothing);
+      expect(find.byType(UsernameSetupScreen), findsOneWidget);
+      expect(find.textContaining('Could not undo the sign-up'), findsOneWidget);
     });
 
     testWidgets('fits a narrow phone without overflow', (tester) async {
@@ -417,9 +482,95 @@ void main() {
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
 
-      await tester.pumpWidget(_app(UsernameSetupScreen(repository: _FakeProfileRepository())));
+      await tester.pumpWidget(screen(_FakeProfileRepository()));
 
       expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('going back keeps what was typed', () {
+    testWidgets('username -> register: the register form comes back filled', (tester) async {
+      final auth = _FakeAuthService();
+      await _openRegister(tester, auth);
+      await _fillRegister(tester);
+      await _submitRegister(tester);
+      expect(auth.signUps, hasLength(1));
+
+      // What AuthGate shows next, and the way back from it.
+      await tester.pumpWidget(
+        _app(UsernameSetupScreen(repository: _FakeProfileRepository(), authService: auth)),
+      );
+      await tester.enterText(find.widgetWithText(TextField, 'First name'), 'Maria');
+      await tester.enterText(find.widgetWithText(TextField, 'Username'), 'maria');
+      await tester.tap(find.byTooltip('Back to sign up'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(RegisterScreen), findsOneWidget);
+      expect(find.widgetWithText(TextField, 'm@p.gr'), findsOneWidget);
+      expect(
+        tester.widget<TextField>(find.widgetWithText(TextField, 'Password')).controller!.text,
+        'Party!Time9',
+      );
+      expect(find.text('9'), findsOneWidget);
+      expect(find.text('March'), findsOneWidget);
+      expect(find.text('${DateTime.now().year - 20}'), findsOneWidget);
+      expect(find.text('Prefer not to say'), findsOneWidget);
+
+      // ...and Create Account goes again with no retyping. (The first submit's
+      // snackbar is let go first: it sits over the button.)
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+      await _submitRegister(tester);
+      expect(auth.signUps, hasLength(2));
+      expect(auth.signUps.last['email'], 'm@p.gr');
+
+      // Forward again: the names and username were kept too.
+      await tester.pumpWidget(
+        _app(UsernameSetupScreen(repository: _FakeProfileRepository(), authService: auth)),
+      );
+      expect(find.widgetWithText(TextField, 'Maria'), findsOneWidget);
+      expect(find.widgetWithText(TextField, 'maria'), findsOneWidget);
+    });
+
+    testWidgets('register -> login: a login that is built anew comes back filled', (tester) async {
+      final auth = _FakeAuthService();
+      await tester.pumpWidget(_app(LoginScreen(authService: auth)));
+      await tester.enterText(find.widgetWithText(TextField, 'Email'), 'a@b.gr');
+      await tester.enterText(find.widgetWithText(TextField, 'Password'), 'secret-pw');
+
+      // A sign-out makes AuthGate build a fresh LoginScreen: a new State.
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(_app(LoginScreen(authService: auth)));
+
+      expect(find.widgetWithText(TextField, 'a@b.gr'), findsOneWidget);
+      expect(
+        tester.widget<TextField>(find.widgetWithText(TextField, 'Password')).controller!.text,
+        'secret-pw',
+      );
+    });
+
+    testWidgets('finishing onboarding forgets everything, password included', (tester) async {
+      AuthDrafts.instance
+        ..registerPassword = 'Party!Time9'
+        ..loginPassword = 'x';
+      await tester.pumpWidget(
+        _app(UsernameSetupScreen(
+          repository: _FakeProfileRepository(parkOnboarding: false),
+          authService: _FakeAuthService(),
+        )),
+      );
+      await tester.enterText(find.widgetWithText(TextField, 'First name'), 'Maria');
+      await tester.enterText(find.widgetWithText(TextField, 'Last name'), 'P');
+      await tester.enterText(find.widgetWithText(TextField, 'Username'), 'maria');
+      await tester.ensureVisible(find.text('Continue'));
+      await tester.tap(find.text('Continue'));
+      // Microtasks only: the clear runs before the push, and pumping a frame
+      // would build HomeScreen, which needs a real Supabase.
+      await tester.idle();
+
+      expect(AuthDrafts.instance.registerPassword, '');
+      expect(AuthDrafts.instance.loginPassword, '');
+      expect(AuthDrafts.instance.username, '');
     });
   });
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../services/auth_drafts.dart';
 import '../../services/auth_service.dart';
 import '../widgets/auth_branding.dart';
 import 'register_screen.dart';
@@ -16,8 +17,12 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
+  // Seeded from AuthDrafts: signing out (the username screen's back arrow
+  // among others) makes AuthGate build a new LoginScreen, which would
+  // otherwise come back empty.
+  late final _emailController = TextEditingController(text: AuthDrafts.instance.loginEmail);
+  late final _passwordController =
+      TextEditingController(text: AuthDrafts.instance.loginPassword);
   late final AuthService _authService = widget.authService ?? AuthService();
   bool _isLoading = false;
 
@@ -59,6 +64,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   controller: _emailController,
                   style: const TextStyle(color: Colors.white),
                   cursorColor: Colors.white,
+                  onChanged: (v) => AuthDrafts.instance.loginEmail = v,
                   decoration: const InputDecoration(
                     labelText: 'Email',
                     labelStyle: TextStyle(color: Colors.white70),
@@ -69,7 +75,10 @@ class _LoginScreenState extends State<LoginScreen> {
                   keyboardType: TextInputType.emailAddress,
                 ),
                 const SizedBox(height: 16),
-                AuthPasswordField(controller: _passwordController),
+                AuthPasswordField(
+                  controller: _passwordController,
+                  onChanged: (v) => AuthDrafts.instance.loginPassword = v,
+                ),
               ],
             ),
             const SizedBox(height: 24),

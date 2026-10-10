@@ -18,8 +18,6 @@ class AuthService {
     required String email,
     required String password,
     required DateTime dateOfBirth,
-    required String firstName,
-    required String lastName,
     required String gender,
   }) async {
     return await _supabase.auth.signUp(
@@ -30,12 +28,29 @@ class AuthService {
         // and stored by handle_new_user into user_birthdates.
         'date_of_birth': isoDate(dateOfBirth),
         // Held only in the owner's auth user_metadata for now — no table
-        // reads them yet. Not `profiles`: that row is readable by everyone.
-        'first_name': firstName,
-        'last_name': lastName,
+        // reads it yet. Not `profiles`: that row is readable by everyone.
         'gender': gender,
       },
     );
+  }
+
+  /// First and last name, picked on the username screen. Same home as
+  /// `gender`: the owner's user_metadata, which nothing else can read.
+  Future<void> saveNames({required String firstName, required String lastName}) async {
+    await _supabase.auth.updateUser(
+      UserAttributes(data: {'first_name': firstName, 'last_name': lastName}),
+    );
+  }
+
+  /// The username screen's way back: deletes the account Create Account just
+  /// made (abandon_signup, which refuses once onboarding is complete), then
+  /// signs out. Without the delete, the email would stay taken by an account
+  /// the user cannot see, and the refilled register form could never be sent
+  /// again. The sign-out's own server call then answers 403 for the vanished
+  /// user, which gotrue ignores, so the local session is still cleared.
+  Future<void> abandonSignup() async {
+    await _supabase.rpc('abandon_signup');
+    await signOut();
   }
 
   // Sign In Logic
