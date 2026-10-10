@@ -18,13 +18,23 @@ class AuthService {
     required String email,
     required String password,
     required DateTime dateOfBirth,
+    required String firstName,
+    required String lastName,
+    required String gender,
   }) async {
     return await _supabase.auth.signUp(
       email: email,
       password: password,
-      // Read by the before_user_created age gate (which refuses under-13s) and
-      // stored by handle_new_user into user_birthdates.
-      data: {'date_of_birth': isoDate(dateOfBirth)},
+      data: {
+        // Read by the before_user_created age gate (which refuses under-13s)
+        // and stored by handle_new_user into user_birthdates.
+        'date_of_birth': isoDate(dateOfBirth),
+        // Held only in the owner's auth user_metadata for now — no table
+        // reads them yet. Not `profiles`: that row is readable by everyone.
+        'first_name': firstName,
+        'last_name': lastName,
+        'gender': gender,
+      },
     );
   }
 
