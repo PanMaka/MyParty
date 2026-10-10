@@ -167,21 +167,45 @@ class SocialRepository {
         .eq('blocked_id', targetUserId);
   }
 
-  /// Only ever returns blocks the current user created — the `blocks` SELECT
-  /// policy is `blocker_id = auth.uid()`, so there is no way to ask who
-  /// blocked you.
-  Future<List<Profile>> fetchBlocked() async {
+  /// Whether the current user has blocked [targetUserId].
+  ///
+  /// Only ever about blocks YOU made — the `blocks` SELECT policy is
+  /// `blocker_id = auth.uid()` — so this answers nothing about whether the
+  /// other person blocked you, and the profile screen can use it without
+  /// becoming a block oracle. It is how that screen offers Unblock: once you
+  /// block someone the `profiles` policy hides them from you too, so their
+  /// profile no longer loads and this is the only thing left to ask.
+  Future<bool> isBlocking(String targetUserId) async {
     final id = _uid;
-    if (id == null) return [];
+    if (id == null) return false;
 
-    final rows = await _client
+    final row = await _client
         .from('blocks')
-        .select('profiles!blocks_blocked_id_fkey(id, username, follower_count, following_count)')
+        .select('blocked_id')
         .eq('blocker_id', id)
-        .order('created_at', ascending: false)
-        .limit(200);
+        .eq('blocked_id', targetUserId)
+        .maybeSingle();
 
-    return _unwrapJoined(rows, 'profiles');
+    return row != null;
+  }
+
+  /// The people the current user has blocked, newest first — the Blocked
+  /// accounts screen.
+  ///
+  /// An RPC, not an embed. This used to select
+  /// `profiles!blocks_blocked_id_fkey(...)` from `blocks`, and that embed goes
+  /// through the `profiles` SELECT policy, which hides a blocked pair from each
+  /// other — so it returned nothing for every block ever made.
+  /// `get_my_blocked_accounts` reads the names as definer, and only for blocks
+  /// the caller made; there is still no way to ask who blocked you.
+  Future<List<Profile>> fetchBlocked() async {
+    if (_uid == null) return [];
+
+    final rows = await _client.rpc('get_my_blocked_accounts');
+    return (rows as List).map((row) {
+      final r = row as Map<String, dynamic>;
+      return Profile.fromRow({...r, 'id': r['user_id']});
+    }).toList();
   }
 
   List<Profile> _unwrapJoined(dynamic rows, String key) {

@@ -1,40 +1,8 @@
-import 'dart:async';
-
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
-import '../models/party_message.dart';
-
-/// A live subscription to one party's chat topic.
-///
-/// Wraps a `RealtimeChannel` in plain streams so [ChatScreen] never touches
-/// the realtime API directly, and so a test can hand the screen an instance
-/// built from ordinary `StreamController`s.
-class PartyChatChannel {
-  PartyChatChannel({
-    required this.messages,
-    required this.hiddenMessageIds,
-    required this.status,
-    required this.dispose,
-  });
-
-  /// `new_message` broadcasts.
-  final Stream<PartyMessage> messages;
-
-  /// `message_hidden` broadcasts — a moderation retraction carrying only the
-  /// id. Without this, a host takes a message down and every phone with the
-  /// chat already open keeps rendering it until the screen is reopened.
-  final Stream<String> hiddenMessageIds;
-
-  /// Every subscribe/disconnect transition. [ChatScreen] listens for a
-  /// *re*-subscribe to know it needs to close the gap that opened while the
-  /// socket was down.
-  final Stream<RealtimeSubscribeStatus> status;
-
-  /// Closes the streams and leaves the channel. A field rather than a method
-  /// so a test can supply its own teardown without subclassing.
-  final Future<void> Function() dispose;
-}
+import '../models/chat_message.dart';
+import 'chat_source.dart';
 
 /// Every widget-level Supabase call for group chat goes through here —
 /// screens never call `Supabase.instance.client` directly. Mirrors
@@ -82,9 +50,9 @@ class ChatRepository {
   /// because several people hitting send in the same instant share a
   /// timestamp, and the id is then the only thing producing a total order.
   /// Never an offset (CLAUDE.md #5).
-  Future<List<PartyMessage>> fetchMessages(
+  Future<List<ChatMessage>> fetchMessages(
     String partyId, {
-    PartyMessage? before,
+    ChatMessage? before,
     int limit = 30,
   }) async {
     final rows = await _client.rpc('get_messages', params: {
@@ -95,44 +63,17 @@ class ChatRepository {
     });
 
     return (rows as List)
-        .map((row) => PartyMessage.fromRow(row as Map<String, dynamic>))
+        .map((row) => ChatMessage.fromRow(row as Map<String, dynamic>))
         .toList();
   }
 
-  /// Everything that arrived after [since] — the reconnect gap-fill.
-  ///
-  /// Broadcast has no replay, so anything sent while the socket was down is
-  /// simply gone from the client's point of view. Reconnecting therefore
-  /// cannot mean "resume listening"; it has to mean "ask what I missed".
-  /// Pages backwards from the newest until it reaches [since], which is one
-  /// round trip for a normal blip and stays bounded for a long outage — at
-  /// which point the user is better served by the screen reloading anyway.
-  Future<List<PartyMessage>> fetchMessagesSince(
-    String partyId,
-    DateTime since, {
-    int maxPages = 5,
-    int pageSize = 50,
-  }) async {
-    final gathered = <PartyMessage>[];
-    PartyMessage? cursor;
-
-    for (var page = 0; page < maxPages; page++) {
-      final rows = await fetchMessages(partyId, before: cursor, limit: pageSize);
-      if (rows.isEmpty) break;
-
-      gathered.addAll(rows.where((m) => m.createdAt.isAfter(since)));
-
-      // The page is newest-first, so its last row is the oldest one in it.
-      // Once that is at or before the watermark, everything older is already
-      // held and there is nothing left to close.
-      final oldest = rows.last;
-      if (!oldest.createdAt.isAfter(since)) break;
-      if (rows.length < pageSize) break;
-      cursor = oldest;
-    }
-
-    return gathered;
-  }
+  /// Everything that arrived after [since] — the reconnect gap-fill. See
+  /// [fetchChatMessagesSince].
+  Future<List<ChatMessage>> fetchMessagesSince(String partyId, DateTime since) =>
+      fetchChatMessagesSince(
+        (before, limit) => fetchMessages(partyId, before: before, limit: limit),
+        since,
+      );
 
   /// Sends a message under a client-generated id.
   ///
@@ -143,7 +84,7 @@ class ChatRepository {
   /// is how "you are not in this chat" and "you are sending too fast" both
   /// reach the UI (both are `42501` from the policy and the rate-limit
   /// trigger respectively).
-  Future<PartyMessage> sendMessage({
+  Future<ChatMessage> sendMessage({
     required String partyId,
     required String body,
   }) async {
@@ -163,9 +104,9 @@ class ChatRepository {
         .select('id, party_id, author_id, body, created_at')
         .single();
 
-    return PartyMessage(
+    return ChatMessage(
       id: row['id'] as String,
-      partyId: row['party_id'] as String,
+      conversationId: row['party_id'] as String,
       authorId: row['author_id'] as String,
       // Own messages render without an author label, so there is nothing to
       // look up here — and a join to fetch our own username would be a round
@@ -182,18 +123,14 @@ class ChatRepository {
   /// Fire-and-forget from the UI's point of view: the server clamps the value
   /// to its own clock and refuses to move it backwards, so a stale or racing
   /// call from a second device is harmless and needs no coordination here.
+  ///
+  /// An RPC, not a PostgREST upsert. `party_reads` may only UPDATE
+  /// `last_read_at`, and an upsert SETs every key in the body, so it was
+  /// refused with 403 on every call — and swallowed, which left every badge
+  /// stuck (`20261010101036`, gotcha 12).
   Future<void> markRead(String partyId) async {
-    final id = _uid;
-    if (id == null) return;
-
-    await _client.from('party_reads').upsert(
-      {
-        'party_id': partyId,
-        'user_id': id,
-        'last_read_at': DateTime.now().toUtc().toIso8601String(),
-      },
-      onConflict: 'party_id,user_id',
-    );
+    if (_uid == null) return;
+    await _client.rpc('mark_party_read', params: {'p_party_id': partyId});
   }
 
   /// Soft delete, never a hard one (CLAUDE.md #7). An RPC rather than a PATCH
@@ -208,58 +145,9 @@ class ChatRepository {
     });
   }
 
-  /// Joins the party's broadcast topic.
-  ///
-  /// `private: true` is load bearing: it makes the client present its auth
-  /// token on the channel so the RLS policy on `realtime.messages` runs. On a
-  /// public channel the policy never evaluates and the join is simply
-  /// unauthorized — which looks exactly like a party with no traffic, so
-  /// getting this wrong fails silently rather than loudly.
-  ///
-  /// Note there is no send path here at all. Messages are sent by INSERT into
-  /// `messages` and arrive back through this channel via the database
-  /// trigger; the client never broadcasts. `realtime.messages` has no INSERT
-  /// policy precisely so that stays true.
-  PartyChatChannel subscribe(String partyId) {
-    final messages = StreamController<PartyMessage>.broadcast();
-    final hidden = StreamController<String>.broadcast();
-    final status = StreamController<RealtimeSubscribeStatus>.broadcast();
-
-    final channel = _client.channel(
-      'party:$partyId',
-      opts: const RealtimeChannelConfig(private: true),
-    );
-
-    channel
-        .onBroadcast(
-          event: 'new_message',
-          callback: (payload) {
-            if (messages.isClosed) return;
-            messages.add(PartyMessage.fromBroadcast(payload));
-          },
-        )
-        .onBroadcast(
-          event: 'message_hidden',
-          callback: (payload) {
-            if (hidden.isClosed) return;
-            final id = payload['id'] as String?;
-            if (id != null) hidden.add(id);
-          },
-        )
-        .subscribe((state, error) {
-          if (!status.isClosed) status.add(state);
-        });
-
-    return PartyChatChannel(
-      messages: messages.stream,
-      hiddenMessageIds: hidden.stream,
-      status: status.stream,
-      dispose: () async {
-        await messages.close();
-        await hidden.close();
-        await status.close();
-        await _client.removeChannel(channel);
-      },
-    );
-  }
+  /// Joins the party's broadcast topic. The channel mechanics — and why it
+  /// must be private, and why there is no send path — are in
+  /// [subscribeChatTopic], shared with direct messages.
+  ChatChannel subscribe(String partyId) =>
+      subscribeChatTopic(_client, 'party:$partyId');
 }

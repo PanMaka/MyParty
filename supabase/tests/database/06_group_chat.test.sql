@@ -31,7 +31,7 @@
 -- against.
 begin;
 set search_path to public, extensions;
-select plan(49);
+select plan(53);
 
 -- ============================================================
 -- Membership on a PRIVATE party. This half is inherited from
@@ -358,12 +358,44 @@ select throws_ok(
   'a user cannot write someone else''s read state'
 );
 
+-- How the client marks a chat read (20261010101036). The statement PostgREST
+-- generates for `.upsert(onConflict: 'party_id,user_id')` SETs every key, and
+-- party_reads may only UPDATE last_read_at -- asserted so nobody "simplifies"
+-- markRead back to an upsert. It is refused even though the row exists and
+-- nothing about the key would change: the privilege check is on the SET list.
+select throws_ok(
+  $$ insert into public.party_reads (party_id, user_id, last_read_at) values
+     ('aaaaaaaa-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222', now())
+     on conflict (party_id, user_id) do update
+     set party_id = excluded.party_id, user_id = excluded.user_id, last_read_at = excluded.last_read_at $$,
+  '42501',
+  null,
+  'a PostgREST-style upsert of party_reads is refused -- the reason mark_party_read exists (gotcha 12)'
+);
+
+select lives_ok(
+  $$ select public.mark_party_read('aaaaaaaa-0000-0000-0000-000000000001') $$,
+  'mark_party_read succeeds on a chat that already has read state -- the conflict path'
+);
+
 select tests.authenticate_as('11111111-1111-1111-1111-111111111111'); -- host
 
 select is_empty(
   $$ select 1 from public.party_reads
      where user_id = '22222222-2222-2222-2222-222222222222' $$,
   'and cannot read it either -- read state is owner-only'
+);
+
+select lives_ok(
+  $$ select public.mark_party_read('aaaaaaaa-0000-0000-0000-000000000001') $$,
+  'mark_party_read creates read state the first time -- the insert path'
+);
+
+select is(
+  (select unread_count from public.get_party_chats()
+   where party_id = 'aaaaaaaa-0000-0000-0000-000000000001'),
+  0,
+  'and the host''s badge clears'
 );
 
 

@@ -25,6 +25,7 @@ class _FakeProfileRepository extends ProfileRepository {
   static const _defaultPrivacy = ProfilePrivacy(
     mapVisibility: MapVisibility.public,
     invitePolicy: InvitePolicy.anyone,
+    dmPolicy: DmPolicy.everyone,
   );
 
   final bool failWrites;
@@ -37,6 +38,7 @@ class _FakeProfileRepository extends ProfileRepository {
   /// is a 22P02 at runtime that no amount of Dart type-checking would catch.
   final List<String> mapVisibilityWrites = [];
   final List<String> invitePolicyWrites = [];
+  final List<String> dmPolicyWrites = [];
 
   @override
   String? get currentUserId => 'me';
@@ -48,15 +50,24 @@ class _FakeProfileRepository extends ProfileRepository {
   }
 
   @override
-  Future<void> updatePrivacy({MapVisibility? mapVisibility, InvitePolicy? invitePolicy}) async {
+  Future<void> updatePrivacy({
+    MapVisibility? mapVisibility,
+    InvitePolicy? invitePolicy,
+    DmPolicy? dmPolicy,
+  }) async {
     if (mapVisibility != null) mapVisibilityWrites.add(mapVisibility.wire);
     if (invitePolicy != null) invitePolicyWrites.add(invitePolicy.wire);
+    if (dmPolicy != null) dmPolicyWrites.add(dmPolicy.wire);
 
     // Rejected exactly as the server would reject it: nothing is stored. The
     // screen must not end up displaying the value it tried to write.
     if (failWrites) throw Exception('rejected');
 
-    _privacy = _privacy.copyWith(mapVisibility: mapVisibility, invitePolicy: invitePolicy);
+    _privacy = _privacy.copyWith(
+      mapVisibility: mapVisibility,
+      invitePolicy: invitePolicy,
+      dmPolicy: dmPolicy,
+    );
   }
 }
 
@@ -76,6 +87,14 @@ Finder _sheetOption(String label) =>
 /// The last two sections sit just past the bottom of the 800x600 test surface,
 /// and a `ListView` only builds the children it needs — so an off-screen row is
 /// genuinely absent from the tree rather than merely invisible.
+/// The value shown on ONE tier row. Needed since Phase 33: the map row and the
+/// messages row both default to "Everyone", so a bare `find.text` can no
+/// longer say which row it is reading.
+Finder _tierValue(String rowTitle, String value) => find.descendant(
+      of: find.ancestor(of: find.text(rowTitle), matching: find.byType(InkWell)),
+      matching: find.text(value),
+    );
+
 Future<void> _scrollTo(WidgetTester tester, Finder finder) async {
   await tester.scrollUntilVisible(finder, 200, scrollable: find.byType(Scrollable).first);
   await tester.pumpAndSettle();
@@ -90,7 +109,6 @@ void main() {
       // then consent, then the irreversible one.
       expect(find.text('PRIVACY'), findsOneWidget);
       expect(find.text('NOTIFICATIONS'), findsOneWidget);
-      expect(find.text('ACCOUNT'), findsOneWidget);
 
       // And every row that used to trail the profile tab. All six are asserted
       // here because this is now the ONLY screen they exist on — a row dropped
@@ -98,9 +116,13 @@ void main() {
       expect(find.text('Who sees which parties I go to'), findsOneWidget);
       expect(find.text('Who sees my parties on the map'), findsOneWidget);
       expect(find.text('Who can invite me'), findsOneWidget);
+      expect(find.text('Who can message me'), findsOneWidget);
+      expect(find.text('Blocked accounts'), findsOneWidget);
       expect(find.text('Notifications & location'), findsOneWidget);
 
+      // Below the fold since the PRIVACY card grew two rows.
       await _scrollTo(tester, find.text('Sign out'));
+      expect(find.text('ACCOUNT'), findsOneWidget);
       expect(find.text('Data & deletion'), findsOneWidget);
       expect(find.text('Sign out'), findsOneWidget);
     });
@@ -114,7 +136,8 @@ void main() {
       await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
       await tester.pumpAndSettle();
 
-      expect(find.text('Did not load'), findsNWidgets(2));
+      // Three tier rows: map, invites, messages.
+      expect(find.text('Did not load'), findsNWidgets(3));
       expect(find.text('…'), findsNothing);
       expect(tester.takeException(), isNull);
     });
@@ -124,8 +147,9 @@ void main() {
     testWidgets('show the loaded tiers rather than the old hardcoded copy', (tester) async {
       await _pumpSettings(tester, _FakeProfileRepository());
 
-      expect(find.text('Everyone'), findsOneWidget);
+      expect(_tierValue('Who sees my parties on the map', 'Everyone'), findsOneWidget);
       expect(find.text('Anyone'), findsOneWidget);
+      expect(_tierValue('Who can message me', 'Everyone'), findsOneWidget);
 
       // Copy from the design prototype that described a friendship model the
       // schema does not have.
@@ -193,7 +217,7 @@ void main() {
       // ...and the row reloaded to what the server actually holds. A privacy
       // control that displays a setting the server never stored is worse than
       // one that fails loudly — the user would believe they were hidden.
-      expect(find.text('Everyone'), findsOneWidget);
+      expect(_tierValue('Who sees my parties on the map', 'Everyone'), findsOneWidget);
       expect(find.text('Nobody'), findsNothing);
     });
 
@@ -207,7 +231,7 @@ void main() {
       // now would open a tier sheet with no current tier to check against —
       // `_privacy!` — which is a crash on exactly the slow connection that
       // makes the window wide enough to hit.
-      expect(find.text('…'), findsNWidgets(2));
+      expect(find.text('…'), findsNWidgets(3));
       await tester.tap(find.text('Who sees my parties on the map'));
       await tester.pump();
 
@@ -216,7 +240,28 @@ void main() {
 
       gate.complete();
       await tester.pumpAndSettle();
-      expect(find.text('Everyone'), findsOneWidget);
+      expect(_tierValue('Who sees my parties on the map', 'Everyone'), findsOneWidget);
+    });
+
+    testWidgets('choosing who can message me writes the enum wire value', (tester) async {
+      final repo = _FakeProfileRepository();
+      await _pumpSettings(tester, repo);
+
+      await tester.tap(find.text('Who can message me'));
+      await tester.pumpAndSettle();
+
+      // Both things the tiers do NOT do are said where the choice is made.
+      expect(find.textContaining('already replied in stay open'), findsOneWidget);
+      expect(find.textContaining('Blocking someone always stops them'), findsOneWidget);
+      expect(_sheetOption('Only people I follow'), findsOneWidget);
+
+      await tester.tap(_sheetOption('Nobody'));
+      await tester.pumpAndSettle();
+
+      expect(repo.dmPolicyWrites, ['nobody']);
+      expect(repo.mapVisibilityWrites, isEmpty);
+      expect(repo.invitePolicyWrites, isEmpty);
+      expect(_tierValue('Who can message me', 'Nobody'), findsOneWidget);
     });
   });
 }

@@ -342,7 +342,7 @@ class ProfileRepository {
 
     final row = await _client
         .from('profiles')
-        .select('map_visibility, invite_policy')
+        .select('map_visibility, invite_policy, dm_policy')
         .eq('id', userId)
         .maybeSingle();
 
@@ -350,7 +350,7 @@ class ProfileRepository {
     return ProfilePrivacy.fromRow(row);
   }
 
-  /// Writes either or both tiers.
+  /// Writes any of the three tiers.
   ///
   /// A plain PATCH: `profiles` already carries a table-wide UPDATE grant and an
   /// owner-only policy, and both columns are `not null` enums, so a bad value is
@@ -358,13 +358,18 @@ class ProfileRepository {
   /// `protect_credibility_score` trigger deliberately does not freeze these —
   /// it exists for system-maintained columns, and freezing a preference the user
   /// is supposed to set would make the toggle do nothing.
-  Future<void> updatePrivacy({MapVisibility? mapVisibility, InvitePolicy? invitePolicy}) async {
+  Future<void> updatePrivacy({
+    MapVisibility? mapVisibility,
+    InvitePolicy? invitePolicy,
+    DmPolicy? dmPolicy,
+  }) async {
     final userId = currentUserId;
     if (userId == null) return;
 
     final patch = <String, dynamic>{
       'map_visibility': ?mapVisibility?.wire,
       'invite_policy': ?invitePolicy?.wire,
+      'dm_policy': ?dmPolicy?.wire,
     };
 
     if (patch.isEmpty) return;

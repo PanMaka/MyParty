@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../data/direct_chat_repository.dart';
 import '../../data/party_repository.dart';
 import '../../data/profile_repository.dart';
 import '../../data/social_repository.dart';
@@ -14,6 +15,7 @@ import '../widgets/diagonal_placeholder.dart';
 import '../widgets/follow_button.dart';
 import '../widgets/profile_party_card.dart';
 import '../widgets/report_sheet.dart';
+import 'chat_screen.dart';
 import 'host_wizard_screen.dart';
 import 'profile_edit_screen.dart';
 import 'settings_screen.dart';
@@ -113,6 +115,7 @@ class ProfileScreen extends StatefulWidget {
     this.repository,
     this.social,
     this.parties,
+    this.directChats,
   });
 
   /// Injectable so widget tests can subclass [ProfileRepository] without a
@@ -128,6 +131,9 @@ class ProfileScreen extends StatefulWidget {
   /// to a lazy client before this was possible at all.
   final PartyRepository? parties;
 
+  /// Injectable for the same reason: the Message button opens a thread.
+  final DirectChatRepository? directChats;
+
   /// Whose profile this is. Defaults to the signed-in user, which is how the
   /// tab bar mounts it.
   final ProfileTarget target;
@@ -140,6 +146,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   late final SocialRepository _social = widget.social ?? SocialRepository();
   late final ProfileRepository _profiles = widget.repository ?? ProfileRepository();
   late final PartyRepository _parties = widget.parties ?? PartyRepository();
+  late final DirectChatRepository _directChats = widget.directChats ?? DirectChatRepository();
 
   /// Mutable only through the ME / PUBLIC segment, and only ever between the
   /// two [OwnProfile] values — an [OtherProfile] never becomes an [OwnProfile].
@@ -176,6 +183,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _loading = true;
   Object? _loadError;
 
+  /// True when the profile did not load AND the viewer is the one who blocked
+  /// this account. Asked only then, and only about the viewer's own blocks
+  /// ([SocialRepository.isBlocking]), so it says nothing about whether the
+  /// other person blocked the viewer — the "not available" state stays one
+  /// state for that case.
+  bool _blockedByMe = false;
+
+  /// The Message button is mid-request. Guards a double tap opening two chat
+  /// screens on top of each other.
+  bool _openingChat = false;
+
   @override
   void initState() {
     super.initState();
@@ -188,10 +206,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final profile = await _profiles.fetchProfile(userId: id);
       final stats = await _profiles.fetchStats(userId: id);
 
+      var blockedByMe = false;
+      if (profile == null && id != null) {
+        try {
+          blockedByMe = await _social.isBlocking(id);
+        } catch (_) {
+          // Falls back to plain "not available" — the screen is no worse off
+          // than before it asked.
+        }
+      }
+
       if (!mounted) return;
       setState(() {
         _profile = profile;
         _stats = stats;
+        _blockedByMe = blockedByMe;
         _loading = false;
         _loadError = null;
       });
@@ -247,10 +276,94 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (mounted) await _load();
   }
 
-  void _comingSoon() {
+  void _snack(String text) {
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(const SnackBar(content: Text('Coming soon'), behavior: SnackBarBehavior.floating));
+    ).showSnackBar(SnackBar(content: Text(text), behavior: SnackBarBehavior.floating));
+  }
+
+  /// Opens — or reopens — the 1-on-1 thread with [userId].
+  ///
+  /// `get_or_create_direct_thread` returns the same thread for the same pair
+  /// every time, from either side, so there is nothing to look up first.
+  ///
+  /// Every refusal gets the same sentence. The server makes "blocked", "their
+  /// settings say no" and "deleted account" indistinguishable on purpose, and
+  /// a screen that tried to tell them apart would be the block oracle the
+  /// server refused to be.
+  Future<void> _openDirectChat(String userId) async {
+    if (_openingChat) return;
+    setState(() => _openingChat = true);
+
+    try {
+      final threadId = await _directChats.openThread(userId);
+      if (!mounted) return;
+      final profile = _profile;
+      await Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => ChatScreen.direct(
+          threadId: threadId,
+          peerUsername: profile?.username ?? '',
+          peerAvatarUrl: _profiles.avatarUrl(profile?.avatarPath),
+          repository: widget.directChats,
+        ),
+      ));
+    } catch (_) {
+      if (mounted) _snack('You can’t message this user');
+    } finally {
+      if (mounted) setState(() => _openingChat = false);
+    }
+  }
+
+  Future<void> _block(String userId) async {
+    final username = _profile?.username;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.sheet,
+        title: Text(username == null ? 'Block this account?' : 'Block @$username?'),
+        content: const Text(
+          'You won’t see each other’s profiles, parties or messages, and neither '
+          'of you can message the other. You both stop following each other. '
+          'They are not notified.',
+          style: TextStyle(fontSize: 13.5, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Block', style: TextStyle(color: AppColors.destructive)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await _social.block(userId);
+    } catch (_) {
+      if (mounted) _snack('Couldn’t block this account. Try again.');
+      return;
+    }
+    if (!mounted) return;
+    _snack('Blocked');
+    // The profiles policy hides the account from us now, so the reload lands
+    // on the "you blocked this account" state rather than the profile.
+    await _retryLoad();
+  }
+
+  Future<void> _unblock(String userId) async {
+    try {
+      await _social.unblock(userId);
+    } catch (_) {
+      if (mounted) _snack('Couldn’t unblock this account. Try again.');
+      return;
+    }
+    if (!mounted) return;
+    _snack('Unblocked');
+    await _retryLoad();
   }
 
   @override
@@ -759,6 +872,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
       );
     }
 
+    // A block the VIEWER made. Not an oracle: it is the viewer's own row in
+    // `blocks`, which they could always read. A block made by the OTHER person
+    // still lands on the line below, indistinguishable from a missing account.
+    if (_blockedByMe) {
+      return Text(
+        'You blocked this account',
+        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textAlpha(0.55)),
+      );
+    }
+
     // fetchProfile returned null. Either there is no such row or the `profiles`
     // SELECT policy filtered it — a block, in either direction. Rendered
     // identically because they are indistinguishable from the client by design,
@@ -872,26 +995,54 @@ class _ProfileScreenState extends State<ProfileScreen> {
             Expanded(child: _actionButton('Edit profile', onTap: _openEditor)),
           ],
         ),
+        // Blocked by the viewer: the profile is hidden from them too, so the
+        // only actions left are the undo and the report.
+        OtherProfile(:final userId) when _blockedByMe => Row(
+          children: [
+            Expanded(child: _actionButton('Unblock', onTap: () => _unblock(userId))),
+            _overflowMenu(userId, blocked: true),
+          ],
+        ),
         OtherProfile(:final userId) => Row(
           children: [
             Expanded(child: FollowButton(targetUserId: userId)),
             const SizedBox(width: 8),
-            Expanded(child: _actionButton('Message', onTap: _comingSoon)),
-            PopupMenuButton<String>(
-              icon: Icon(Icons.more_horiz, size: 20, color: AppColors.textAlpha(0.5)),
-              color: AppColors.sheet,
-              onSelected: (_) =>
-                  showReportSheet(context, target: ReportTarget.profile, targetId: userId),
-              itemBuilder: (_) => const [
-                PopupMenuItem(
-                  value: 'report',
-                  child: Text('Report', style: TextStyle(fontSize: 13)),
-                ),
-              ],
+            Expanded(
+              child: _actionButton(
+                _openingChat ? '…' : 'Message',
+                onTap: _openingChat ? null : () => _openDirectChat(userId),
+              ),
             ),
+            _overflowMenu(userId, blocked: false),
           ],
         ),
       },
+    );
+  }
+
+  /// The ⋯ on another user's profile: Report, and Block or Unblock.
+  Widget _overflowMenu(String userId, {required bool blocked}) {
+    return PopupMenuButton<String>(
+      icon: Icon(Icons.more_horiz, size: 20, color: AppColors.textAlpha(0.5)),
+      color: AppColors.sheet,
+      onSelected: (value) => switch (value) {
+        'block' => _block(userId),
+        'unblock' => _unblock(userId),
+        _ => showReportSheet(context, target: ReportTarget.profile, targetId: userId),
+      },
+      itemBuilder: (_) => [
+        const PopupMenuItem(
+          value: 'report',
+          child: Text('Report', style: TextStyle(fontSize: 13)),
+        ),
+        PopupMenuItem(
+          value: blocked ? 'unblock' : 'block',
+          child: Text(
+            blocked ? 'Unblock' : 'Block',
+            style: TextStyle(fontSize: 13, color: blocked ? null : AppColors.destructive),
+          ),
+        ),
+      ],
     );
   }
 

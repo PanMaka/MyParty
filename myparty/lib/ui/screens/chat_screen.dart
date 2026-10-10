@@ -4,54 +4,89 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' show RealtimeSubscribeStatus;
 
 import '../../data/chat_repository.dart';
-import '../../models/party_message.dart';
+import '../../data/chat_source.dart';
+import '../../data/direct_chat_repository.dart';
+import '../../models/chat_message.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
 import '../widgets/privacy_badge.dart';
 
-/// Live group chat for one party.
+/// One conversation: a party's group chat, or a 1-on-1 direct thread.
 ///
-/// [partyId] is a real `parties.id` uuid — this screen used to be reachable
-/// only with mock keys like `'taratsa'` and read its header out of the const
-/// `mpParties` map. Title and privacy are passed in rather than fetched
-/// because every caller already holds them (a `PartyChatSummary`, an
-/// `RsvpParty` or a `MapPartyPin`), so a lookup here would be a round trip
-/// spent re-reading what the previous screen just rendered.
+/// Everything the two share — history, keyset paging, optimistic send, echo
+/// dedupe, reconnect gap-fill, live retractions — lives here once and talks
+/// to a [ChatSource]. The two constructors differ only in which source they
+/// build and what the header says.
+///
+/// Header details are passed in rather than fetched because every caller
+/// already holds them (a `PartyChatSummary`, an `RsvpParty`, a `MapPartyPin`,
+/// a loaded `Profile` or a `DirectChatSummary`), so a lookup here would be a
+/// round trip spent re-reading what the previous screen just rendered.
 class ChatScreen extends StatefulWidget {
-  final String partyId;
-  final String partyTitle;
-  final bool isPrivate;
-  final int? memberCount;
-
-  /// Injectable for tests; production callers let it default.
-  final ChatRepository? repository;
-
+  /// A party's group chat. [partyId] is a real `parties.id`.
   const ChatScreen({
     super.key,
-    required this.partyId,
-    required this.partyTitle,
+    required String partyId,
+    required String partyTitle,
     this.isPrivate = false,
     this.memberCount,
-    this.repository,
-  });
+    ChatRepository? repository,
+  })  : conversationId = partyId,
+        title = partyTitle,
+        partyRepository = repository,
+        directRepository = null,
+        peerAvatarUrl = null,
+        isDirect = false;
+
+  /// A 1-on-1 thread. [threadId] comes from
+  /// `DirectChatRepository.openThread` or a `DirectChatSummary`.
+  const ChatScreen.direct({
+    super.key,
+    required String threadId,
+    required String peerUsername,
+    this.peerAvatarUrl,
+    DirectChatRepository? repository,
+  })  : conversationId = threadId,
+        title = '@$peerUsername',
+        isPrivate = false,
+        memberCount = null,
+        partyRepository = null,
+        directRepository = repository,
+        isDirect = true;
+
+  /// The party id, or the thread id.
+  final String conversationId;
+  final String title;
+  final bool isPrivate;
+  final int? memberCount;
+  final String? peerAvatarUrl;
+  final bool isDirect;
+
+  /// Injectable for tests; production callers let them default.
+  final ChatRepository? partyRepository;
+  final DirectChatRepository? directRepository;
+
+  ChatSource _buildSource() => isDirect
+      ? DirectChatSource(directRepository ?? DirectChatRepository(), conversationId)
+      : PartyChatSource(partyRepository ?? ChatRepository(), conversationId);
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  late final ChatRepository _repository = widget.repository ?? ChatRepository();
+  late final ChatSource _source = widget._buildSource();
 
   final _controller = TextEditingController();
   final _scrollController = ScrollController();
 
   /// Oldest first — the order the list renders in. History arrives
   /// newest-first from the keyset RPC and is reversed on the way in.
-  final List<PartyMessage> _messages = [];
+  final List<ChatMessage> _messages = [];
   final Set<String> _seenIds = {};
 
-  PartyChatChannel? _channel;
-  StreamSubscription<PartyMessage>? _messageSub;
+  ChatChannel? _channel;
+  StreamSubscription<ChatMessage>? _messageSub;
   StreamSubscription<String>? _hiddenSub;
   StreamSubscription<RealtimeSubscribeStatus>? _statusSub;
 
@@ -75,7 +110,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _loadInitialHistory() async {
     try {
-      final page = await _repository.fetchMessages(widget.partyId);
+      final page = await _source.fetchMessages();
       if (!mounted) return;
       setState(() {
         _ingest(page);
@@ -83,7 +118,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _loading = false;
       });
       _jumpToBottom();
-      unawaited(_repository.markRead(widget.partyId));
+      unawaited(_source.markRead());
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -94,7 +129,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _connect() {
-    final channel = _repository.subscribe(widget.partyId);
+    final channel = _source.subscribe();
     _channel = channel;
 
     _messageSub = channel.messages.listen((message) {
@@ -102,7 +137,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final wasAtBottom = _isAtBottom();
       setState(() => _ingest([message]));
       if (wasAtBottom) _jumpToBottom();
-      unawaited(_repository.markRead(widget.partyId));
+      unawaited(_source.markRead());
     });
 
     _hiddenSub = channel.hiddenMessageIds.listen((id) {
@@ -132,14 +167,14 @@ class _ChatScreenState extends State<ChatScreen> {
     final newest = _messages.isEmpty ? null : _messages.last.createdAt;
     try {
       final missed = newest == null
-          ? await _repository.fetchMessages(widget.partyId)
-          : await _repository.fetchMessagesSince(widget.partyId, newest);
+          ? await _source.fetchMessages()
+          : await _source.fetchMessagesSince(newest);
       if (!mounted || missed.isEmpty) return;
 
       final wasAtBottom = _isAtBottom();
       setState(() => _ingest(missed));
       if (wasAtBottom) _jumpToBottom();
-      unawaited(_repository.markRead(widget.partyId));
+      unawaited(_source.markRead());
     } catch (_) {
       // A failed gap-fill is not worth interrupting the user over: the next
       // reconnect tries again, and the messages already on screen are still
@@ -154,7 +189,7 @@ class _ChatScreenState extends State<ChatScreen> {
   /// own broadcast echo replaces it rather than appearing twice. It also
   /// covers the honest overlap between a gap-fill page and messages that
   /// arrived live while the fetch was in flight.
-  void _ingest(Iterable<PartyMessage> incoming) {
+  void _ingest(Iterable<ChatMessage> incoming) {
     for (final message in incoming) {
       final existingIndex = _messages.indexWhere((m) => m.id == message.id);
       if (existingIndex >= 0) {
@@ -185,10 +220,7 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       // The keyset cursor is the OLDEST message held — a row, never an
       // offset (CLAUDE.md #5).
-      final page = await _repository.fetchMessages(
-        widget.partyId,
-        before: _messages.first,
-      );
+      final page = await _source.fetchMessages(before: _messages.first);
       if (!mounted) return;
       setState(() {
         _ingest(page);
@@ -205,7 +237,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
 
-    final uid = _repository.currentUserId;
+    final uid = _source.currentUserId;
     if (uid == null) return;
 
     _controller.clear();
@@ -214,9 +246,9 @@ class _ChatScreenState extends State<ChatScreen> {
     // inside sendMessage, so this local row carries a temporary one and is
     // swapped for the stored row when the insert returns.
     final pendingId = 'pending-${DateTime.now().microsecondsSinceEpoch}';
-    final pending = PartyMessage(
+    final pending = ChatMessage(
       id: pendingId,
-      partyId: widget.partyId,
+      conversationId: widget.conversationId,
       authorId: uid,
       authorUsername: '',
       body: text,
@@ -228,10 +260,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _jumpToBottom();
 
     try {
-      final stored = await _repository.sendMessage(
-        partyId: widget.partyId,
-        body: text,
-      );
+      final stored = await _source.sendMessage(text);
       if (!mounted) return;
       setState(() {
         _messages.removeWhere((m) => m.id == pendingId);
@@ -253,7 +282,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  Future<void> _retry(PartyMessage failed) async {
+  Future<void> _retry(ChatMessage failed) async {
     setState(() {
       _messages.removeWhere((m) => m.id == failed.id);
       _seenIds.remove(failed.id);
@@ -400,16 +429,7 @@ class _ChatScreenState extends State<ChatScreen> {
             constraints: const BoxConstraints(),
           ),
           const SizedBox(width: 8),
-          Container(
-            width: 40,
-            height: 40,
-            clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: tint, width: 1.5),
-            ),
-            child: const DiagonalStripePlaceholder(colors: [Color(0xFF1C1622), Color(0xFF151020)]),
-          ),
+          _headerAvatar(tint),
           const SizedBox(width: 11),
           Expanded(
             child: Column(
@@ -418,19 +438,23 @@ class _ChatScreenState extends State<ChatScreen> {
                 Row(
                   children: [
                     Flexible(
-                      child: Text(widget.partyTitle,
+                      child: Text(widget.title,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700)),
                     ),
-                    const SizedBox(width: 6),
-                    PrivacyBadge(isPrivate: widget.isPrivate),
+                    // A DM has no privacy tier to badge: it is always exactly
+                    // two people.
+                    if (!widget.isDirect) ...[
+                      const SizedBox(width: 6),
+                      PrivacyBadge(isPrivate: widget.isPrivate),
+                    ],
                   ],
                 ),
-                if (widget.memberCount != null)
+                if (widget.memberCount case final count?)
                   Text(
                     widget.isPrivate
-                        ? '${widget.memberCount} ${widget.memberCount == 1 ? 'member' : 'members'} · invited only'
-                        : '${widget.memberCount} ${widget.memberCount == 1 ? 'member' : 'members'}',
+                        ? '$count ${count == 1 ? 'member' : 'members'} · invited only'
+                        : '$count ${count == 1 ? 'member' : 'members'}',
                     style: TextStyle(fontSize: 11, color: AppColors.textAlpha(0.5)),
                   ),
               ],
@@ -441,8 +465,29 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _bubble(PartyMessage msg) {
-    final mine = msg.authorId == _repository.currentUserId;
+  /// A party is a rounded square, a person is a circle — the same shapes the
+  /// chat list and the profile header use.
+  Widget _headerAvatar(Color tint) {
+    const placeholder = DiagonalStripePlaceholder(colors: [Color(0xFF1C1622), Color(0xFF151020)]);
+    final url = widget.peerAvatarUrl;
+
+    return Container(
+      width: 40,
+      height: 40,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        shape: widget.isDirect ? BoxShape.circle : BoxShape.rectangle,
+        borderRadius: widget.isDirect ? null : BorderRadius.circular(12),
+        border: Border.all(color: tint, width: 1.5),
+      ),
+      child: url == null
+          ? placeholder
+          : Image.network(url, fit: BoxFit.cover, errorBuilder: (_, _, _) => placeholder),
+    );
+  }
+
+  Widget _bubble(ChatMessage msg) {
+    final mine = msg.authorId == _source.currentUserId;
 
     if (mine) {
       final failed = msg.status == MessageStatus.failed;
@@ -506,7 +551,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   style: TextStyle(fontSize: 10.5, color: AppColors.textAlpha(0.45))),
               const SizedBox(height: 3),
               GestureDetector(
-                onLongPress: () => _showMessageActions(msg),
+                onLongPress: _source.canHideOthersMessages ? () => _showMessageActions(msg) : null,
                 child: Container(
                   constraints: const BoxConstraints(maxWidth: 260),
                   padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
@@ -533,7 +578,7 @@ class _ChatScreenState extends State<ChatScreen> {
   /// offers the action to everyone and lets the RPC refuse — the alternative
   /// is teaching the client who the host is, which is a second copy of a rule
   /// the server already owns.
-  void _showMessageActions(PartyMessage msg) {
+  void _showMessageActions(ChatMessage msg) {
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppColors.sheet,
@@ -548,7 +593,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 Navigator.of(sheetContext).pop();
                 final messenger = ScaffoldMessenger.of(context);
                 try {
-                  await _repository.hideMessage(msg.id);
+                  await _source.hideMessage(msg.id);
                 } catch (_) {
                   messenger.showSnackBar(
                     const SnackBar(
@@ -581,7 +626,7 @@ class _ChatScreenState extends State<ChatScreen> {
               maxLength: 2000,
               buildCounter: (_, {required currentLength, required isFocused, maxLength}) => null,
               decoration: InputDecoration(
-                hintText: 'Party message…',
+                hintText: widget.isDirect ? 'Message…' : 'Party message…',
                 hintStyle: TextStyle(fontSize: 13, color: AppColors.textAlpha(0.42)),
                 filled: true,
                 fillColor: Colors.white.withValues(alpha: 0.06),
