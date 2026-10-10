@@ -9,10 +9,20 @@ import 'package:myparty/services/auth_service.dart';
 import 'package:myparty/ui/screens/login_screen.dart';
 import 'package:myparty/ui/screens/register_screen.dart';
 import 'package:myparty/ui/screens/username_setup_screen.dart';
+import 'package:myparty/ui/theme/app_theme.dart';
 import 'package:myparty/ui/widgets/auth_branding.dart';
 
 /// Records sign-ins instead of reaching GoTrue.
 class _FakeAuthService extends AuthService {
+  _FakeAuthService({this.signUpError, this.answerTaken = false});
+
+  /// When set, signUp throws an [AuthException] carrying this code.
+  final String? signUpError;
+
+  /// When true, signUp answers the way GoTrue does for a taken email with
+  /// confirmation on: a user with no identities, and no error.
+  final bool answerTaken;
+
   final List<String> signIns = [];
   final List<Map<String, Object>> signUps = [];
   int signOuts = 0;
@@ -35,13 +45,29 @@ class _FakeAuthService extends AuthService {
     required String lastName,
     required String gender,
   }) async {
+    if (signUpError != null) {
+      throw AuthException('refused', statusCode: '422', code: signUpError);
+    }
     signUps.add({
       'email': email,
+      'password': password,
       'dateOfBirth': dateOfBirth,
       'firstName': firstName,
       'lastName': lastName,
       'gender': gender,
     });
+    if (answerTaken) {
+      return AuthResponse(
+        user: User(
+          id: 'u',
+          appMetadata: const {},
+          userMetadata: const {},
+          aud: 'authenticated',
+          createdAt: '2026-10-10T00:00:00Z',
+          identities: const [],
+        ),
+      );
+    }
     return AuthResponse();
   }
 }
@@ -72,6 +98,67 @@ class _FakeProfileRepository extends ProfileRepository {
 }
 
 Widget _app(Widget home) => MaterialApp(home: home);
+
+/// Pushes register over a placeholder, so a successful submit has somewhere
+/// to pop back to.
+Future<void> _openRegister(WidgetTester tester, AuthService auth) async {
+  await tester.pumpWidget(
+    _app(
+      Builder(
+        builder: (context) => Scaffold(
+          body: TextButton(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => RegisterScreen(authService: auth)),
+            ),
+            child: const Text('open'),
+          ),
+        ),
+      ),
+    ),
+  );
+  await tester.tap(find.text('open'));
+  await tester.pumpAndSettle();
+}
+
+/// Fills every register field with an acceptable value, [password] aside.
+Future<void> _fillRegister(WidgetTester tester, {String password = 'Party!Time9'}) async {
+  Finder dob(String hint) =>
+      find.ancestor(of: find.text(hint), matching: find.byType(DropdownButton<int>));
+
+  Future<void> pick(Finder field, String item) async {
+    await tester.ensureVisible(field);
+    await tester.tap(field);
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text(item).hitTestable(),
+      100,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.text(item).hitTestable().last);
+    await tester.pumpAndSettle();
+  }
+
+  await tester.enterText(find.widgetWithText(TextField, 'First name'), ' Maria ');
+  await tester.enterText(find.widgetWithText(TextField, 'Last name'), ' Papadopoulou ');
+  await tester.enterText(find.widgetWithText(TextField, 'Email'), 'm@p.gr');
+  await tester.enterText(find.widgetWithText(TextField, 'Password'), password);
+  await pick(dob('Day'), '9');
+  await pick(dob('Month'), 'March');
+  await pick(dob('Year'), '${DateTime.now().year - 20}');
+  await pick(find.byType(AuthGenderField), 'Prefer not to say');
+}
+
+Future<void> _submitRegister(WidgetTester tester) async {
+  await tester.ensureVisible(find.text('Create Account'));
+  await tester.tap(find.text('Create Account'));
+  await tester.pumpAndSettle();
+}
+
+InputDecoration _decoration(WidgetTester tester, String label) =>
+    tester.widget<TextField>(find.widgetWithText(TextField, label)).decoration!;
+
+String? _errorText(WidgetTester tester, String label) => _decoration(tester, label).errorText;
 
 String _headerAsset(WidgetTester tester) {
   final image = tester.widget<Image>(
@@ -174,59 +261,68 @@ void main() {
 
     testWidgets('a complete form sends trimmed names and the gender value', (tester) async {
       final auth = _FakeAuthService();
-      await tester.pumpWidget(
-        _app(
-          Builder(
-            builder: (context) => Scaffold(
-              body: TextButton(
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => RegisterScreen(authService: auth)),
-                ),
-                child: const Text('open'),
-              ),
-            ),
-          ),
-        ),
-      );
-      await tester.tap(find.text('open'));
-      await tester.pumpAndSettle();
+      await _openRegister(tester, auth);
+      await _fillRegister(tester);
 
-      Finder dob(String hint) =>
-          find.ancestor(of: find.text(hint), matching: find.byType(DropdownButton<int>));
-
-      Future<void> pick(Finder field, String item) async {
-        await tester.ensureVisible(field);
-        await tester.tap(field);
-        await tester.pumpAndSettle();
-        await tester.scrollUntilVisible(
-          find.text(item).hitTestable(),
-          100,
-          scrollable: find.byType(Scrollable).last,
-        );
-        await tester.tap(find.text(item).hitTestable().last);
-        await tester.pumpAndSettle();
-      }
-
-      await tester.enterText(find.widgetWithText(TextField, 'First name'), ' Maria ');
-      await tester.enterText(find.widgetWithText(TextField, 'Last name'), ' Papadopoulou ');
-      await tester.enterText(find.widgetWithText(TextField, 'Email'), 'm@p.gr');
-      await tester.enterText(find.widgetWithText(TextField, 'Password'), 'secret');
-      await pick(dob('Day'), '9');
-      await pick(dob('Month'), 'March');
-      await pick(dob('Year'), '${DateTime.now().year - 20}');
-      await pick(find.byType(AuthGenderField), 'Prefer not to say');
-
-      await tester.ensureVisible(find.text('Create Account'));
-      await tester.tap(find.text('Create Account'));
-      await tester.pumpAndSettle();
+      await _submitRegister(tester);
 
       expect(auth.signUps, hasLength(1));
       expect(auth.signUps.single['firstName'], 'Maria');
       expect(auth.signUps.single['lastName'], 'Papadopoulou');
       expect(auth.signUps.single['gender'], 'prefer_not_to_say');
+      expect(auth.signUps.single['password'], 'Party!Time9');
       expect(auth.signUps.single['dateOfBirth'], DateTime(DateTime.now().year - 20, 3, 9));
     });
+
+    for (final c in [
+      ('a password under 9 characters', 'Short!8x', 'The password must be at least 9 characters long'),
+      ('a space in the password', 'Party Time9',
+          'Only Lowercase, Uppercase letters, Numbers and Punctuation marks are allowed'),
+      ('a predictable run of digits', 'Party!Time123',
+          'Predictable patterns like "123" is not allowed'),
+    ]) {
+      testWidgets('${c.$1} is refused under the field and never reaches the server',
+          (tester) async {
+        final auth = _FakeAuthService();
+        await _openRegister(tester, auth);
+        await _fillRegister(tester, password: c.$2);
+
+        await _submitRegister(tester);
+
+        expect(find.text(c.$3), findsOneWidget);
+        expect(_errorText(tester, 'Password'), c.$3);
+        expect(auth.signUps, isEmpty);
+
+        // Typing again clears the complaint.
+        await tester.enterText(find.widgetWithText(TextField, 'Password'), 'Party!Time9');
+        await tester.pump();
+        expect(find.text(c.$3), findsNothing);
+      });
+    }
+
+    for (final c in [
+      ('a refusal from the server', _FakeAuthService(signUpError: 'user_already_exists')),
+      ('an identity-less user (email confirmation on)', _FakeAuthService(answerTaken: true)),
+    ]) {
+      testWidgets('a taken email turns the email field red and says so: ${c.$1}', (tester) async {
+        await _openRegister(tester, c.$2);
+        await _fillRegister(tester);
+
+        await _submitRegister(tester);
+
+        const message = 'There is already an account that is linked with this email.';
+        expect(find.text(message), findsOneWidget);
+        expect(_errorText(tester, 'Email'), message);
+        final decoration = _decoration(tester, 'Email');
+        expect(
+          (decoration.errorBorder! as UnderlineInputBorder).borderSide.color,
+          AppColors.formError,
+        );
+        // Still on the register screen: nothing claimed success.
+        expect(find.byType(RegisterScreen), findsOneWidget);
+        expect(find.text('Registration successful! Please log in.'), findsNothing);
+      });
+    }
 
     testWidgets('fits a narrow phone without overflow', (tester) async {
       tester.view.physicalSize = const Size(320, 640);

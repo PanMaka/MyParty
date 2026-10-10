@@ -62,11 +62,21 @@ class AuthHeader extends StatelessWidget {
   }
 }
 
-/// Password input with an eye toggle to show/hide what was typed.
+/// Red message and underline the auth text fields show when refused.
+const authErrorStyle = TextStyle(color: AppColors.formError, fontSize: 12);
+const authErrorUnderline = UnderlineInputBorder(
+  borderSide: BorderSide(color: AppColors.formError),
+);
+
+/// Password input with an eye toggle to show/hide what was typed. When
+/// [errorText] is set, the underline turns red and the message is shown under
+/// the field.
 class AuthPasswordField extends StatefulWidget {
   final TextEditingController controller;
+  final String? errorText;
+  final ValueChanged<String>? onChanged;
 
-  const AuthPasswordField({super.key, required this.controller});
+  const AuthPasswordField({super.key, required this.controller, this.errorText, this.onChanged});
 
   @override
   State<AuthPasswordField> createState() => _AuthPasswordFieldState();
@@ -82,12 +92,18 @@ class _AuthPasswordFieldState extends State<AuthPasswordField> {
       style: const TextStyle(color: Colors.white),
       cursorColor: Colors.white,
       obscureText: _obscured,
+      onChanged: widget.onChanged,
       decoration: InputDecoration(
         labelText: 'Password',
         labelStyle: const TextStyle(color: Colors.white70),
         focusedBorder: const UnderlineInputBorder(
           borderSide: BorderSide(color: Colors.white),
         ),
+        errorText: widget.errorText,
+        errorMaxLines: 3,
+        errorStyle: authErrorStyle,
+        errorBorder: authErrorUnderline,
+        focusedErrorBorder: authErrorUnderline,
         suffixIcon: IconButton(
           icon: Icon(
             _obscured ? Icons.visibility_off_outlined : Icons.visibility_outlined,
