@@ -255,29 +255,6 @@ still sees that person's new lines while the chat is open. DMs do not have this
 gap: a block refuses the send itself, so no event is ever written
 (`31_direct_messages.test.sql`, section E).
 
-### 1.16 Party chat unread badges never clear — `markRead` returns 403
-
-Found 2026-10-10 while wiring DMs. `ChatRepository.markRead` upserts
-`party_reads` through PostgREST (`?on_conflict=party_id,user_id`,
-`resolution=merge-duplicates`). PostgREST puts every body key in
-`ON CONFLICT DO UPDATE SET`, but `party_reads` grants UPDATE on `last_read_at`
-only, and Postgres checks that list at plan time. So the request is refused
-with 403 **on the first call**, not just on conflict. Measured with
-invitee@myparty.local's real token, twice, both 403. `ChatScreen` fires it
-`unawaited` and swallows the error, so nothing on screen says so. The visible
-symptom is a party chat's unread badge that never goes down.
-
-*Why it is still open:* found on the DM branch and kept off it, so Phase 33
-does not change group-chat behaviour. The fix is already written for DMs:
-`mark_direct_thread_read` (`20261010095848`), a `security invoker` SQL
-function whose SET list names `last_read_at` alone. `mark_party_read` is the
-same function with the table name changed, plus one line in
-`ChatRepository.markRead`, one grants row, and a pgTAP assertion that calls it
-twice.
-
-*What it costs to leave:* every party chat a user has ever opened shows its
-whole history as unread, capped at "99+".
-
 ---
 
 ## 2. Costed: should the map adopt `party_is_past()`?

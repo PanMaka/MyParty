@@ -111,6 +111,7 @@ insert into allowed_grants values
   ('function', 'is_party_host(uuid)', 'authenticated', 'EXECUTE', null),
   ('function', 'map_search_box(double precision,double precision,double precision)', 'authenticated', 'EXECUTE', null),
   ('function', 'mark_direct_thread_read(uuid)', 'authenticated', 'EXECUTE', null),
+  ('function', 'mark_party_read(uuid)', 'authenticated', 'EXECUTE', null),
   ('function', 'party_end_grace()', 'authenticated', 'EXECUTE', null),
   ('function', 'party_cover_upload_target(uuid)', 'authenticated', 'EXECUTE', null),
   ('function', 'party_is_private(uuid)', 'authenticated', 'EXECUTE', null),

@@ -143,8 +143,12 @@ Two more functions came with the client, each fixing a hole the client exposed:
   is refused **on the first call**, not just the second (gotcha 12 is worse
   than it says). `ON CONFLICT DO UPDATE` needs UPDATE privilege on every
   SET-listed column at plan time, and PostgREST SETs every body key.
-  `party_reads` has the same grants and the same client call, and it returns
-  403 today: see `docs/backlog.md` §1.16.
+  `party_reads` had the same grants and the same client call, and had returned
+  403 on every call since Phase 6, so party unread badges never cleared. That
+  is fixed by `mark_party_read` (`20261010101036`), the same function, and
+  `06_group_chat` asserts that the upsert is refused so nobody goes back to it.
+  **Any client write to a table with column-scoped UPDATE goes through a
+  function, never `.upsert()`.**
 - **`get_my_blocked_accounts`** (definer). A block hides the pair from each
   other in the `profiles` policy, so a blocked account vanishes from search,
   from the Direct list and from its own profile. The old

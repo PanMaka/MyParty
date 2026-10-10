@@ -123,18 +123,14 @@ class ChatRepository {
   /// Fire-and-forget from the UI's point of view: the server clamps the value
   /// to its own clock and refuses to move it backwards, so a stale or racing
   /// call from a second device is harmless and needs no coordination here.
+  ///
+  /// An RPC, not a PostgREST upsert. `party_reads` may only UPDATE
+  /// `last_read_at`, and an upsert SETs every key in the body, so it was
+  /// refused with 403 on every call — and swallowed, which left every badge
+  /// stuck (`20261010101036`, gotcha 12).
   Future<void> markRead(String partyId) async {
-    final id = _uid;
-    if (id == null) return;
-
-    await _client.from('party_reads').upsert(
-      {
-        'party_id': partyId,
-        'user_id': id,
-        'last_read_at': DateTime.now().toUtc().toIso8601String(),
-      },
-      onConflict: 'party_id,user_id',
-    );
+    if (_uid == null) return;
+    await _client.rpc('mark_party_read', params: {'p_party_id': partyId});
   }
 
   /// Soft delete, never a hard one (CLAUDE.md #7). An RPC rather than a PATCH
