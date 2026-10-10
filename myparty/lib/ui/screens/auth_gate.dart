@@ -111,13 +111,13 @@ class _ProfileGateState extends State<_ProfileGate> {
         }
         // PartyLinkHandler only around the signed-in, onboarded root: a link
         // opened earlier waits in PartyLinks.pending until this exists.
-        //
-        // Finishing onboarding flips this same gate rather than navigating:
-        // the gate has to stay mounted, because it is the only thing that
-        // turns a signedOut event into the login screen.
         return snapshot.data!
             ? UsernameSetupScreen(
-                onCompleted: () => setState(() => _needsUsername = Future.value(false)),
+                // No re-query: the write just succeeded, and Notifications
+                // already ran on the first check.
+                onOnboarded: () => setState(() {
+                  _needsUsername = Future.value(false);
+                }),
               )
             : const PartyLinkHandler(child: HomeScreen());
       },

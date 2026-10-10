@@ -89,6 +89,7 @@ insert into allowed_grants values
   ('column', 'user_devices', 'authenticated', 'UPDATE', 'last_location'),
   ('column', 'user_devices', 'authenticated', 'UPDATE', 'platform'),
   ('column', 'user_devices', 'authenticated', 'UPDATE', 'push_token'),
+  ('function', 'abandon_signup()', 'authenticated', 'EXECUTE', null),
   ('function', 'cancel_account_deletion()', 'authenticated', 'EXECUTE', null),
   ('function', 'confirm_party_cover(uuid)', 'authenticated', 'EXECUTE', null),
   ('function', 'confirm_post_upload(uuid)', 'authenticated', 'EXECUTE', null),
