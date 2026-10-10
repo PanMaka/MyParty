@@ -29,7 +29,7 @@
 -- Everything else is built inside this transaction.
 begin;
 set search_path to public, extensions;
-select plan(85);
+select plan(86);
 
 -- Thread ids come back from the RPC, so they are parked here. Created as
 -- postgres and granted out, so every persona can read the names back.
@@ -110,6 +110,22 @@ select throws_ok(
   '42501',
   'cannot message this user',
   'an unknown user id is refused with the same text'
+);
+
+-- An account still on the username screen (20261010102726). Without this, a
+-- stranger's empty thread would hold a NO ACTION reference to the profile and
+-- make that account's abandon_signup fail with 23503 -- permanently, for a
+-- reason it cannot see.
+reset role;
+insert into public.profiles (id, username) values
+  ('99999999-0000-0000-0000-00000000aaaa', 'half_signed_up');
+select tests.authenticate_as('11111111-1111-1111-1111-111111111111'); -- host
+
+select throws_ok(
+  $$ select public.get_or_create_direct_thread('99999999-0000-0000-0000-00000000aaaa') $$,
+  '42501',
+  'cannot message this user',
+  'an account that has not finished onboarding cannot be messaged -- same refusal text'
 );
 
 select throws_ok(
@@ -651,8 +667,8 @@ select throws_like(
 
 -- Thread-creation rate limit: 30 an hour.
 reset role;
-insert into public.profiles (id, username)
-select ('99999999-9999-9999-9999-' || lpad((800000 + g)::text, 12, '0'))::uuid, 'dm_target_' || g
+insert into public.profiles (id, username, onboarding_completed_at)
+select ('99999999-9999-9999-9999-' || lpad((800000 + g)::text, 12, '0'))::uuid, 'dm_target_' || g, now()
 from generate_series(1, 31) g;
 
 select tests.authenticate_as('33333333-3333-3333-3333-333333333333');
