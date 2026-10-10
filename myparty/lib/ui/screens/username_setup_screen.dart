@@ -4,11 +4,22 @@ import '../../data/profile_repository.dart';
 import '../../services/auth_drafts.dart';
 import '../../services/auth_service.dart';
 import '../widgets/auth_branding.dart';
-import 'home_screen.dart';
 import 'register_screen.dart';
 
 class UsernameSetupScreen extends StatefulWidget {
-  const UsernameSetupScreen({super.key, this.repository, this.authService});
+  const UsernameSetupScreen({
+    super.key,
+    required this.onOnboarded,
+    this.repository,
+    this.authService,
+  });
+
+  /// Called once the username is written. AuthGate swaps itself to HomeScreen
+  /// in response; this screen must not navigate there itself. It is built
+  /// INSIDE AuthGate's route, so a pushReplacement would replace AuthGate —
+  /// the only listener on auth state — and every later sign-out would clear
+  /// the session while leaving the user on HomeScreen.
+  final VoidCallback onOnboarded;
 
   /// Injectable so the screen builds under `flutter test`; null means the real
   /// [ProfileRepository].
@@ -67,12 +78,7 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
       await _profiles.completeOnboarding(username);
       _drafts.clear();
 
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const HomeScreen()),
-        );
-      }
+      if (mounted) widget.onOnboarded();
     } on PostgrestException catch (e) {
       setState(() => _errorText = e.message);
     } on AuthException catch (e) {

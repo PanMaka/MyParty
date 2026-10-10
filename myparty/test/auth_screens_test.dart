@@ -117,6 +117,25 @@ class _FakeProfileRepository extends ProfileRepository {
 
 Widget _app(Widget home) => MaterialApp(home: home);
 
+/// Holds a child the way AuthGate holds UsernameSetupScreen, and swaps to
+/// "home" when told onboarding is done.
+class _GateProbe extends StatefulWidget {
+  const _GateProbe({required this.child});
+
+  final Widget Function(VoidCallback onOnboarded) child;
+
+  @override
+  State<_GateProbe> createState() => _GateProbeState();
+}
+
+class _GateProbeState extends State<_GateProbe> {
+  bool _done = false;
+
+  @override
+  Widget build(BuildContext context) =>
+      _done ? const Text('home') : widget.child(() => setState(() => _done = true));
+}
+
 /// Pushes register over a placeholder, so a successful submit has somewhere
 /// to pop back to.
 Future<void> _openRegister(WidgetTester tester, AuthService auth) async {
@@ -346,7 +365,11 @@ void main() {
 
   group('username setup', () {
     Widget screen(_FakeProfileRepository repo, [_FakeAuthService? auth]) =>
-        _app(UsernameSetupScreen(repository: repo, authService: auth ?? _FakeAuthService()));
+        _app(UsernameSetupScreen(
+          onOnboarded: () {},
+          repository: repo,
+          authService: auth ?? _FakeAuthService(),
+        ));
 
     Future<void> fillNames(WidgetTester tester) async {
       await tester.enterText(find.widgetWithText(TextField, 'First name'), ' Maria ');
@@ -466,6 +489,34 @@ void main() {
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
     });
 
+    testWidgets('finishing hands back to its host instead of replacing the route it is in',
+        (tester) async {
+      // Stands in for AuthGate: the screen is built INSIDE the host's route.
+      // The old pushReplacement(HomeScreen) replaced that route, AuthGate with
+      // it, and with AuthGate went the only listener on auth state -- sign-out
+      // then cleared the session and left the user on HomeScreen.
+      await tester.pumpWidget(_app(_GateProbe(
+        child: (onOnboarded) => UsernameSetupScreen(
+          onOnboarded: onOnboarded,
+          repository: _FakeProfileRepository(parkOnboarding: false),
+          authService: _FakeAuthService(),
+        ),
+      )));
+      final gate = tester.state(find.byType(_GateProbe));
+
+      await tester.enterText(find.widgetWithText(TextField, 'First name'), 'Maria');
+      await tester.enterText(find.widgetWithText(TextField, 'Last name'), 'P');
+      await tester.enterText(find.widgetWithText(TextField, 'Username'), 'maria');
+      await tester.ensureVisible(find.text('Continue'));
+      await tester.tap(find.text('Continue'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('home'), findsOneWidget);
+      expect(tester.state(find.byType(_GateProbe)), same(gate), reason: 'the gate survived');
+      expect(tester.state<NavigatorState>(find.byType(Navigator)).canPop(), isFalse,
+          reason: 'nothing was pushed over or in place of the gate');
+    });
+
     testWidgets('the back arrow undoes the sign-up and opens register', (tester) async {
       final auth = _FakeAuthService();
       await tester.pumpWidget(screen(_FakeProfileRepository(), auth));
@@ -522,7 +573,11 @@ void main() {
 
       // What AuthGate shows next, and the way back from it.
       await tester.pumpWidget(
-        _app(UsernameSetupScreen(repository: _FakeProfileRepository(), authService: auth)),
+        _app(UsernameSetupScreen(
+          onOnboarded: () {},
+          repository: _FakeProfileRepository(),
+          authService: auth,
+        )),
       );
       await tester.enterText(find.widgetWithText(TextField, 'First name'), 'Maria');
       await tester.enterText(find.widgetWithText(TextField, 'Username'), 'maria');
@@ -550,7 +605,11 @@ void main() {
 
       // Forward again: the names and username were kept too.
       await tester.pumpWidget(
-        _app(UsernameSetupScreen(repository: _FakeProfileRepository(), authService: auth)),
+        _app(UsernameSetupScreen(
+          onOnboarded: () {},
+          repository: _FakeProfileRepository(),
+          authService: auth,
+        )),
       );
       expect(find.widgetWithText(TextField, 'Maria'), findsOneWidget);
       expect(find.widgetWithText(TextField, 'maria'), findsOneWidget);
@@ -579,6 +638,7 @@ void main() {
         ..loginPassword = 'x';
       await tester.pumpWidget(
         _app(UsernameSetupScreen(
+          onOnboarded: () {},
           repository: _FakeProfileRepository(parkOnboarding: false),
           authService: _FakeAuthService(),
         )),
@@ -588,9 +648,7 @@ void main() {
       await tester.enterText(find.widgetWithText(TextField, 'Username'), 'maria');
       await tester.ensureVisible(find.text('Continue'));
       await tester.tap(find.text('Continue'));
-      // Microtasks only: the clear runs before the push, and pumping a frame
-      // would build HomeScreen, which needs a real Supabase.
-      await tester.idle();
+      await tester.pumpAndSettle();
 
       expect(AuthDrafts.instance.registerPassword, '');
       expect(AuthDrafts.instance.loginPassword, '');
