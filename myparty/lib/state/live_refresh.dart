@@ -50,9 +50,15 @@ mixin LiveRefresh<T extends StatefulWidget> on State<T> {
   /// A write landed somewhere in the app. Default: nothing.
   void onDataChange(DataChange change) {}
 
+  /// The screen's tab came on or went off screen. For holding something only
+  /// while visible — a realtime subscription — rather than for refetching,
+  /// which the mixin already does. Default: nothing.
+  void onLiveVisibilityChanged(bool visible) {}
+
   StreamSubscription<DataChange>? _changes;
   DateTime _fetchedAt = DateTime.now();
   bool _stale = false;
+  bool _wasVisible = true;
 
   bool get isLiveVisible {
     final mine = liveTab;
@@ -63,6 +69,7 @@ mixin LiveRefresh<T extends StatefulWidget> on State<T> {
   @override
   void initState() {
     super.initState();
+    _wasVisible = isLiveVisible;
     _changes = dataChanges.stream.listen((change) {
       if (mounted) onDataChange(change);
     });
@@ -90,7 +97,13 @@ mixin LiveRefresh<T extends StatefulWidget> on State<T> {
   }
 
   void _onTabShown() {
-    if (!mounted || liveTab == null || !isLiveVisible) return;
+    if (!mounted || liveTab == null) return;
+    final visible = isLiveVisible;
+    if (visible != _wasVisible) {
+      _wasVisible = visible;
+      onLiveVisibilityChanged(visible);
+    }
+    if (!visible) return;
     final old = DateTime.now().difference(_fetchedAt) >= liveStaleAfter;
     if (_stale || old) _run();
   }

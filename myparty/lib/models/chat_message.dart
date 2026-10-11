@@ -136,6 +136,20 @@ class PartyChatSummary {
   }
 
   String get unreadLabel => unreadCount >= 100 ? '99+' : '$unreadCount';
+
+  /// This row with the badge cleared — what a read marker that just moved to
+  /// now means, applied before the list's refetch confirms it.
+  PartyChatSummary read() => PartyChatSummary(
+        partyId: partyId,
+        partyTitle: partyTitle,
+        isPrivate: isPrivate,
+        startsAt: startsAt,
+        goingCount: goingCount,
+        lastMessageBody: lastMessageBody,
+        lastMessageAuthorUsername: lastMessageAuthorUsername,
+        lastMessageAt: lastMessageAt,
+        unreadCount: 0,
+      );
 }
 
 /// One row of `public.get_direct_chats` — a 1-on-1 thread as it appears in the
@@ -189,4 +203,17 @@ class DirectChatSummary {
   }
 
   String get unreadLabel => unreadCount >= 100 ? '99+' : '$unreadCount';
+
+  /// This row with the badge cleared; see [PartyChatSummary.read].
+  DirectChatSummary read() => DirectChatSummary(
+        threadId: threadId,
+        peerId: peerId,
+        peerUsername: peerUsername,
+        peerAvatarPath: peerAvatarPath,
+        lastMessageBody: lastMessageBody,
+        lastMessageAuthorId: lastMessageAuthorId,
+        lastMessageAt: lastMessageAt,
+        activityAt: activityAt,
+        unreadCount: 0,
+      );
 }

@@ -91,7 +91,7 @@ class _FakeDirectChats extends DirectChatRepository {
   Future<List<ChatMessage>> fetchMessagesSince(String threadId, DateTime since) async => const [];
 
   @override
-  Future<ChatMessage> sendMessage({required String threadId, required String body}) async {
+  Future<ChatMessage> insertMessage({required String threadId, required String body}) async {
     sentTo.add(threadId);
     return ChatMessage(
       id: 'stored-$body',
@@ -104,10 +104,10 @@ class _FakeDirectChats extends DirectChatRepository {
   }
 
   @override
-  Future<void> markRead(String threadId) async => markedRead.add(threadId);
+  Future<void> writeReadMarker(String threadId) async => markedRead.add(threadId);
 
   @override
-  Future<void> hideMessage(String messageId, {String? reason}) async {}
+  Future<void> writeHide(String messageId, {String? reason}) async {}
 
   @override
   ChatChannel subscribe(String threadId) {
