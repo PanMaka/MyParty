@@ -5,7 +5,7 @@ import '../../models/feed_post.dart';
 import '../../models/map_party_pin.dart';
 import '../../state/mp_store.dart';
 import '../screens/chat_screen.dart';
-import '../../state/rsvp_changes.dart';
+import '../../state/data_changes.dart';
 import '../../utils/english_date.dart';
 import '../../utils/share_party.dart';
 import '../theme/app_theme.dart';
@@ -365,9 +365,9 @@ class _MapPinSheetState extends State<MapPinSheet> {
   ///
   /// Optimistic: the button and both counts move on the tap, and roll back if
   /// the write fails. The sheet stays open so the viewer sees it take. On
-  /// success the change is published on [rsvpChanges], which is what makes
-  /// the map refetch its pins and MY PARTIES reload — neither tab rebuilds on
-  /// its own, they live in an IndexedStack.
+  /// success [PartyRepository.setRsvp] announces the change, which is what
+  /// makes the map refetch its pins and MY PARTIES reload — neither tab
+  /// rebuilds on its own, they live in an IndexedStack.
   Future<void> _answer(MpRsvp status) async {
     if (_saving) return;
     final before = _pin;
@@ -386,7 +386,6 @@ class _MapPinSheetState extends State<MapPinSheet> {
         status: status,
         current: current,
       );
-      rsvpChanges.value = RsvpChange(partyId: before.id, status: next);
     } catch (_) {
       if (!mounted) return;
       setState(() => _pin = before);

@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show protected;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/hosted_parties.dart';
@@ -8,6 +9,7 @@ import '../models/map_time_window.dart';
 import '../models/party_list_item.dart';
 import '../models/party_summary.dart';
 import '../models/rsvp_party.dart';
+import '../state/data_changes.dart';
 import '../state/mp_store.dart' show MpRsvp;
 
 /// Which end of the calendar a party list is asking for.
@@ -39,7 +41,22 @@ class PartyRepository {
   /// Creates a party and its initial invitations in one RPC call.
   /// `party` keys: title, description, lat, lon, starts_at (ISO 8601),
   /// is_private. Returns the new party's id.
+  ///
+  /// Announces [PartyCreated] once the row exists, which is what brings the
+  /// profile's HOSTED count and list, MY PARTIES, ALL PARTIES and the map
+  /// along without anyone pulling to refresh. The RPC is
+  /// [insertPartyWithInvites]; test doubles override that.
   Future<String> createPartyWithInvites({
+    required Map<String, dynamic> party,
+    List<String> inviteeIds = const [],
+  }) async {
+    final id = await insertPartyWithInvites(party: party, inviteeIds: inviteeIds);
+    dataChanges.publish(PartyCreated(partyId: id));
+    return id;
+  }
+
+  @protected
+  Future<String> insertPartyWithInvites({
     required Map<String, dynamic> party,
     List<String> inviteeIds = const [],
   }) async {
@@ -62,7 +79,17 @@ class PartyRepository {
   ///
   /// [bytes] must be a JPEG or a PNG — the only two types the bucket accepts,
   /// and the only two the image picker emits (see [coverContentType]).
+  ///
+  /// Announces [PartyCoverChanged] once confirmed: the lists that refetched on
+  /// [PartyCreated] did so before these bytes existed.
   Future<String> uploadCover(String partyId, Uint8List bytes) async {
+    final path = await putCover(partyId, bytes);
+    dataChanges.publish(PartyCoverChanged(partyId: partyId));
+    return path;
+  }
+
+  @protected
+  Future<String> putCover(String partyId, Uint8List bytes) async {
     final contentType = coverContentType(bytes);
     if (contentType == null) {
       throw ArgumentError('A cover must be a JPEG or a PNG');
@@ -485,7 +512,21 @@ class PartyRepository {
   /// Upsert rather than insert-or-update: the primary key is
   /// (party_id, user_id), so a viewer changing their mind is one round trip
   /// and the trigger sees it as the single status delta it is built for.
+  ///
+  /// Announces [RsvpChanged] once the write lands — the one place every RSVP
+  /// door goes through, so none of them can leave MY PARTIES, the map's pins
+  /// or a search hit on the old answer. The write is [writeRsvp].
   Future<void> setRsvp({
+    required String partyId,
+    required MpRsvp status,
+    required MpRsvp? current,
+  }) async {
+    await writeRsvp(partyId: partyId, status: status, current: current);
+    dataChanges.publish(RsvpChanged(partyId: partyId, status: current == status ? null : status));
+  }
+
+  @protected
+  Future<void> writeRsvp({
     required String partyId,
     required MpRsvp status,
     required MpRsvp? current,

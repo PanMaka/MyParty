@@ -9,10 +9,12 @@ import '../../data/party_repository.dart';
 import '../../data/social_repository.dart';
 import '../../models/map_party_pin.dart';
 import '../../models/map_time_window.dart';
-import '../../state/rsvp_changes.dart';
+import '../../state/data_changes.dart';
+import '../../state/live_refresh.dart';
 import '../theme/app_theme.dart';
 import '../widgets/map_base.dart';
 import '../widgets/map_pin_sheet.dart';
+import '../widgets/mp_bottom_nav.dart' show MpTab;
 import '../widgets/mp_map_pin.dart';
 import 'search_screen.dart';
 
@@ -54,7 +56,7 @@ const _kLocateZoom = 15.0;
 /// of the bottom nav, with the ~1cm of air the legend was given in phase 30.
 const double _kControlsBottom = 142;
 
-class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
+class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin, LiveRefresh<MapScreen> {
   final MapController _mapController = MapController();
 
   /// The recenter flight in progress, if any. Replaced on every tap and
@@ -83,7 +85,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    rsvpChanges.addListener(_onRsvpChanged);
     _initializeMap();
   }
 
@@ -95,17 +96,34 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   /// include anyone else who answered meanwhile). [MapPartyPin.withRsvp] reads
   /// the delta off THIS copy's `my_rsvp_status`, which is still the pre-tap
   /// answer, so it applies the same step the sheet did.
-  void _onRsvpChanged() {
-    final change = rsvpChanges.value;
-    if (change != null && mounted) {
-      final index = _pins.indexWhere((p) => p.id == change.partyId);
-      if (index >= 0) {
-        setState(() {
-          _pins = [..._pins]..[index] = _pins[index].withRsvp(change.status?.name);
-        });
-      }
+  @override
+  void onDataChange(DataChange change) {
+    switch (change) {
+      case RsvpChanged(:final partyId, :final status):
+        final index = _pins.indexWhere((p) => p.id == partyId);
+        if (index >= 0) {
+          setState(() {
+            _pins = [..._pins]..[index] = _pins[index].withRsvp(status?.name);
+          });
+        }
+        refreshWhenVisible();
+      // A party the viewer just hosted is a new pin, and its cover is what
+      // the pin's sheet shows.
+      case PartyCreated() || PartyCoverChanged() || BlockChanged():
+        refreshWhenVisible();
+      default:
+        break;
     }
-    if (_mapReady) _fetchEventsInBounds();
+  }
+
+  @override
+  MpTab? get liveTab => MpTab.map;
+
+  /// The visible bounds, asked again. Before `onMapReady` there is no
+  /// viewport to ask about, and the first fetch is already on its way.
+  @override
+  Future<void> liveRefresh() async {
+    if (_mapReady) await _fetchEventsInBounds();
   }
 
   Future<void> _initializeMap() async {
@@ -281,7 +299,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
   @override
   void dispose() {
-    rsvpChanges.removeListener(_onRsvpChanged);
     _debounce?.cancel();
     _stopFlight();
     super.dispose();

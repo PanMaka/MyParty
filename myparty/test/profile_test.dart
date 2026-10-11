@@ -259,6 +259,36 @@ class _LiveSocialRepository extends _FakeSocialRepository {
   }
 }
 
+/// The owner's hosting as the server holds it: create_party_with_invites adds
+/// the row that get_my_hosted_parties lists and get_profile_stats counts.
+class _HostingProfiles extends _FakeProfileRepository {
+  int hosted = 3;
+
+  @override
+  Future<ProfileStats> fetchStats({String? userId}) async =>
+      ProfileStats(partiesAttended: 7, partiesHosted: hosted, storiesPosted: 12);
+}
+
+class _HostingParties extends _FakePartyRepository {
+  _HostingParties(this.profiles);
+
+  final _HostingProfiles profiles;
+  final List<PartySummary> upcoming = [];
+
+  @override
+  Future<HostedParties> fetchMyHostedParties() async => HostedParties(upcoming: upcoming, past: const []);
+
+  @override
+  Future<String> insertPartyWithInvites({
+    required Map<String, dynamic> party,
+    List<String> inviteeIds = const [],
+  }) async {
+    upcoming.add(_party('new-party', party['title'] as String));
+    profiles.hosted += 1;
+    return 'new-party';
+  }
+}
+
 Future<void> _pumpProfile(
   WidgetTester tester,
   _FakeProfileRepository repo, {
@@ -911,6 +941,37 @@ void main() {
 
       expect(profiles.fetches, before);
       expect(find.text('Follow'), findsOneWidget);
+    });
+  });
+
+  group('live hosting', () {
+    testWidgets('hosting a party moves HOSTED and adds it to the list without a refresh', (tester) async {
+      final profiles = _HostingProfiles();
+      final parties = _HostingParties(profiles);
+      await _pumpProfile(tester, profiles, parties: parties);
+      expect(find.text('3'), findsOneWidget);
+
+      // The host wizard's call, made from the Parties tab.
+      await parties.createPartyWithInvites(party: {'title': 'Rooftop opening'});
+      await tester.pumpAndSettle();
+
+      expect(find.text('4'), findsOneWidget);
+      expect(find.text('3'), findsNothing);
+      await _scrollTo(tester, find.text('Rooftop opening'));
+      expect(find.text('Rooftop opening'), findsOneWidget);
+    });
+
+    testWidgets('pulling the profile down refetches it', (tester) async {
+      final profiles = _HostingProfiles();
+      final parties = _HostingParties(profiles);
+      await _pumpProfile(tester, profiles, parties: parties);
+
+      // Changed on the server with no event at all — someone else's write.
+      profiles.hosted = 9;
+      await tester.fling(find.text('FOLLOWERS'), const Offset(0, 400), 1000);
+      await tester.pumpAndSettle();
+
+      expect(find.text('9'), findsOneWidget);
     });
   });
 }

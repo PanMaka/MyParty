@@ -19,7 +19,7 @@ class _FakePartyRepository extends PartyRepository {
   final covers = <(String, Uint8List)>[];
 
   @override
-  Future<String> createPartyWithInvites({
+  Future<String> insertPartyWithInvites({
     required Map<String, dynamic> party,
     List<String> inviteeIds = const [],
   }) async {
@@ -28,7 +28,7 @@ class _FakePartyRepository extends PartyRepository {
   }
 
   @override
-  Future<String> uploadCover(String partyId, Uint8List bytes) async {
+  Future<String> putCover(String partyId, Uint8List bytes) async {
     covers.add((partyId, bytes));
     if (failCover) throw StateError('upload failed');
     return '$partyId/cover';

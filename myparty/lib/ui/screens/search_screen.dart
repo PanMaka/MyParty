@@ -6,6 +6,9 @@ import '../../data/party_repository.dart';
 import '../../data/social_repository.dart';
 import '../../models/map_party_pin.dart';
 import '../../models/profile.dart';
+import '../../state/data_changes.dart';
+import '../../state/live_refresh.dart';
+import '../widgets/mp_bottom_nav.dart' show MpTab;
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
 import '../widgets/map_pin_sheet.dart';
@@ -52,7 +55,7 @@ class SearchScreen extends StatefulWidget {
   State<SearchScreen> createState() => _SearchScreenState();
 }
 
-class _SearchScreenState extends State<SearchScreen> {
+class _SearchScreenState extends State<SearchScreen> with LiveRefresh<SearchScreen> {
   late final SocialRepository _social = widget.social ?? SocialRepository();
   late final PartyRepository _parties = widget.parties ?? PartyRepository();
 
@@ -70,6 +73,41 @@ class _SearchScreenState extends State<SearchScreen> {
   Object? _error;
   List<Profile> _people = const [];
   PartySearchResults _partyHits = const PartySearchResults(upcoming: [], past: []);
+
+  /// Pushed over the map, so visible whenever it is mounted.
+  @override
+  MpTab? get liveTab => null;
+
+  /// The current query, asked again.
+  @override
+  Future<void> liveRefresh() async {
+    if (_query.length >= SearchScreen.minQueryLength) await _run(_query);
+  }
+
+  @override
+  void onDataChange(DataChange change) {
+    switch (change) {
+      // An answer given on a hit's sheet. The hit is the pin the sheet is
+      // opened from next time, so it has to carry the new answer or the sheet
+      // reopens on the old one. Patched rather than re-searched: the hits
+      // are what the user is reading.
+      case RsvpChanged(:final partyId, :final status):
+        List<MapPartyPin> patch(List<MapPartyPin> pins) =>
+            [for (final p in pins) p.id == partyId ? p.withRsvp(status?.name) : p];
+        setState(() {
+          _partyHits = PartySearchResults(
+            upcoming: patch(_partyHits.upcoming),
+            past: patch(_partyHits.past),
+          );
+        });
+      // A block hides the pair from each other in every policy, people and
+      // parties alike, so the hits are no longer what the server would say.
+      case BlockChanged():
+        refreshWhenVisible();
+      default:
+        break;
+    }
+  }
 
   @override
   void dispose() {

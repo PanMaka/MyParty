@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../data/party_repository.dart';
 import '../../models/party_list_item.dart';
 import '../../services/party_links.dart';
+import '../../state/mp_store.dart' show MpRsvp;
 import 'party_detail_sheet.dart';
 
 /// Opens the party a link points at, once someone is signed in to see it.
@@ -76,7 +77,27 @@ class _PartyLinkHandlerState extends State<PartyLinkHandler> {
       // A missing cover is the placeholder, not a failure to open the party.
     }
     if (!mounted) return;
-    await showPartyDetailSheet(context, item, coverUrl: coverUrl);
+    await showPartyDetailSheet(
+      context,
+      item,
+      coverUrl: coverUrl,
+      onRsvp: (status) => _answer(item, status),
+    );
+  }
+
+  /// An answer given on a linked party. There is no list under this sheet to
+  /// own the write, so it is made here; PartyRepository.setRsvp announces it,
+  /// which is what reaches MY PARTIES and the map. The sheet has already
+  /// closed, so only a failure has anything to say.
+  Future<void> _answer(PartyListItem item, MpRsvp status) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await _parties.setRsvp(partyId: item.partyId, status: status, current: item.myRsvp);
+    } catch (_) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('That did not save.'), behavior: SnackBarBehavior.floating),
+      );
+    }
   }
 
   Future<PartyListItem?> _fetch(String id) async {

@@ -33,6 +33,15 @@ final class RsvpChanged extends DataChange {
   final MpRsvp? status;
 }
 
+/// The cover of [partyId] finished uploading. Separate from [PartyCreated]
+/// because the cover lands after the party does: a list that refetched on
+/// the creation would otherwise keep a placeholder where the photo now is.
+final class PartyCoverChanged extends DataChange {
+  const PartyCoverChanged({required this.partyId});
+
+  final String partyId;
+}
+
 /// The viewer started ([following] true) or stopped following [targetUserId].
 /// The target's `follower_count` moved by one on the server.
 final class FollowChanged extends DataChange {
@@ -102,3 +111,10 @@ class DataChanges {
 }
 
 final DataChanges dataChanges = DataChanges();
+
+/// The wire value of `my_rsvp_status` as an [MpRsvp], null for "no row".
+MpRsvp? parseRsvpStatus(String? value) => switch (value) {
+      'going' => MpRsvp.going,
+      'interested' => MpRsvp.interested,
+      _ => null,
+    };
