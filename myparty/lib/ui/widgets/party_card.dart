@@ -75,7 +75,10 @@ class PartyCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           GestureDetector(
-            onTap: () => showPartyDetailSheet(context, item, coverUrl: coverUrl),
+            // The card's own answer callback, handed on: the sheet's
+            // Going / Interested / Coming used to close the sheet and save
+            // nothing, because it was opened with no callback at all.
+            onTap: () => showPartyDetailSheet(context, item, coverUrl: coverUrl, onRsvp: onRsvp),
             child: SizedBox(
               height: 158,
               child: Stack(

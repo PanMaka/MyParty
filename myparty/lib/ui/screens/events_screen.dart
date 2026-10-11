@@ -13,7 +13,8 @@ import '../widgets/host_post_strip.dart';
 import '../widgets/map_pin_sheet.dart';
 import '../widgets/mp_bottom_nav.dart';
 import '../../state/mp_store.dart' show MpRsvp;
-import '../../state/rsvp_changes.dart';
+import '../../state/data_changes.dart';
+import '../../state/live_refresh.dart';
 import '../widgets/party_card.dart';
 import '../widgets/privacy_badge.dart';
 import 'host_wizard_screen.dart';
@@ -50,7 +51,7 @@ class EventsScreen extends StatefulWidget {
   State<EventsScreen> createState() => _EventsScreenState();
 }
 
-class _EventsScreenState extends State<EventsScreen> {
+class _EventsScreenState extends State<EventsScreen> with LiveRefresh<EventsScreen> {
   late final PartyRepository _repository = widget.repository ?? PartyRepository();
   late final FeedRepository _feed = widget.feed ?? FeedRepository();
   bool _showAll = true;
@@ -68,6 +69,11 @@ class _EventsScreenState extends State<EventsScreen> {
   bool _loading = false;
   bool _exhausted = false;
   Object? _listError;
+
+  /// A from-scratch reload was asked for while a page was in flight. Kept
+  /// rather than dropped: the request is usually "a party was just hosted",
+  /// and losing it would leave the new party off the list until a pull.
+  bool _resetPending = false;
   final ScrollController _listScroll = ScrollController();
 
   @override
@@ -75,14 +81,12 @@ class _EventsScreenState extends State<EventsScreen> {
     super.initState();
     _rsvpsFuture = _repository.fetchMyParties();
     _observe(_rsvpsFuture);
-    rsvpChanges.addListener(_onRsvpChanged);
     _listScroll.addListener(_onScroll);
     _loadList(reset: true);
   }
 
   @override
   void dispose() {
-    rsvpChanges.removeListener(_onRsvpChanged);
     _listScroll.dispose();
     super.dispose();
   }
@@ -99,7 +103,10 @@ class _EventsScreenState extends State<EventsScreen> {
   /// has to mean most interested of all of them, not of whatever this page
   /// happened to contain.
   Future<void> _loadList({bool reset = false}) async {
-    if (_loading) return;
+    if (_loading) {
+      if (reset) _resetPending = true;
+      return;
+    }
     if (!reset && (_exhausted || _cursor == null)) return;
 
     setState(() {
@@ -134,6 +141,7 @@ class _EventsScreenState extends State<EventsScreen> {
         _exhausted = page.cursor == null;
         _loading = false;
       });
+      _runPendingReset();
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -145,7 +153,14 @@ class _EventsScreenState extends State<EventsScreen> {
         if (reset || _items.isEmpty) _listError = error;
         _exhausted = true;
       });
+      _runPendingReset();
     }
+  }
+
+  void _runPendingReset() {
+    if (!_resetPending) return;
+    _resetPending = false;
+    _loadList(reset: true);
   }
 
   void _changeSort(PartySort sort) {
@@ -176,17 +191,13 @@ class _EventsScreenState extends State<EventsScreen> {
     });
 
     try {
+      // MY PARTIES is now stale -- it is the same rsvps rows seen from the
+      // other end. setRsvp announces the write, so this screen's
+      // [onDataChange] reloads it and the map's pins hear about it too.
       await _repository.setRsvp(
         partyId: item.partyId,
         status: status,
         current: previous,
-      );
-      // MY PARTIES is now stale -- it is the same rsvps rows seen from the
-      // other end. Published rather than reloaded here so the map's pins hear
-      // about it too; [_onRsvpChanged] does the reload.
-      rsvpChanges.value = RsvpChange(
-        partyId: item.partyId,
-        status: withdrawing ? null : status,
       );
     } catch (_) {
       if (!mounted) return;
@@ -208,24 +219,64 @@ class _EventsScreenState extends State<EventsScreen> {
     unawaited(future.then((_) {}, onError: (_) {}));
   }
 
-  /// An RSVP was saved, here or on another tab (the map sheet, search).
-  ///
-  /// MY PARTIES is refetched, since a new answer adds a row and a withdrawal
-  /// removes one. A matching ALL PARTIES card has its button patched in place
-  /// rather than the list reloaded, which would lose the reader's scroll
-  /// position and page; its counters refresh on the next load, for the reason
-  /// [_setRsvp] gives.
-  void _onRsvpChanged() {
-    final change = rsvpChanges.value;
-    if (change == null || !mounted) return;
-    final index = _items.indexWhere((i) => i.partyId == change.partyId);
-    if (index >= 0) {
-      _items[index] = _items[index].copyWith(
-        myRsvp: change.status,
-        clearRsvp: change.status == null,
-      );
-    }
+  @override
+  MpTab? get liveTab => MpTab.events;
+
+  /// Both tabs, from scratch. ALL PARTIES keeps its cards on screen until the
+  /// new first page replaces them, and MY PARTIES keeps its rows (the
+  /// FutureBuilder holds the previous data while the new future runs).
+  @override
+  Future<void> liveRefresh() async {
     _reloadRsvps();
+    await Future.wait([
+      _rsvpsFuture.then((_) {}, onError: (_) {}),
+      _loadList(reset: true),
+    ]);
+  }
+
+  @override
+  void onDataChange(DataChange change) {
+    switch (change) {
+      // An RSVP was saved, here or on another tab (the map sheet, search).
+      //
+      // MY PARTIES is refetched, since a new answer adds a row and a
+      // withdrawal removes one. A matching ALL PARTIES card has its button
+      // patched in place rather than the list reloaded, which would lose the
+      // reader's scroll position and page; its counters refresh on the next
+      // load, for the reason [_setRsvp] gives.
+      case RsvpChanged(:final partyId, :final status):
+        final index = _items.indexWhere((i) => i.partyId == partyId);
+        if (index >= 0) {
+          _items[index] = _items[index].copyWith(myRsvp: status, clearRsvp: status == null);
+        }
+        _reloadRsvps();
+      // A party the viewer hosts appeared, or its cover did: it belongs on
+      // both lists. A full reload, since a new row has to land in the
+      // server's order rather than be spliced in by a guess.
+      case PartyCreated() || PartyCoverChanged():
+        refreshWhenVisible();
+      // A block hides the pair's parties from each other: a party the blocked
+      // account hosts leaves both lists.
+      case BlockChanged():
+        refreshWhenVisible();
+      default:
+        break;
+    }
+  }
+
+  /// Pull-to-refresh for a tab whose content may not scroll (an empty or
+  /// failed state): it still has to accept the drag.
+  Widget _pullable(Widget child, {bool scrolls = false}) {
+    return RefreshIndicator(
+      onRefresh: liveRefresh,
+      color: AppColors.purple,
+      child: scrolls
+          ? child
+          : CustomScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              slivers: [SliverFillRemaining(hasScrollBody: false, child: child)],
+            ),
+    );
   }
 
   void _reloadRsvps() {
@@ -331,11 +382,14 @@ class _EventsScreenState extends State<EventsScreen> {
                   : FutureBuilder<List<RsvpParty>>(
                       future: _rsvpsFuture,
                       builder: (context, snapshot) {
-                        if (snapshot.connectionState != ConnectionState.done) {
+                        // A reload keeps the previous rows (the snapshot holds
+                        // them while the new future runs); only a list with
+                        // nothing to show yet is loading.
+                        if (snapshot.connectionState != ConnectionState.done && !snapshot.hasData) {
                           return const Center(child: CircularProgressIndicator(color: AppColors.purple));
                         }
                         if (snapshot.hasError) {
-                          return _errorState();
+                          return _pullable(_errorState());
                         }
 
                         final now = widget.clock();
@@ -364,9 +418,10 @@ class _EventsScreenState extends State<EventsScreen> {
                           }
                         }
 
-                        if (current.isEmpty) return _emptyState(context);
+                        if (current.isEmpty) return _pullable(_emptyState(context));
 
-                        return ListView(
+                        return _pullable(scrolls: true, ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
                           padding: const EdgeInsets.fromLTRB(14, 16, 14, 96),
                           children: [
                             if (happening.isNotEmpty) _rsvpSection(context, 'HAPPENING NOW', happening, live: true),
@@ -383,7 +438,7 @@ class _EventsScreenState extends State<EventsScreen> {
                               _rsvpSection(context, 'LATER', later),
                             ],
                           ],
-                        );
+                        ));
                       },
                     ),
             ),
@@ -437,13 +492,13 @@ class _EventsScreenState extends State<EventsScreen> {
 
   Widget _allPartiesBody() {
     if (_listError != null && _items.isEmpty) {
-      return _listErrorState();
+      return _pullable(_listErrorState());
     }
     if (_items.isEmpty && _loading) {
       return const Center(child: CircularProgressIndicator(color: AppColors.purple));
     }
     if (_items.isEmpty) {
-      return Center(
+      return _pullable(Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
           child: Text(
@@ -452,11 +507,12 @@ class _EventsScreenState extends State<EventsScreen> {
             style: TextStyle(fontSize: 13, height: 1.5, color: AppColors.textAlpha(0.5)),
           ),
         ),
-      );
+      ));
     }
 
-    return ListView.builder(
+    return _pullable(scrolls: true, ListView.builder(
       controller: _listScroll,
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(14, 0, 14, 96),
       // +1 footer: the paging spinner, or the end of the list.
       itemCount: _items.length + 1,
@@ -479,7 +535,7 @@ class _EventsScreenState extends State<EventsScreen> {
           ),
         );
       },
-    );
+    ));
   }
 
   Widget _listHeader() {
@@ -571,8 +627,8 @@ class _EventsScreenState extends State<EventsScreen> {
         // with every action on it: the RSVP answers, share, report, and the
         // group chat icon on a private party (which is how this row's old
         // direct-to-chat tap is still one tap away). An answer given there is
-        // published on rsvpChanges, which [_onRsvpChanged] already reloads
-        // this list on. Closing it lands back here: it is a modal over this
+        // announced by PartyRepository.setRsvp, which [onDataChange] already
+        // reloads this list on. Closing it lands back here: it is a modal over this
         // screen, not a route away from it.
         onTap: () => showMapPinSheet(context, rsvp.pin, repository: _repository),
         // The rounding moved from the BoxDecoration onto a ClipRRect; the

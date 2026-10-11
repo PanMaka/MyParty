@@ -77,7 +77,7 @@ class _FakeChatRepository extends ChatRepository {
   }
 
   @override
-  Future<ChatMessage> sendMessage({
+  Future<ChatMessage> insertMessage({
     required String partyId,
     required String body,
   }) async {
@@ -94,13 +94,13 @@ class _FakeChatRepository extends ChatRepository {
   }
 
   @override
-  Future<void> markRead(String partyId) async => markReadCalls += 1;
+  Future<void> writeReadMarker(String partyId) async => markReadCalls += 1;
 
   @override
   Future<List<PartyChatSummary>> fetchPartyChats() async => _chats;
 
   @override
-  Future<void> hideMessage(String messageId, {String? reason}) async {}
+  Future<void> writeHide(String messageId, {String? reason}) async {}
 
   @override
   ChatChannel subscribe(String partyId) {

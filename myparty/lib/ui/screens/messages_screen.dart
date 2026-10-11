@@ -3,10 +3,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../data/chat_repository.dart';
+import '../../data/chat_source.dart';
 import '../../data/direct_chat_repository.dart';
 import '../../models/chat_message.dart';
+import '../../state/data_changes.dart';
+import '../../state/live_refresh.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
+import '../widgets/mp_bottom_nav.dart' show MpTab;
 import 'chat_screen.dart';
 
 /// The chat list, in two tabs: **Parties** (group chats, `get_party_chats`)
@@ -21,6 +25,15 @@ import 'chat_screen.dart';
 /// Neither tab filters anything. The party list is exactly what
 /// `can_chat_in_party` admits and the Direct list exactly the threads you are
 /// a member of minus blocked peers — the RPCs apply both.
+///
+/// **Both tabs stay live while on screen.** Your own reads, sends and hides
+/// arrive as [DataChange]s from the chat repositories, wherever the chat was
+/// opened from; other people's lines arrive over the conversations' own
+/// broadcast topics, which each tab holds for the rows it shows (see
+/// [ChatListWatcher]) and drops when the Messages tab is hidden. A topic only
+/// says "something happened": the tab refetches, debounced by [_settle], so a
+/// burst of lines is one round trip and the counts are always the server's.
+const Duration _settle = Duration(milliseconds: 750);
 class MessagesScreen extends StatefulWidget {
   /// Injectable for tests; production callers let them default.
   final ChatRepository? repository;
@@ -32,20 +45,104 @@ class MessagesScreen extends StatefulWidget {
   State<MessagesScreen> createState() => _MessagesScreenState();
 }
 
-class _MessagesScreenState extends State<MessagesScreen> {
+class _MessagesScreenState extends State<MessagesScreen> with LiveRefresh<MessagesScreen> {
   late final ChatRepository _repository = widget.repository ?? ChatRepository();
   late final DirectChatRepository _direct = widget.directRepository ?? DirectChatRepository();
   late Future<List<PartyChatSummary>> _chatsFuture;
 
+  /// The last list that loaded — what the topics are held for, and what a
+  /// read is patched into before the refetch confirms it.
+  List<PartyChatSummary> _chats = const [];
+
+  late final ChatListWatcher _watcher = ChatListWatcher(
+    subscribe: _repository.subscribe,
+    onActivity: _soon,
+  );
+  Timer? _debounce;
+
   @override
   void initState() {
     super.initState();
-    _chatsFuture = _repository.fetchPartyChats();
+    _chatsFuture = _fetch();
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _watcher.clear();
+    super.dispose();
+  }
+
+  Future<List<PartyChatSummary>> _fetch() {
+    final future = _repository.fetchPartyChats();
+    future.then((chats) {
+      if (!mounted) return;
+      _chats = chats;
+      if (isLiveVisible) _watcher.watch(chats.map((c) => c.partyId));
+    }, onError: (_) {});
+    return future;
   }
 
   Future<void> _refresh() async {
-    setState(() => _chatsFuture = _repository.fetchPartyChats());
-    await _chatsFuture;
+    // A block body: an arrow would return the Future from the closure, which
+    // setState asserts against — the pull-to-refresh here threw in debug
+    // builds from the day it was added.
+    setState(() {
+      _chatsFuture = _fetch();
+    });
+    try {
+      await _chatsFuture;
+    } catch (_) {
+      // Rendered by the FutureBuilder; the pull spinner only needs it settled.
+    }
+  }
+
+  @override
+  MpTab? get liveTab => MpTab.messages;
+
+  @override
+  Future<void> liveRefresh() => _refresh();
+
+  @override
+  void onLiveVisibilityChanged(bool visible) {
+    if (visible) {
+      _watcher.watch(_chats.map((c) => c.partyId));
+    } else {
+      _debounce?.cancel();
+      _watcher.clear();
+    }
+  }
+
+  @override
+  void onDataChange(DataChange change) {
+    switch (change) {
+      // The badge clears now; the refetch confirms it and picks up anything
+      // said since.
+      case ConversationRead(:final conversationId, direct: false):
+        if (_chats.any((c) => c.partyId == conversationId)) {
+          setState(() {
+            _chats = [for (final c in _chats) c.partyId == conversationId ? c.read() : c];
+          });
+        }
+        _soon();
+      case MessageSent(direct: false) || MessageHidden(direct: false) || BlockChanged():
+        _soon();
+      default:
+        break;
+    }
+  }
+
+  /// A refetch, debounced, or deferred to the next time the tab is shown.
+  void _soon() {
+    if (!mounted) return;
+    if (!isLiveVisible) {
+      refreshWhenVisible();
+      return;
+    }
+    _debounce?.cancel();
+    _debounce = Timer(_settle, () {
+      if (mounted) refreshWhenVisible();
+    });
   }
 
   Future<void> _openChat(PartyChatSummary chat) async {
@@ -58,9 +155,10 @@ class _MessagesScreenState extends State<MessagesScreen> {
         repository: widget.repository,
       ),
     ));
-    // ChatScreen marks the party read on open, so the badge this list is
-    // showing is stale by the time we come back.
-    if (mounted) await _refresh();
+    // No refresh on the way back: ChatScreen marks the party read, and the
+    // repository announces that the moment it lands — which also covers a
+    // chat opened from the map, a party sheet or the host wizard, none of
+    // which come back through here.
   }
 
   @override
@@ -108,11 +206,15 @@ class _MessagesScreenState extends State<MessagesScreen> {
       child: FutureBuilder<List<PartyChatSummary>>(
         future: _chatsFuture,
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
+          // A refetch keeps the rows it is replacing on screen.
+          if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
 
-          final chats = snapshot.data ?? const <PartyChatSummary>[];
+          // [_chats], not snapshot.data: it is the same list once a fetch
+          // lands (it is assigned before the builder hears), and unlike the
+          // snapshot it also carries a read patched in this frame.
+          final chats = snapshot.hasData ? _chats : const <PartyChatSummary>[];
 
           return ListView(
             key: const ValueKey('chat-list-screen'),
@@ -288,7 +390,7 @@ class _DirectChatsTab extends StatefulWidget {
 }
 
 class _DirectChatsTabState extends State<_DirectChatsTab>
-    with AutomaticKeepAliveClientMixin {
+    with AutomaticKeepAliveClientMixin, LiveRefresh<_DirectChatsTab> {
   static const _pageSize = 30;
 
   final _scroll = ScrollController();
@@ -303,6 +405,15 @@ class _DirectChatsTabState extends State<_DirectChatsTab>
   @override
   bool get wantKeepAlive => true;
 
+  /// The `dm:{uuid}` topics of the threads on screen. A thread somebody
+  /// opens with you for the first time has no topic you could already be
+  /// holding; that arrives on the next tab focus or resume.
+  late final ChatListWatcher _watcher = ChatListWatcher(
+    subscribe: widget.repository.subscribe,
+    onActivity: _soon,
+  );
+  Timer? _debounce;
+
   @override
   void initState() {
     super.initState();
@@ -312,8 +423,52 @@ class _DirectChatsTabState extends State<_DirectChatsTab>
 
   @override
   void dispose() {
+    _debounce?.cancel();
+    _watcher.clear();
     _scroll.dispose();
     super.dispose();
+  }
+
+  @override
+  MpTab? get liveTab => MpTab.messages;
+
+  @override
+  Future<void> liveRefresh() => _reload();
+
+  @override
+  void onLiveVisibilityChanged(bool visible) {
+    if (visible) {
+      _watcher.watch(_threads.map((t) => t.threadId));
+    } else {
+      _debounce?.cancel();
+      _watcher.clear();
+    }
+  }
+
+  @override
+  void onDataChange(DataChange change) {
+    switch (change) {
+      case ConversationRead(:final conversationId, direct: true):
+        final at = _threads.indexWhere((t) => t.threadId == conversationId);
+        if (at >= 0) setState(() => _threads[at] = _threads[at].read());
+        _soon();
+      case MessageSent(direct: true) || MessageHidden(direct: true) || BlockChanged():
+        _soon();
+      default:
+        break;
+    }
+  }
+
+  void _soon() {
+    if (!mounted) return;
+    if (!isLiveVisible) {
+      refreshWhenVisible();
+      return;
+    }
+    _debounce?.cancel();
+    _debounce = Timer(_settle, () {
+      if (mounted) refreshWhenVisible();
+    });
   }
 
   Future<void> _reload() async {
@@ -328,11 +483,14 @@ class _DirectChatsTabState extends State<_DirectChatsTab>
         _loading = false;
         _failed = false;
       });
+      if (isLiveVisible) _watcher.watch(_threads.map((t) => t.threadId));
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _failed = true;
+        // A failed refetch keeps the threads already on screen; only a list
+        // with nothing to show says it did not load.
+        _failed = _threads.isEmpty;
       });
     }
   }
@@ -372,8 +530,8 @@ class _DirectChatsTabState extends State<_DirectChatsTab>
         repository: widget.repository,
       ),
     ));
-    // The chat marked itself read and may have moved to the top.
-    if (mounted) await _reload();
+    // No reload on the way back: the read and anything sent are announced by
+    // the repository as they land (see [onDataChange]).
   }
 
   @override

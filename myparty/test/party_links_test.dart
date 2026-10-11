@@ -3,6 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:myparty/data/party_repository.dart';
 import 'package:myparty/models/party_list_item.dart';
 import 'package:myparty/services/party_links.dart';
+import 'package:myparty/state/data_changes.dart';
+import 'package:myparty/state/mp_store.dart';
 import 'package:myparty/ui/widgets/party_detail_sheet.dart';
 import 'package:myparty/ui/widgets/party_link_handler.dart';
 import 'package:myparty/utils/share_party.dart';
@@ -36,6 +38,11 @@ class _FakePartyRepository extends PartyRepository {
   final PartyListItem? party;
   final bool fail;
   final fetched = <String>[];
+  final rsvpWrites = <MpRsvp>[];
+
+  @override
+  Future<void> writeRsvp({required String partyId, required MpRsvp status, required MpRsvp? current}) async =>
+      rsvpWrites.add(status);
 
   @override
   Future<PartyListItem?> fetchParty(String partyId) async {
@@ -153,6 +160,28 @@ void main() {
       await tester.pump();
 
       expect(shared, ['https://mypartycorp.com/p/$_id']);
+    });
+  });
+
+  group('answering a linked party', () {
+    testWidgets('Going on the sheet is saved and announced', (tester) async {
+      // There is no list under a link's sheet to own the write; it used to
+      // be opened with no callback, so the answer closed the sheet and went
+      // nowhere.
+      final repo = _FakePartyRepository(party: _item());
+      final announced = <RsvpChanged>[];
+      final sub = dataChanges.stream.listen((c) {
+        if (c is RsvpChanged) announced.add(c);
+      });
+      addTearDown(sub.cancel);
+      await _mount(tester, repo, ValueNotifier<String?>(_id));
+
+      await tester.tap(find.descendant(of: find.byType(PartyDetailSheet), matching: find.text('Going')));
+      await tester.pumpAndSettle();
+
+      expect(repo.rsvpWrites, [MpRsvp.going]);
+      expect(announced.single.partyId, _id);
+      expect(announced.single.status, MpRsvp.going);
     });
   });
 }

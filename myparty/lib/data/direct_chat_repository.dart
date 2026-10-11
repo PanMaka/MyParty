@@ -1,7 +1,9 @@
+import 'package:flutter/foundation.dart' show protected;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/chat_message.dart';
+import '../state/data_changes.dart';
 import 'chat_source.dart';
 import 'profile_repository.dart';
 
@@ -90,7 +92,20 @@ class DirectChatRepository {
   ///
   /// The insert's RETURNING is a read (gotcha 6), and that is fine here: the
   /// SELECT policy shows a member their own lines.
+  ///
+  /// Announces [MessageSent] once stored, so the chat list's preview and order
+  /// move with it. The insert is [insertMessage].
   Future<ChatMessage> sendMessage({
+    required String threadId,
+    required String body,
+  }) async {
+    final stored = await insertMessage(threadId: threadId, body: body);
+    dataChanges.publish(MessageSent(conversationId: threadId, direct: true));
+    return stored;
+  }
+
+  @protected
+  Future<ChatMessage> insertMessage({
     required String threadId,
     required String body,
   }) async {
@@ -125,13 +140,29 @@ class DirectChatRepository {
   /// `last_read_at`, and an upsert would SET the key columns too and be
   /// refused (gotcha 12 — see `20261010095848`). The server stamps the time
   /// itself and never moves it backwards.
+  ///
+  /// Announces [ConversationRead] once the server has moved the marker — not
+  /// before, or the list would clear a badge on a read that never landed. The
+  /// RPC is [writeReadMarker].
   Future<void> markRead(String threadId) async {
+    await writeReadMarker(threadId);
+    dataChanges.publish(ConversationRead(conversationId: threadId, direct: true));
+  }
+
+  @protected
+  Future<void> writeReadMarker(String threadId) async {
     if (_uid == null) return;
     await _client.rpc('mark_direct_thread_read', params: {'p_thread_id': threadId});
   }
 
   /// Author-only, checked by `hide_direct_message`.
   Future<void> hideMessage(String messageId, {String? reason}) async {
+    await writeHide(messageId, reason: reason);
+    dataChanges.publish(const MessageHidden(direct: true));
+  }
+
+  @protected
+  Future<void> writeHide(String messageId, {String? reason}) async {
     await _client.rpc('hide_direct_message', params: {
       'p_message_id': messageId,
       'p_reason': reason,

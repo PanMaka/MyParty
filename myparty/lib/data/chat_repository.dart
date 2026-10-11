@@ -1,7 +1,9 @@
+import 'package:flutter/foundation.dart' show protected;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/chat_message.dart';
+import '../state/data_changes.dart';
 import 'chat_source.dart';
 
 /// Every widget-level Supabase call for group chat goes through here —
@@ -84,7 +86,20 @@ class ChatRepository {
   /// is how "you are not in this chat" and "you are sending too fast" both
   /// reach the UI (both are `42501` from the policy and the rate-limit
   /// trigger respectively).
+  ///
+  /// Announces [MessageSent] once stored, so the chat list's preview and order
+  /// move with it. The insert is [insertMessage].
   Future<ChatMessage> sendMessage({
+    required String partyId,
+    required String body,
+  }) async {
+    final stored = await insertMessage(partyId: partyId, body: body);
+    dataChanges.publish(MessageSent(conversationId: partyId, direct: false));
+    return stored;
+  }
+
+  @protected
+  Future<ChatMessage> insertMessage({
     required String partyId,
     required String body,
   }) async {
@@ -128,7 +143,17 @@ class ChatRepository {
   /// `last_read_at`, and an upsert SETs every key in the body, so it was
   /// refused with 403 on every call — and swallowed, which left every badge
   /// stuck (`20261010101036`, gotcha 12).
+  ///
+  /// Announces [ConversationRead] once the server has moved the marker — not
+  /// before, or the list would clear a badge on a read that never landed. The
+  /// RPC is [writeReadMarker].
   Future<void> markRead(String partyId) async {
+    await writeReadMarker(partyId);
+    dataChanges.publish(ConversationRead(conversationId: partyId, direct: false));
+  }
+
+  @protected
+  Future<void> writeReadMarker(String partyId) async {
     if (_uid == null) return;
     await _client.rpc('mark_party_read', params: {'p_party_id': partyId});
   }
@@ -139,6 +164,12 @@ class ChatRepository {
   /// so a client-side soft-delete is structurally impossible.
   /// `hide_message` re-checks authorship/hosting server-side.
   Future<void> hideMessage(String messageId, {String? reason}) async {
+    await writeHide(messageId, reason: reason);
+    dataChanges.publish(const MessageHidden(direct: false));
+  }
+
+  @protected
+  Future<void> writeHide(String messageId, {String? reason}) async {
     await _client.rpc('hide_message', params: {
       'p_message_id': messageId,
       'p_reason': reason,

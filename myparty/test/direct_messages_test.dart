@@ -91,7 +91,7 @@ class _FakeDirectChats extends DirectChatRepository {
   Future<List<ChatMessage>> fetchMessagesSince(String threadId, DateTime since) async => const [];
 
   @override
-  Future<ChatMessage> sendMessage({required String threadId, required String body}) async {
+  Future<ChatMessage> insertMessage({required String threadId, required String body}) async {
     sentTo.add(threadId);
     return ChatMessage(
       id: 'stored-$body',
@@ -104,10 +104,10 @@ class _FakeDirectChats extends DirectChatRepository {
   }
 
   @override
-  Future<void> markRead(String threadId) async => markedRead.add(threadId);
+  Future<void> writeReadMarker(String threadId) async => markedRead.add(threadId);
 
   @override
-  Future<void> hideMessage(String messageId, {String? reason}) async {}
+  Future<void> writeHide(String messageId, {String? reason}) async {}
 
   @override
   ChatChannel subscribe(String threadId) {
@@ -150,13 +150,13 @@ class _FakeSocial extends SocialRepository {
   Future<bool> isFollowing(String targetUserId) async => false;
 
   @override
-  Future<void> block(String targetUserId) async {
+  Future<void> insertBlock(String targetUserId) async {
     calls.add('block:$targetUserId');
     blocked.add(Profile(id: targetUserId, username: 'zoi', followerCount: 0, followingCount: 0));
   }
 
   @override
-  Future<void> unblock(String targetUserId) async {
+  Future<void> deleteBlock(String targetUserId) async {
     calls.add('unblock:$targetUserId');
     blocked.removeWhere((p) => p.id == targetUserId);
   }
@@ -495,6 +495,19 @@ void main() {
 
       expect(social.calls, ['unblock:them']);
       expect(find.text('@zoi'), findsNothing);
+    });
+
+    testWidgets('a block made elsewhere appears in Blocked accounts without a refresh', (tester) async {
+      final social = _FakeSocial();
+      await tester.pumpWidget(MaterialApp(home: BlockedAccountsScreen(social: social)));
+      await tester.pumpAndSettle();
+      expect(find.text('You haven’t blocked anyone.'), findsOneWidget);
+
+      // The profile's Block, made through the same repository.
+      await social.block('them');
+      await tester.pumpAndSettle();
+
+      expect(find.text('@zoi'), findsOneWidget);
     });
   });
 }

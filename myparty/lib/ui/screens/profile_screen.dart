@@ -9,10 +9,13 @@ import '../../models/hosted_parties.dart';
 import '../../models/party_summary.dart';
 import '../../models/profile.dart';
 import '../../models/profile_stats.dart';
+import '../../state/data_changes.dart';
+import '../../state/live_refresh.dart';
 import '../../utils/english_date.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
 import '../widgets/follow_button.dart';
+import '../widgets/mp_bottom_nav.dart' show MpTab;
 import '../widgets/profile_party_card.dart';
 import '../widgets/report_sheet.dart';
 import 'chat_screen.dart';
@@ -142,7 +145,7 @@ class ProfileScreen extends StatefulWidget {
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
-class _ProfileScreenState extends State<ProfileScreen> {
+class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileScreen> {
   late final SocialRepository _social = widget.social ?? SocialRepository();
   late final ProfileRepository _profiles = widget.repository ?? ProfileRepository();
   late final PartyRepository _parties = widget.parties ?? PartyRepository();
@@ -152,9 +155,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   /// two [OwnProfile] values — an [OtherProfile] never becomes an [OwnProfile].
   late ProfileTarget _target = widget.target;
 
-  late final Future<List<Profile>> _theirFollowing = _social.fetchFollowing(
-    userId: widget.target.userIdOrNull,
-  );
+  late Future<List<Profile>> _theirFollowing = _fetchTheirFollowing();
 
   /// The owner's whole party list, plus the signed cover URLs it renders with.
   ///
@@ -162,16 +163,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
   /// are in, and two futures would make every card flip from placeholder to
   /// photo a beat after it appeared. Owner-only: `get_my_hosted_parties` takes
   /// no user id, so this cannot be pointed at [OtherProfile] even by mistake.
-  late final Future<(HostedParties, Map<String, String>)> _myParties = _loadMyParties();
+  late Future<(HostedParties, Map<String, String>)> _myParties = _loadMyParties();
 
   /// Public parties this profile has already hosted — the PUBLIC PARTIES card.
   /// `publicOnly` because the heading says public; see [PartyRepository].
-  late final Future<List<PartySummary>> _hostedPublicPast = _parties.fetchHostedParties(
-    hostId: widget.target.userIdOrNull,
-    window: PartyWindow.past,
-    publicOnly: true,
-    limit: 3,
-  );
+  late Future<List<PartySummary>> _hostedPublicPast = _fetchHostedPublicPast();
+
+  Future<List<Profile>> _fetchTheirFollowing() => _social.fetchFollowing(userId: widget.target.userIdOrNull);
+
+  Future<List<PartySummary>> _fetchHostedPublicPast() => _parties.fetchHostedParties(
+        hostId: widget.target.userIdOrNull,
+        window: PartyWindow.past,
+        publicOnly: true,
+        limit: 3,
+      );
 
 
   Profile? _profile;
@@ -199,6 +204,70 @@ class _ProfileScreenState extends State<ProfileScreen> {
     super.initState();
     _load();
   }
+
+  /// The signed-in user's own profile is the Profile tab; anybody else's is a
+  /// pushed screen, visible for as long as it is mounted.
+  @override
+  MpTab? get liveTab => widget.target is OwnProfile ? MpTab.profile : null;
+
+  /// Everything this screen shows, refetched in place. The futures are swapped
+  /// in one setState so their FutureBuilders keep the previous answer on screen
+  /// until the new one lands (see [_settled]).
+  @override
+  Future<void> liveRefresh() async {
+    final following = _fetchTheirFollowing();
+    final hostedPublicPast = _fetchHostedPublicPast();
+    final myParties = widget.target is OwnProfile ? _loadMyParties() : _myParties;
+    setState(() {
+      _theirFollowing = following;
+      _hostedPublicPast = hostedPublicPast;
+      _myParties = myParties;
+    });
+    // A failed half is rendered by its own FutureBuilder; the pull-to-refresh
+    // spinner only needs to know that everything has answered.
+    Future<void> settle(Future<Object?> f) => f.then((_) {}, onError: (_) {});
+    await Future.wait([_load(), settle(following), settle(hostedPublicPast), settle(myParties)]);
+  }
+
+  @override
+  void onDataChange(DataChange change) {
+    final own = widget.target is OwnProfile;
+    switch (change) {
+      // Their FOLLOWERS tile moved on the server. On the screen the tap
+      // happened on it has already moved optimistically; the refetch is what
+      // brings every other open copy of this profile along, and reconciles the
+      // optimistic one with anyone else who followed meanwhile.
+      case FollowChanged(:final targetUserId) when !own && targetUserId == _target.userIdOrNull:
+        refreshWhenVisible();
+      // Your own FOLLOWING rail (the public preview) gained or lost somebody.
+      case FollowChanged() when own:
+        refreshWhenVisible();
+      // HOSTED and the HOSTING list.
+      case PartyCreated() when own:
+        refreshWhenVisible();
+      // The blocked account's profile turns into "you blocked this account"
+      // (or back), and a block purges the follow edges both ways — which is
+      // your own FOLLOWING rail and their FOLLOWERS tile.
+      case BlockChanged(:final userId) when own || userId == _target.userIdOrNull:
+        refreshWhenVisible();
+      default:
+        break;
+    }
+  }
+
+  /// The follow button flipped, or flipped back after a refused write. The
+  /// tile beside it moves with it, before the server has answered.
+  void _onFollowToggled(bool following) {
+    final loaded = _profile;
+    if (loaded == null) return;
+    setState(() => _profile = loaded.withFollowerDelta(following ? 1 : -1));
+  }
+
+  /// A FutureBuilder handed a new future keeps the previous data while it
+  /// waits. Only a snapshot with NOTHING to show yet is loading — anything else
+  /// would flash a placeholder over a correct list on every refresh.
+  static bool _settled(AsyncSnapshot<Object?> snapshot) =>
+      snapshot.connectionState != ConnectionState.waiting || snapshot.hasData;
 
   Future<void> _load() async {
     final id = _target.userIdOrNull;
@@ -349,9 +418,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
     if (!mounted) return;
     _snack('Blocked');
-    // The profiles policy hides the account from us now, so the reload lands
-    // on the "you blocked this account" state rather than the profile.
-    await _retryLoad();
+    // No reload here: block() announces itself, and [onDataChange] reloads
+    // this screen along with every other copy of it. The profiles policy hides
+    // the account from us now, so that reload lands on the "you blocked this
+    // account" state rather than the profile.
   }
 
   Future<void> _unblock(String userId) async {
@@ -363,7 +433,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
     if (!mounted) return;
     _snack('Unblocked');
-    await _retryLoad();
+    // Reloaded by [onDataChange], as for a block.
   }
 
   @override
@@ -372,7 +442,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       backgroundColor: AppColors.bg,
       body: SafeArea(
         bottom: false,
-        child: ListView(
+        child: RefreshIndicator(
+          onRefresh: liveRefresh,
+          child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.only(bottom: 96),
           children: [
             Padding(
@@ -470,6 +543,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             // behind the gear in the header — see [SettingsScreen].
             if (_target.showsOwnerSections) _myPartyList() else ..._publicSections(context),
           ],
+          ),
         ),
       ),
     );
@@ -495,7 +569,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       child: FutureBuilder<(HostedParties, Map<String, String>)>(
         future: _myParties,
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
+          if (!_settled(snapshot)) {
             return _partyListShell(null, _sectionNotice('…'));
           }
           if (snapshot.hasError) {
@@ -627,7 +701,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             FutureBuilder<List<PartySummary>>(
               future: _hostedPublicPast,
               builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
+                if (!_settled(snapshot)) {
                   return _sectionNotice('…');
                 }
                 if (snapshot.hasError) {
@@ -1005,7 +1079,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         OtherProfile(:final userId) => Row(
           children: [
-            Expanded(child: FollowButton(targetUserId: userId)),
+            Expanded(child: FollowButton(targetUserId: userId, repository: _social, onChanged: _onFollowToggled)),
             const SizedBox(width: 8),
             Expanded(
               child: _actionButton(

@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart' show protected;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/profile.dart';
+import '../state/data_changes.dart';
 
 /// Every widget-level Supabase call for the follow graph and blocks goes
 /// through here — screens never call `Supabase.instance.client` directly.
@@ -76,7 +78,26 @@ class SocialRepository {
   /// Throws if a block exists in either direction — the `follows` INSERT
   /// policy rejects it, which is what makes "cannot follow again until
   /// unblock" a server-side rule rather than a UI one.
+  ///
+  /// Announces [FollowChanged] once the write lands, so every other copy of
+  /// the target's profile moves its follower count too. The write itself is
+  /// [insertFollow]; a test double overrides that and keeps the announcement.
   Future<void> follow(String targetUserId) async {
+    await insertFollow(targetUserId);
+    dataChanges.publish(
+      FollowChanged(targetUserId: targetUserId, following: true),
+    );
+  }
+
+  Future<void> unfollow(String targetUserId) async {
+    await deleteFollow(targetUserId);
+    dataChanges.publish(
+      FollowChanged(targetUserId: targetUserId, following: false),
+    );
+  }
+
+  @protected
+  Future<void> insertFollow(String targetUserId) async {
     final id = _uid;
     if (id == null) throw StateError('Not signed in');
 
@@ -86,7 +107,8 @@ class SocialRepository {
     });
   }
 
-  Future<void> unfollow(String targetUserId) async {
+  @protected
+  Future<void> deleteFollow(String targetUserId) async {
     final id = _uid;
     if (id == null) throw StateError('Not signed in');
 
@@ -146,7 +168,23 @@ class SocialRepository {
   /// Blocking also deletes the follow edges in both directions, server-side
   /// (the `blocks_purge_follows` trigger). Callers should refresh any follow
   /// state they are holding rather than assuming it survived.
+  ///
+  /// Announces [BlockChanged] once the row exists. A block hides the pair from
+  /// each other in every policy, so this is the widest change in the app: the
+  /// profile, both chat lists, the map, both party lists and search all
+  /// refetch on it. The insert is [insertBlock].
   Future<void> block(String targetUserId) async {
+    await insertBlock(targetUserId);
+    dataChanges.publish(BlockChanged(userId: targetUserId, blocked: true));
+  }
+
+  Future<void> unblock(String targetUserId) async {
+    await deleteBlock(targetUserId);
+    dataChanges.publish(BlockChanged(userId: targetUserId, blocked: false));
+  }
+
+  @protected
+  Future<void> insertBlock(String targetUserId) async {
     final id = _uid;
     if (id == null) throw StateError('Not signed in');
 
@@ -156,7 +194,8 @@ class SocialRepository {
     });
   }
 
-  Future<void> unblock(String targetUserId) async {
+  @protected
+  Future<void> deleteBlock(String targetUserId) async {
     final id = _uid;
     if (id == null) throw StateError('Not signed in');
 

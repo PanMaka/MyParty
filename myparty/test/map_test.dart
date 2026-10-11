@@ -9,7 +9,7 @@ import 'package:myparty/data/party_repository.dart';
 import 'package:myparty/models/map_party_pin.dart';
 import 'package:myparty/models/map_time_window.dart';
 import 'package:myparty/state/mp_store.dart';
-import 'package:myparty/state/rsvp_changes.dart';
+import 'package:myparty/state/data_changes.dart';
 import 'package:myparty/ui/screens/map_screen.dart';
 import 'package:myparty/ui/screens/search_screen.dart';
 import 'package:myparty/ui/widgets/map_base.dart';
@@ -77,7 +77,7 @@ class _FakePartyRepository extends PartyRepository {
   bool rsvpFails = false;
 
   @override
-  Future<void> setRsvp({
+  Future<void> writeRsvp({
     required String partyId,
     required MpRsvp status,
     required MpRsvp? current,
@@ -960,7 +960,19 @@ void main() {
       await _mount(tester, repository);
       final before = repository.calls.length;
 
-      rsvpChanges.value = const RsvpChange(partyId: 'p1', status: MpRsvp.going);
+      dataChanges.publish(const RsvpChanged(partyId: 'p1', status: MpRsvp.going));
+      await tester.pump();
+
+      expect(repository.calls.length, before + 1);
+      await _teardown(tester);
+    });
+
+    testWidgets('a party hosted anywhere makes the map refetch, so its pin appears', (tester) async {
+      final repository = _FakePartyRepository(const []);
+      await _mount(tester, repository);
+      final before = repository.calls.length;
+
+      dataChanges.publish(const PartyCreated(partyId: 'new-party'));
       await tester.pump();
 
       expect(repository.calls.length, before + 1);
@@ -1227,10 +1239,11 @@ void main() {
       // interested_count -- the one the map pin draws -- and it must move on
       // the tap, not after a round trip.
       final repository = _FakePartyRepository(const []);
-      final published = <RsvpChange?>[];
-      void listener() => published.add(rsvpChanges.value);
-      rsvpChanges.addListener(listener);
-      addTearDown(() => rsvpChanges.removeListener(listener));
+      final published = <RsvpChanged>[];
+      final sub = dataChanges.stream.listen((change) {
+        if (change is RsvpChanged) published.add(change);
+      });
+      addTearDown(sub.cancel);
 
       await pumpSheet(tester, full(), repository);
       expect(find.text('34 interested'), findsOneWidget);
@@ -1244,8 +1257,8 @@ void main() {
       expect(find.text('12 going'), findsOneWidget);
       // Published only once the write landed, which is what tells the map and
       // MY PARTIES to refetch.
-      expect(published.single!.partyId, 'aaaaaaaa-0000-0000-0000-000000000002');
-      expect(published.single!.status, MpRsvp.interested);
+      expect(published.single.partyId, 'aaaaaaaa-0000-0000-0000-000000000002');
+      expect(published.single.status, MpRsvp.interested);
     });
 
     testWidgets('switching interested -> going moves going ONLY', (tester) async {
@@ -1279,9 +1292,10 @@ void main() {
     testWidgets('a failed write rolls the sheet back and publishes nothing', (tester) async {
       final repository = _FakePartyRepository(const [])..rsvpFails = true;
       var notified = 0;
-      void listener() => notified++;
-      rsvpChanges.addListener(listener);
-      addTearDown(() => rsvpChanges.removeListener(listener));
+      final sub = dataChanges.stream.listen((change) {
+        if (change is RsvpChanged) notified++;
+      });
+      addTearDown(sub.cancel);
 
       await pumpSheet(tester, full(), repository);
       await tapAnswer(tester, 'Going');

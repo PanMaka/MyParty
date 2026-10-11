@@ -49,47 +49,163 @@ class ChatChannel {
 /// There is no send path here. Messages are sent by INSERT and arrive back
 /// through this channel via the database trigger; the client never
 /// broadcasts, and `realtime.messages` has no INSERT policy so that stays true.
+///
+/// **One channel per topic, shared.** The Messages list watches the topics of
+/// the chats it shows while an open [ChatScreen] watches its own, and those
+/// overlap. `client.channel()` makes a new channel every call, and a second
+/// join of the same topic on one socket makes the server close the first —
+/// so two holders of `party:{id}` would cut each other off. Holders share the
+/// channel instead, and it is left when the last one disposes.
 ChatChannel subscribeChatTopic(SupabaseClient client, String topic) {
+  final key = '${identityHashCode(client)}|$topic';
+  final shared = _sharedTopics[key] ??= _SharedTopic.open(client, topic);
+  shared.holders += 1;
+
+  // Per holder, and replaying the last status: [ChatScreen] treats every
+  // `subscribed` after its first as a reconnect that needs a gap-fill, so a
+  // holder that joins an already-subscribed channel has to see that first
+  // `subscribed` too, exactly as if it had joined on its own.
+  final status = StreamController<RealtimeSubscribeStatus>.broadcast();
+  final forward = shared.status.stream.listen(status.add);
+  final last = shared.lastStatus;
+  if (last != null) {
+    scheduleMicrotask(() {
+      if (!status.isClosed) status.add(last);
+    });
+  }
+
+  var disposed = false;
+  return ChatChannel(
+    messages: shared.messages.stream,
+    hiddenMessageIds: shared.hidden.stream,
+    status: status.stream,
+    dispose: () async {
+      if (disposed) return;
+      disposed = true;
+      await forward.cancel();
+      await status.close();
+      shared.holders -= 1;
+      if (shared.holders == 0) {
+        _sharedTopics.remove(key);
+        await shared.close(client);
+      }
+    },
+  );
+}
+
+final Map<String, _SharedTopic> _sharedTopics = {};
+
+class _SharedTopic {
+  _SharedTopic._(this.channel);
+
+  factory _SharedTopic.open(SupabaseClient client, String topic) {
+    final shared = _SharedTopic._(client.channel(
+      topic,
+      opts: const RealtimeChannelConfig(private: true),
+    ));
+
+    shared.channel
+        .onBroadcast(
+          event: 'new_message',
+          callback: (payload) {
+            if (shared.messages.isClosed) return;
+            shared.messages.add(ChatMessage.fromBroadcast(payload));
+          },
+        )
+        .onBroadcast(
+          event: 'message_hidden',
+          callback: (payload) {
+            if (shared.hidden.isClosed) return;
+            final id = payload['id'] as String?;
+            if (id != null) shared.hidden.add(id);
+          },
+        )
+        .subscribe((state, error) {
+          shared.lastStatus = state;
+          if (!shared.status.isClosed) shared.status.add(state);
+        });
+
+    return shared;
+  }
+
+  final RealtimeChannel channel;
   final messages = StreamController<ChatMessage>.broadcast();
   final hidden = StreamController<String>.broadcast();
   final status = StreamController<RealtimeSubscribeStatus>.broadcast();
+  RealtimeSubscribeStatus? lastStatus;
+  int holders = 0;
 
-  final channel = client.channel(
-    topic,
-    opts: const RealtimeChannelConfig(private: true),
-  );
+  Future<void> close(SupabaseClient client) async {
+    await messages.close();
+    await hidden.close();
+    await status.close();
+    await client.removeChannel(channel);
+  }
+}
 
-  channel
-      .onBroadcast(
-        event: 'new_message',
-        callback: (payload) {
-          if (messages.isClosed) return;
-          messages.add(ChatMessage.fromBroadcast(payload));
-        },
-      )
-      .onBroadcast(
-        event: 'message_hidden',
-        callback: (payload) {
-          if (hidden.isClosed) return;
-          final id = payload['id'] as String?;
-          if (id != null) hidden.add(id);
-        },
-      )
-      .subscribe((state, error) {
-        if (!status.isClosed) status.add(state);
-      });
+/// Keeps a chat list's rows live: holds the broadcast topic of each listed
+/// conversation and reports any traffic on any of them through [onActivity].
+///
+/// Traffic, not content. The list does not render from the payload — it
+/// refetches, so the unread count stays the server's and a blocked author's
+/// line is filtered by the SELECT policy rather than trusted from a broadcast.
+///
+/// Capped at [limit] topics, the most recent first: the realtime server limits
+/// channels per connection, and a conversation far down the list is one the
+/// tab-focus and resume refetches cover well enough.
+class ChatListWatcher {
+  ChatListWatcher({required this.subscribe, required this.onActivity, this.limit = 25});
 
-  return ChatChannel(
-    messages: messages.stream,
-    hiddenMessageIds: hidden.stream,
-    status: status.stream,
-    dispose: () async {
-      await messages.close();
-      await hidden.close();
-      await status.close();
-      await client.removeChannel(channel);
-    },
-  );
+  final ChatChannel Function(String conversationId) subscribe;
+  final void Function() onActivity;
+  final int limit;
+
+  final Map<String, ({ChatChannel channel, List<StreamSubscription<Object?>> subs})> _held = {};
+
+  /// The conversations currently held.
+  Set<String> get watching => _held.keys.toSet();
+
+  /// Holds exactly the first [limit] of [conversationIds], leaving the rest.
+  void watch(Iterable<String> conversationIds) {
+    final wanted = conversationIds.take(limit).toSet();
+    for (final id in _held.keys.where((id) => !wanted.contains(id)).toList()) {
+      _drop(id);
+    }
+    for (final id in wanted) {
+      if (_held.containsKey(id)) continue;
+      final channel = subscribe(id);
+      // The first `subscribed` is the join; any later one is a reconnect, and
+      // broadcast has no replay, so whatever was said meanwhile is activity.
+      var joined = false;
+      _held[id] = (
+        channel: channel,
+        subs: [
+          channel.messages.listen((_) => onActivity()),
+          channel.hiddenMessageIds.listen((_) => onActivity()),
+          channel.status.listen((state) {
+            if (state != RealtimeSubscribeStatus.subscribed) return;
+            if (joined) onActivity();
+            joined = true;
+          }),
+        ],
+      );
+    }
+  }
+
+  /// Leaves every topic.
+  void clear() {
+    for (final id in _held.keys.toList()) {
+      _drop(id);
+    }
+  }
+
+  void _drop(String id) {
+    final held = _held.remove(id)!;
+    for (final sub in held.subs) {
+      sub.cancel();
+    }
+    unawaited(held.channel.dispose());
+  }
 }
 
 /// Everything newer than [since] — the reconnect gap-fill, for either kind of

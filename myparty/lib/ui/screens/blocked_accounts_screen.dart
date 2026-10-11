@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../../data/social_repository.dart';
 import '../../models/profile.dart';
+import '../../state/data_changes.dart';
+import '../../state/live_refresh.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
+import '../widgets/mp_bottom_nav.dart' show MpTab;
 
 /// The people you have blocked, each with an Unblock button.
 ///
@@ -22,7 +25,7 @@ class BlockedAccountsScreen extends StatefulWidget {
   State<BlockedAccountsScreen> createState() => _BlockedAccountsScreenState();
 }
 
-class _BlockedAccountsScreenState extends State<BlockedAccountsScreen> {
+class _BlockedAccountsScreenState extends State<BlockedAccountsScreen> with LiveRefresh<BlockedAccountsScreen> {
   late final SocialRepository _social = widget.social ?? SocialRepository();
 
   List<Profile>? _blocked;
@@ -48,6 +51,18 @@ class _BlockedAccountsScreenState extends State<BlockedAccountsScreen> {
     } catch (_) {
       if (mounted) setState(() => _failed = true);
     }
+  }
+
+  @override
+  MpTab? get liveTab => null;
+
+  @override
+  Future<void> liveRefresh() => _load();
+
+  /// A block or unblock made from a profile while this list exists.
+  @override
+  void onDataChange(DataChange change) {
+    if (change is BlockChanged) refreshWhenVisible();
   }
 
   Future<void> _unblock(Profile profile) async {
@@ -113,7 +128,10 @@ class _BlockedAccountsScreenState extends State<BlockedAccountsScreen> {
       );
     }
 
-    return ListView.separated(
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView.separated(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.symmetric(vertical: 8),
       itemCount: blocked.length,
       separatorBuilder: (_, _) => Container(height: 1, color: AppColors.hairline),
@@ -145,6 +163,7 @@ class _BlockedAccountsScreenState extends State<BlockedAccountsScreen> {
           ),
         );
       },
+    ),
     );
   }
 }

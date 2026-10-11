@@ -7,9 +7,11 @@ import 'package:myparty/models/map_party_pin.dart';
 import 'package:myparty/models/party_list_item.dart';
 import 'package:myparty/models/rsvp_party.dart';
 import 'package:myparty/state/mp_store.dart';
-import 'package:myparty/state/rsvp_changes.dart';
+import 'package:myparty/state/data_changes.dart';
+import 'package:myparty/state/live_refresh.dart';
 import 'package:myparty/ui/screens/events_screen.dart';
 import 'package:myparty/ui/widgets/map_pin_sheet.dart';
+import 'package:myparty/ui/widgets/mp_bottom_nav.dart';
 import 'package:myparty/ui/widgets/party_card.dart';
 import 'package:myparty/ui/widgets/party_detail_sheet.dart';
 
@@ -72,8 +74,22 @@ class _FakePartyRepository extends PartyRepository {
 
   final List<({String partyId, MpRsvp status, MpRsvp? current})> rsvpWrites = [];
 
+  /// Every party the screen (or a test standing in for the wizard) created.
+  /// The fake does not add the row to [pages] itself — a test does that, as
+  /// the server would, so it controls what the refetch finds.
+  final List<Map<String, dynamic>> created = [];
+
   @override
-  Future<void> setRsvp({
+  Future<String> insertPartyWithInvites({
+    required Map<String, dynamic> party,
+    List<String> inviteeIds = const [],
+  }) async {
+    created.add(party);
+    return 'new-party';
+  }
+
+  @override
+  Future<void> writeRsvp({
     required String partyId,
     required MpRsvp status,
     required MpRsvp? current,
@@ -518,7 +534,8 @@ void main() {
 
     testWidgets('an RSVP saved on ANOTHER tab reloads MY PARTIES and relights the card', (tester) async {
       // The tabs live in an IndexedStack, so this screen is never rebuilt by
-      // the map sheet writing an rsvp. rsvpChanges is the only way it hears.
+      // the map sheet writing an rsvp. The data change bus is the only way
+      // it hears.
       final repo = _FakePartyRepository(const [], pages: {
         PartySort.soonest: [_item(id: 'p9', title: 'Techno Monday')],
       });
@@ -527,7 +544,7 @@ void main() {
       final before = repo.rsvpFetches;
       expect(find.text('Going ✓'), findsNothing);
 
-      rsvpChanges.value = const RsvpChange(partyId: 'p9', status: MpRsvp.going);
+      dataChanges.publish(const RsvpChanged(partyId: 'p9', status: MpRsvp.going));
       await tester.pumpAndSettle();
 
       expect(repo.rsvpFetches, before + 1);
@@ -838,6 +855,122 @@ void main() {
 
       expect(find.textContaining('load the parties'), findsOneWidget);
       expect(find.text('Try again'), findsOneWidget);
+    });
+  });
+
+  group('live updates', () {
+    tearDown(() => visibleTab.value = null);
+
+    testWidgets('a party hosted elsewhere lands on ALL PARTIES and MY PARTIES without a refresh', (tester) async {
+      final repo = _FakePartyRepository(<RsvpParty>[], pages: {
+        PartySort.soonest: [_item(id: 'p1', title: 'Techno Monday')],
+      });
+      await tester.pumpWidget(_host(repo));
+      await tester.pumpAndSettle();
+      final mine = repo.rsvpFetches;
+      expect(find.text('Rooftop opening'), findsNothing);
+
+      // What the server holds once create_party_with_invites has run.
+      repo.pages[PartySort.soonest]!.add(_item(id: 'new-party', title: 'Rooftop opening'));
+      // The wizard's call, made from another screen.
+      await repo.createPartyWithInvites(party: {'title': 'Rooftop opening'});
+      await tester.pumpAndSettle();
+
+      expect(find.text('Rooftop opening'), findsOneWidget);
+      expect(find.text('Techno Monday'), findsOneWidget, reason: 'the reload keeps the rest of the list');
+      expect(repo.rsvpFetches, mine + 1);
+    });
+
+    testWidgets('while the tab is hidden it waits, then catches up the moment it is shown', (tester) async {
+      visibleTab.value = MpTab.map;
+      final repo = _FakePartyRepository(const [], pages: {
+        PartySort.soonest: [_item(id: 'p1', title: 'Techno Monday')],
+      });
+      await tester.pumpWidget(_host(repo));
+      await tester.pumpAndSettle();
+      final before = repo.sortsRequested.length;
+
+      repo.pages[PartySort.soonest]!.add(_item(id: 'new-party', title: 'Rooftop opening'));
+      await repo.createPartyWithInvites(party: {'title': 'Rooftop opening'});
+      await tester.pumpAndSettle();
+
+      // Hidden behind the map: no round trip for pixels nobody can see.
+      expect(repo.sortsRequested.length, before);
+
+      visibleTab.value = MpTab.events;
+      await tester.pumpAndSettle();
+
+      expect(repo.sortsRequested.length, before + 1);
+      expect(find.text('Rooftop opening'), findsOneWidget);
+    });
+
+    testWidgets('coming back to the app refetches what is on screen', (tester) async {
+      final repo = _FakePartyRepository(const [], pages: {
+        PartySort.soonest: [_item(id: 'p1', title: 'Techno Monday')],
+      });
+      await tester.pumpWidget(_host(repo));
+      await tester.pumpAndSettle();
+      final before = repo.sortsRequested.length;
+
+      // Someone else hosted while the app was in the background.
+      repo.pages[PartySort.soonest]!.add(_item(id: 'theirs', title: 'Their party'));
+      appResumes.value += 1;
+      await tester.pumpAndSettle();
+
+      expect(repo.sortsRequested.length, before + 1);
+      expect(find.text('Their party'), findsOneWidget);
+    });
+
+    testWidgets("a block refetches both lists, since the blocked host's parties leave them", (tester) async {
+      final repo = _FakePartyRepository(const [], pages: {
+        PartySort.soonest: [_item(id: 'p1', title: 'Techno Monday')],
+      });
+      await tester.pumpWidget(_host(repo));
+      await tester.pumpAndSettle();
+      final before = repo.sortsRequested.length;
+      final mine = repo.rsvpFetches;
+
+      repo.pages[PartySort.soonest]!.clear();
+      dataChanges.publish(const BlockChanged(userId: '11111111-1111-1111-1111-111111111111', blocked: true));
+      await tester.pumpAndSettle();
+
+      expect(repo.sortsRequested.length, before + 1);
+      expect(repo.rsvpFetches, mine + 1);
+      expect(find.text('Techno Monday'), findsNothing);
+    });
+
+    testWidgets('pulling ALL PARTIES down refetches it', (tester) async {
+      final repo = _FakePartyRepository(const [], pages: {
+        PartySort.soonest: [_item(id: 'p1', title: 'Techno Monday')],
+      });
+      await tester.pumpWidget(_host(repo));
+      await tester.pumpAndSettle();
+      final before = repo.sortsRequested.length;
+
+      await tester.fling(find.text('Techno Monday'), const Offset(0, 400), 1000);
+      await tester.pumpAndSettle();
+
+      expect(repo.sortsRequested.length, before + 1);
+    });
+
+    testWidgets('an answer on the card\'s detail sheet is saved and lights the card', (tester) async {
+      // The sheet used to be opened with no callback: Going closed it and
+      // saved nothing.
+      final repo = _FakePartyRepository(const [], pages: {
+        PartySort.soonest: [_item(id: 'p1', title: 'Techno Monday')],
+      });
+      await tester.pumpWidget(_host(repo));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Techno Monday'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.descendant(of: find.byType(PartyDetailSheet), matching: find.text('Going')));
+      await tester.pumpAndSettle();
+
+      expect(repo.rsvpWrites.single.partyId, 'p1');
+      expect(repo.rsvpWrites.single.status, MpRsvp.going);
+      expect(find.byType(PartyDetailSheet), findsNothing);
+      expect(find.text('Going ✓'), findsOneWidget);
     });
   });
 }
