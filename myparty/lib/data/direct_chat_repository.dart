@@ -174,6 +174,13 @@ class DirectChatRepository {
   ChatChannel subscribe(String threadId) =>
       subscribeChatTopic(_client, 'dm:$threadId');
 
+  /// Joins the signed-in user's `inbox:{uuid}` — activity in any of their
+  /// threads, new ones included. Null when nobody is signed in.
+  InboxChannel? subscribeInbox() {
+    final id = _uid;
+    return id == null ? null : subscribeInboxTopic(_client, id);
+  }
+
   /// The peer's avatar for the Direct tab. Delegates to [ProfileRepository]
   /// so the `avatars` bucket stays the single authority on how its objects are
   /// reached.

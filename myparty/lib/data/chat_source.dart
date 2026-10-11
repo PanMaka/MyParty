@@ -143,6 +143,61 @@ class _SharedTopic {
   }
 }
 
+/// A live subscription to the viewer's `inbox:{uuid}` topic (20261011125542).
+///
+/// One event, `dm_activity`, meaning "something happened in one of your DM
+/// threads" — a line, or a line taken down — including a thread you have never
+/// seen. It carries the thread id and nothing else, by design: the Direct list
+/// refetches rather than render it, so the SELECT policy stays the only thing
+/// that decides what you read.
+class InboxChannel {
+  InboxChannel({required this.activity, required this.status, required this.dispose});
+
+  /// The thread id of each `dm_activity`.
+  final Stream<String> activity;
+
+  /// Subscribe/disconnect transitions; a re-subscribe means the socket was
+  /// down and anything said meanwhile was missed.
+  final Stream<RealtimeSubscribeStatus> status;
+
+  final Future<void> Function() dispose;
+}
+
+/// Joins `inbox:{userId}` as a private channel. The policy admits only the
+/// user it names, so joining anyone else's is simply unauthorized.
+InboxChannel subscribeInboxTopic(SupabaseClient client, String userId) {
+  final activity = StreamController<String>.broadcast();
+  final status = StreamController<RealtimeSubscribeStatus>.broadcast();
+
+  final channel = client.channel(
+    'inbox:$userId',
+    opts: const RealtimeChannelConfig(private: true),
+  );
+
+  channel
+      .onBroadcast(
+        event: 'dm_activity',
+        callback: (payload) {
+          if (activity.isClosed) return;
+          final threadId = payload['thread_id'] as String?;
+          if (threadId != null) activity.add(threadId);
+        },
+      )
+      .subscribe((state, error) {
+        if (!status.isClosed) status.add(state);
+      });
+
+  return InboxChannel(
+    activity: activity.stream,
+    status: status.stream,
+    dispose: () async {
+      await activity.close();
+      await status.close();
+      await client.removeChannel(channel);
+    },
+  );
+}
+
 /// Keeps a chat list's rows live: holds the broadcast topic of each listed
 /// conversation and reports any traffic on any of them through [onActivity].
 ///
