@@ -121,6 +121,13 @@ class _FakeDirectChats extends DirectChatRepository {
   }
 
   @override
+  InboxChannel? subscribeInbox() => InboxChannel(
+        activity: const Stream.empty(),
+        status: const Stream.empty(),
+        dispose: () async {},
+      );
+
+  @override
   String? avatarUrl(String? path) => null;
 }
 

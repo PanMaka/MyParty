@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' show RealtimeSubscribeStatus;
 
 import '../../data/chat_repository.dart';
 import '../../data/chat_source.dart';
@@ -29,8 +30,9 @@ import 'chat_screen.dart';
 /// **Both tabs stay live while on screen.** Your own reads, sends and hides
 /// arrive as [DataChange]s from the chat repositories, wherever the chat was
 /// opened from; other people's lines arrive over the conversations' own
-/// broadcast topics, which each tab holds for the rows it shows (see
-/// [ChatListWatcher]) and drops when the Messages tab is hidden. A topic only
+/// broadcast topics — the Parties tab holds the `party:{uuid}` of each row it
+/// shows (see [ChatListWatcher]), the Direct tab holds the viewer's one
+/// `inbox:{uuid}` — and drops them when the Messages tab is hidden. A topic only
 /// says "something happened": the tab refetches, debounced by [_settle], so a
 /// burst of lines is one round trip and the counts are always the server's.
 const Duration _settle = Duration(milliseconds: 750);
@@ -405,26 +407,52 @@ class _DirectChatsTabState extends State<_DirectChatsTab>
   @override
   bool get wantKeepAlive => true;
 
-  /// The `dm:{uuid}` topics of the threads on screen. A thread somebody
-  /// opens with you for the first time has no topic you could already be
-  /// holding; that arrives on the next tab focus or resume.
-  late final ChatListWatcher _watcher = ChatListWatcher(
-    subscribe: widget.repository.subscribe,
-    onActivity: _soon,
-  );
+  /// The viewer's `inbox:{uuid}`, held while the tab is on screen. One topic
+  /// for every thread — including one somebody opens with you after this list
+  /// loaded, which no per-thread `dm:{uuid}` subscription could cover.
+  InboxChannel? _inbox;
+  final List<StreamSubscription<Object?>> _inboxSubs = [];
   Timer? _debounce;
+
+  void _holdInbox() {
+    if (_inbox != null) return;
+    final inbox = widget.repository.subscribeInbox();
+    if (inbox == null) return;
+    _inbox = inbox;
+    // The first `subscribed` is the join; a later one is a reconnect, and
+    // broadcast has no replay.
+    var joined = false;
+    _inboxSubs
+      ..add(inbox.activity.listen((_) => _soon()))
+      ..add(inbox.status.listen((state) {
+        if (state != RealtimeSubscribeStatus.subscribed) return;
+        if (joined) _soon();
+        joined = true;
+      }));
+  }
+
+  void _dropInbox() {
+    for (final sub in _inboxSubs) {
+      sub.cancel();
+    }
+    _inboxSubs.clear();
+    final inbox = _inbox;
+    _inbox = null;
+    if (inbox != null) unawaited(inbox.dispose());
+  }
 
   @override
   void initState() {
     super.initState();
     _scroll.addListener(_onScroll);
+    if (isLiveVisible) _holdInbox();
     unawaited(_reload());
   }
 
   @override
   void dispose() {
     _debounce?.cancel();
-    _watcher.clear();
+    _dropInbox();
     _scroll.dispose();
     super.dispose();
   }
@@ -438,10 +466,10 @@ class _DirectChatsTabState extends State<_DirectChatsTab>
   @override
   void onLiveVisibilityChanged(bool visible) {
     if (visible) {
-      _watcher.watch(_threads.map((t) => t.threadId));
+      _holdInbox();
     } else {
       _debounce?.cancel();
-      _watcher.clear();
+      _dropInbox();
     }
   }
 
@@ -483,7 +511,6 @@ class _DirectChatsTabState extends State<_DirectChatsTab>
         _loading = false;
         _failed = false;
       });
-      if (isLiveVisible) _watcher.watch(_threads.map((t) => t.threadId));
     } catch (_) {
       if (!mounted) return;
       setState(() {

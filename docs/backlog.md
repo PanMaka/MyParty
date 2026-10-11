@@ -259,17 +259,6 @@ The Messages list does **not** widen this. Since Phase 34 it holds the same
 `party:{uuid}` topics, but it never renders a payload: any traffic triggers a
 refetch of `get_party_chats`, which goes through the SELECT policy.
 
-### 1.16 A DM thread somebody opens with you appears only on focus or resume
-
-Phase 34a keeps the Direct tab live over the `dm:{uuid}` topics of the threads
-it already lists. A thread that did not exist when the list loaded has no topic
-the client could be holding, so its first line shows up on the next tab focus
-(after 30s) or app resume.
-
-*Why it is still open:* closing it needs a per-user topic, which is a backend
-change, and 34a was kept client-only. Phase 34b (`inbox:{uuid}`) is the fix;
-delete this entry when it merges.
-
 ### 1.17 Other people's follows, RSVPs and invitations arrive on focus or resume
 
 A new follower moves your FOLLOWERS tile, an RSVP on your party moves its
@@ -281,23 +270,29 @@ of the three has a topic.
 fanning out to exactly one recipient (the followee, the host, the invitee), so
 it would be cheap. It was left out to keep Phase 34's backend change to the one
 case focus/resume handles badly: a conversation that goes on while you watch.
+The `inbox:{uuid}` topic from 34b (`20261011125542`) is where they would go,
+as new event names beside `dm_activity`, each carrying an id and nothing
+else.
 Nothing here polls, and nothing should start to.
 
-### 1.18 The Messages list watches 25 conversations per tab
+### 1.18 The Parties chat list watches 25 conversations
 
-`ChatListWatcher` holds the topics of the first 25 rows on each tab, newest
-first. A chat further down updates on focus or resume, not live.
+`ChatListWatcher` holds the `party:{uuid}` topics of the first 25 rows, newest
+first. A chat further down updates on focus or resume, not live. The Direct tab
+has no such cap: it holds the one `inbox:{uuid}` topic (34b).
 
 *Why it is still open:* the realtime server limits channels per connection, and
 an open `ChatScreen` and the map's future needs share that budget. 25 was a
 guess, not a measurement. Measure the actual limit on the hosted project before
 raising it.
 
-### 1.19 Two pieces of the live-data plumbing have no automated test
+### 1.19 Three pieces of the live-data plumbing have no automated test
 
 `subscribeChatTopic`'s channel sharing (one channel per topic, a holder count,
-the replayed status) and `MainScreen`'s wiring of `visibleTab`/`appResumes`
-are exercised by nothing in `flutter test`. Everything that consumes them is
+the replayed status), `subscribeInboxTopic`, and `MainScreen`'s wiring of
+`visibleTab`/`appResumes` are exercised by nothing in `flutter test`. The inbox
+policy and trigger are covered in pgTAP (`32_dm_inbox_topic`); the client's
+join of that topic over a real socket is not. Everything that consumes them is
 tested by setting `visibleTab`/`appResumes` directly or by faking `subscribe`.
 
 *Why it is still open:* the first needs a `SupabaseClient`, and constructing one
@@ -305,7 +300,8 @@ under `flutter test` starts a realtime socket and timers. The second builds its
 four screens with real repositories, since `MainScreen` takes no injection.
 Both are a refactor (a realtime seam, injectable tabs) larger than the code they
 would cover. Check them by hand on a device: open a party chat from the map,
-switch to Messages, and have a second account post in it.
+switch to Messages, and have a second account post in it; then have a third
+account send you a first DM while the Direct tab is open.
 
 ### 1.20 A profile edit does not reach lists that are already loaded
 

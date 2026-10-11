@@ -120,6 +120,21 @@ class _DirectChats extends DirectChatRepository {
   int fetches = 0;
   final topics = <String, _Topic>{};
 
+  /// The viewer's inbox:{uuid}, and how many holders it has right now.
+  final inboxActivity = StreamController<String>.broadcast();
+  final inboxStatus = StreamController<RealtimeSubscribeStatus>.broadcast();
+  int inboxHolders = 0;
+
+  @override
+  InboxChannel? subscribeInbox() {
+    inboxHolders += 1;
+    return InboxChannel(
+      activity: inboxActivity.stream,
+      status: inboxStatus.stream,
+      dispose: () async => inboxHolders -= 1,
+    );
+  }
+
   @override
   String? get currentUserId => 'me';
 
@@ -330,18 +345,64 @@ void main() {
       expect(find.text('3'), findsNothing);
     });
 
-    testWidgets("the peer's line on a listed thread's topic refetches the list", (tester) async {
+    testWidgets("the peer's line arrives over the inbox and refetches the list", (tester) async {
       final direct = _DirectChats([_thread(id: 't1', body: 'hey')]);
       await openDirect(tester, direct);
-      expect(direct.topics['t1']?.holders, 1);
+      expect(direct.inboxHolders, 1);
+      expect(direct.topics, isEmpty, reason: 'one inbox, not a topic per thread');
 
       direct.threads = [_thread(id: 't1', body: 'are you coming?', unread: 1)];
-      direct.topics['t1']!.messages.add(_line('t1', 'are you coming?'));
+      direct.inboxActivity.add('t1');
       await tester.pump(_settled);
       await tester.pumpAndSettle();
 
       expect(find.text('are you coming?'), findsOneWidget);
       expect(find.text('1'), findsOneWidget);
+    });
+
+    testWidgets('a thread somebody opens with you after the list loaded appears without a refresh', (tester) async {
+      // The case per-thread topics could never cover: there was no topic for
+      // this thread to hold when the list loaded.
+      final direct = _DirectChats(const []);
+      await openDirect(tester, direct);
+      expect(find.textContaining('No direct messages yet'), findsOneWidget);
+
+      direct.threads = [_thread(id: 'brand-new', body: 'hi, saw your party', unread: 1)];
+      direct.inboxActivity.add('brand-new');
+      await tester.pump(_settled);
+      await tester.pumpAndSettle();
+
+      expect(find.text('hi, saw your party'), findsOneWidget);
+    });
+
+    testWidgets('a reconnect of the inbox refetches, since broadcast has no replay', (tester) async {
+      final direct = _DirectChats([_thread(id: 't1')]);
+      await openDirect(tester, direct);
+      final before = direct.fetches;
+
+      direct.inboxStatus.add(RealtimeSubscribeStatus.subscribed);
+      await tester.pump(_settled);
+      expect(direct.fetches, before, reason: 'the first subscribe is the join');
+
+      direct.inboxStatus.add(RealtimeSubscribeStatus.subscribed);
+      await tester.pump(_settled);
+      await tester.pumpAndSettle();
+      expect(direct.fetches, before + 1);
+    });
+
+    testWidgets('the inbox is held only while the Messages tab is on screen', (tester) async {
+      visibleTab.value = MpTab.messages;
+      final direct = _DirectChats([_thread(id: 't1')]);
+      await openDirect(tester, direct);
+      expect(direct.inboxHolders, 1);
+
+      visibleTab.value = MpTab.profile;
+      await tester.pump();
+      expect(direct.inboxHolders, 0);
+
+      visibleTab.value = MpTab.messages;
+      await tester.pumpAndSettle();
+      expect(direct.inboxHolders, 1);
     });
   });
 }
