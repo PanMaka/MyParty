@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -109,10 +111,10 @@ class _FakeSocialRepository extends SocialRepository {
   }
 
   @override
-  Future<void> follow(String userId) async => calls.add('follow:$userId');
+  Future<void> insertFollow(String userId) async => calls.add('follow:$userId');
 
   @override
-  Future<void> unfollow(String userId) async => calls.add('unfollow:$userId');
+  Future<void> deleteFollow(String userId) async => calls.add('unfollow:$userId');
 }
 
 /// [PartyRepository] had to move to a lazily-resolved client before this was
@@ -210,6 +212,51 @@ PartySummary _party(
     area: area,
     coverPath: coverPath,
   );
+}
+
+/// The follow graph as the server holds it, shared by the two fakes below so
+/// that a write through one is what the other reads back — which is what makes
+/// "the refetch agrees with the optimistic number" an assertion at all.
+class _FollowServer {
+  int followers = 42;
+}
+
+class _LiveProfileRepository extends _FakeProfileRepository {
+  _LiveProfileRepository(this.server);
+
+  final _FollowServer server;
+  int fetches = 0;
+
+  @override
+  Future<Profile?> fetchProfile({String? userId}) async {
+    fetches += 1;
+    return Profile(id: userId ?? 'me', username: 'nikos', followerCount: server.followers, followingCount: 9);
+  }
+}
+
+class _LiveSocialRepository extends _FakeSocialRepository {
+  _LiveSocialRepository(this.server, {this.refuse = false});
+
+  final _FollowServer server;
+  final bool refuse;
+
+  /// Holds the write in flight, so a test can look at the screen between the
+  /// tap and the server's answer.
+  Completer<void>? inFlight;
+
+  @override
+  Future<void> insertFollow(String userId) async {
+    await inFlight?.future;
+    if (refuse) throw Exception('blocked');
+    server.followers += 1;
+  }
+
+  @override
+  Future<void> deleteFollow(String userId) async {
+    await inFlight?.future;
+    if (refuse) throw Exception('blocked');
+    server.followers -= 1;
+  }
 }
 
 Future<void> _pumpProfile(
@@ -760,6 +807,110 @@ void main() {
       // policy — is gone, so the row's shape no longer encodes who is looking.
       expect(find.text('FOLLOWERS'), findsOneWidget);
       expect(find.text('HOSTED'), findsOneWidget);
+    });
+  });
+
+  group('live follower count', () {
+    const them = OtherProfile('someone-else');
+
+    Future<_LiveSocialRepository> pumpLive(WidgetTester tester, _FollowServer server, {bool refuse = false}) async {
+      final social = _LiveSocialRepository(server, refuse: refuse);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ProfileScreen(
+            target: them,
+            repository: _LiveProfileRepository(server),
+            social: social,
+            parties: _FakePartyRepository(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      return social;
+    }
+
+    testWidgets('following moves their FOLLOWERS tile before the server answers', (tester) async {
+      final server = _FollowServer();
+      final social = await pumpLive(tester, server);
+      expect(find.text('42'), findsOneWidget);
+
+      social.inFlight = Completer<void>();
+      await tester.tap(find.text('Follow'));
+      await tester.pump();
+
+      // Optimistic: the write has not landed and the tile has already moved.
+      expect(server.followers, 42);
+      expect(find.text('43'), findsOneWidget);
+
+      social.inFlight!.complete();
+      await tester.pumpAndSettle();
+
+      // And the refetch the write announced agrees with it, rather than
+      // snapping the tile back to a number read before the write.
+      expect(server.followers, 43);
+      expect(find.text('43'), findsOneWidget);
+      expect(find.text('Following'), findsOneWidget);
+    });
+
+    testWidgets('unfollowing moves it back down', (tester) async {
+      final server = _FollowServer();
+      await pumpLive(tester, server);
+
+      await tester.tap(find.text('Follow'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Following'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('42'), findsOneWidget);
+      expect(find.text('Follow'), findsOneWidget);
+    });
+
+    testWidgets('a refused follow puts the count and the button back', (tester) async {
+      final server = _FollowServer();
+      await pumpLive(tester, server, refuse: true);
+
+      await tester.tap(find.text('Follow'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('42'), findsOneWidget);
+      expect(find.text('43'), findsNothing);
+      expect(find.text('Follow'), findsOneWidget);
+    });
+
+    testWidgets('a follow made somewhere else reaches this profile without a refresh', (tester) async {
+      final server = _FollowServer();
+      await pumpLive(tester, server);
+
+      // Another screen's button — a second copy of this profile, a feed card —
+      // goes through the same repository method, which announces the write.
+      await _LiveSocialRepository(server).follow('someone-else');
+      await tester.pumpAndSettle();
+
+      expect(find.text('43'), findsOneWidget);
+      expect(find.text('Following'), findsOneWidget);
+    });
+
+    testWidgets('a follow of somebody else leaves this profile alone', (tester) async {
+      final server = _FollowServer();
+      final profiles = _LiveProfileRepository(server);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ProfileScreen(
+            target: them,
+            repository: profiles,
+            social: _LiveSocialRepository(server),
+            parties: _FakePartyRepository(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final before = profiles.fetches;
+
+      await _LiveSocialRepository(_FollowServer()).follow('a-third-person');
+      await tester.pumpAndSettle();
+
+      expect(profiles.fetches, before);
+      expect(find.text('Follow'), findsOneWidget);
     });
   });
 }

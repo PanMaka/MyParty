@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/profile.dart';
+import '../state/data_changes.dart';
 
 /// Every widget-level Supabase call for the follow graph and blocks goes
 /// through here — screens never call `Supabase.instance.client` directly.
@@ -76,7 +78,26 @@ class SocialRepository {
   /// Throws if a block exists in either direction — the `follows` INSERT
   /// policy rejects it, which is what makes "cannot follow again until
   /// unblock" a server-side rule rather than a UI one.
+  ///
+  /// Announces [FollowChanged] once the write lands, so every other copy of
+  /// the target's profile moves its follower count too. The write itself is
+  /// [insertFollow]; a test double overrides that and keeps the announcement.
   Future<void> follow(String targetUserId) async {
+    await insertFollow(targetUserId);
+    dataChanges.publish(
+      FollowChanged(targetUserId: targetUserId, following: true),
+    );
+  }
+
+  Future<void> unfollow(String targetUserId) async {
+    await deleteFollow(targetUserId);
+    dataChanges.publish(
+      FollowChanged(targetUserId: targetUserId, following: false),
+    );
+  }
+
+  @protected
+  Future<void> insertFollow(String targetUserId) async {
     final id = _uid;
     if (id == null) throw StateError('Not signed in');
 
@@ -86,7 +107,8 @@ class SocialRepository {
     });
   }
 
-  Future<void> unfollow(String targetUserId) async {
+  @protected
+  Future<void> deleteFollow(String targetUserId) async {
     final id = _uid;
     if (id == null) throw StateError('Not signed in');
 

@@ -25,14 +25,14 @@ class _FakeSocialRepository extends SocialRepository {
   Future<bool> isFollowing(String targetUserId) async => following;
 
   @override
-  Future<void> follow(String targetUserId) async {
+  Future<void> insertFollow(String targetUserId) async {
     followCalls += 1;
     if (failWrites) throw Exception('blocked');
     following = true;
   }
 
   @override
-  Future<void> unfollow(String targetUserId) async {
+  Future<void> deleteFollow(String targetUserId) async {
     unfollowCalls += 1;
     if (failWrites) throw Exception('blocked');
     following = false;

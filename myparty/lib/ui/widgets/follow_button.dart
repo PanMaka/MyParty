@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../data/social_repository.dart';
+import '../../state/data_changes.dart';
 import '../theme/app_theme.dart';
 
 /// Follow/unfollow a real profile. Replaces `MpStore.toggleFollow`, which was
@@ -15,9 +18,16 @@ class FollowButton extends StatefulWidget {
     required this.targetUserId,
     this.compact = false,
     this.repository,
+    this.onChanged,
   });
 
   final String targetUserId;
+
+  /// Called with the new state the instant the button flips, and again with
+  /// the old one if the write is refused. This is how the follower count
+  /// beside the button moves optimistically with it and rolls back with it —
+  /// the counter belongs to the screen, the button only says what happened.
+  final ValueChanged<bool>? onChanged;
 
   /// Pill-shaped variant used inside feed cards; the default is the wide
   /// block button on the profile screen.
@@ -35,10 +45,25 @@ class _FollowButtonState extends State<FollowButton> {
   bool _following = false;
   bool _loading = true;
 
+  /// Another copy of this button (the same profile pushed twice, a feed card)
+  /// followed or unfollowed the same person, and the server said yes.
+  StreamSubscription<DataChange>? _changes;
+
   @override
   void initState() {
     super.initState();
+    _changes = dataChanges.stream.listen((change) {
+      if (change is FollowChanged && change.targetUserId == widget.targetUserId && mounted) {
+        setState(() => _following = change.following);
+      }
+    });
     _load();
+  }
+
+  @override
+  void dispose() {
+    _changes?.cancel();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -63,6 +88,7 @@ class _FollowButtonState extends State<FollowButton> {
     // fail server-side (the follows INSERT policy), so the flag has to be
     // rolled back rather than assumed.
     setState(() => _following = !wasFollowing);
+    widget.onChanged?.call(!wasFollowing);
 
     try {
       if (wasFollowing) {
@@ -73,6 +99,7 @@ class _FollowButtonState extends State<FollowButton> {
     } catch (_) {
       if (!mounted) return;
       setState(() => _following = wasFollowing);
+      widget.onChanged?.call(wasFollowing);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           // English because the button above it is. The same sentence is still

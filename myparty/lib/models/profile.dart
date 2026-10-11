@@ -62,6 +62,19 @@ class Profile {
     );
   }
 
+  /// This row with its follower count moved by [delta] — the profile screen's
+  /// optimistic follow, applied the instant the button flips and undone the
+  /// same way if the write is refused. Never below zero: a stale row and a
+  /// rollback arriving together must not print "-1 followers".
+  Profile withFollowerDelta(int delta) => Profile(
+    id: id,
+    username: username,
+    followerCount: (followerCount + delta).clamp(0, 1 << 31),
+    followingCount: followingCount,
+    bio: bio,
+    avatarPath: avatarPath,
+  );
+
   /// True only when there is a real key to load. Guards the image widget, the
   /// same way [PartySummary.hasCapacity] guards the progress bar — an
   /// `Image.network` on an empty string is a broken-image icon, which is a
