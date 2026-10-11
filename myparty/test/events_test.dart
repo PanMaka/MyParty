@@ -921,6 +921,24 @@ void main() {
       expect(find.text('Their party'), findsOneWidget);
     });
 
+    testWidgets("a block refetches both lists, since the blocked host's parties leave them", (tester) async {
+      final repo = _FakePartyRepository(const [], pages: {
+        PartySort.soonest: [_item(id: 'p1', title: 'Techno Monday')],
+      });
+      await tester.pumpWidget(_host(repo));
+      await tester.pumpAndSettle();
+      final before = repo.sortsRequested.length;
+      final mine = repo.rsvpFetches;
+
+      repo.pages[PartySort.soonest]!.clear();
+      dataChanges.publish(const BlockChanged(userId: '11111111-1111-1111-1111-111111111111', blocked: true));
+      await tester.pumpAndSettle();
+
+      expect(repo.sortsRequested.length, before + 1);
+      expect(repo.rsvpFetches, mine + 1);
+      expect(find.text('Techno Monday'), findsNothing);
+    });
+
     testWidgets('pulling ALL PARTIES down refetches it', (tester) async {
       final repo = _FakePartyRepository(const [], pages: {
         PartySort.soonest: [_item(id: 'p1', title: 'Techno Monday')],

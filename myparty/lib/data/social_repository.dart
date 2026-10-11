@@ -168,7 +168,23 @@ class SocialRepository {
   /// Blocking also deletes the follow edges in both directions, server-side
   /// (the `blocks_purge_follows` trigger). Callers should refresh any follow
   /// state they are holding rather than assuming it survived.
+  ///
+  /// Announces [BlockChanged] once the row exists. A block hides the pair from
+  /// each other in every policy, so this is the widest change in the app: the
+  /// profile, both chat lists, the map, both party lists and search all
+  /// refetch on it. The insert is [insertBlock].
   Future<void> block(String targetUserId) async {
+    await insertBlock(targetUserId);
+    dataChanges.publish(BlockChanged(userId: targetUserId, blocked: true));
+  }
+
+  Future<void> unblock(String targetUserId) async {
+    await deleteBlock(targetUserId);
+    dataChanges.publish(BlockChanged(userId: targetUserId, blocked: false));
+  }
+
+  @protected
+  Future<void> insertBlock(String targetUserId) async {
     final id = _uid;
     if (id == null) throw StateError('Not signed in');
 
@@ -178,7 +194,8 @@ class SocialRepository {
     });
   }
 
-  Future<void> unblock(String targetUserId) async {
+  @protected
+  Future<void> deleteBlock(String targetUserId) async {
     final id = _uid;
     if (id == null) throw StateError('Not signed in');
 

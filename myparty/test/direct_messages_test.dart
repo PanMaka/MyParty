@@ -150,13 +150,13 @@ class _FakeSocial extends SocialRepository {
   Future<bool> isFollowing(String targetUserId) async => false;
 
   @override
-  Future<void> block(String targetUserId) async {
+  Future<void> insertBlock(String targetUserId) async {
     calls.add('block:$targetUserId');
     blocked.add(Profile(id: targetUserId, username: 'zoi', followerCount: 0, followingCount: 0));
   }
 
   @override
-  Future<void> unblock(String targetUserId) async {
+  Future<void> deleteBlock(String targetUserId) async {
     calls.add('unblock:$targetUserId');
     blocked.removeWhere((p) => p.id == targetUserId);
   }
@@ -495,6 +495,19 @@ void main() {
 
       expect(social.calls, ['unblock:them']);
       expect(find.text('@zoi'), findsNothing);
+    });
+
+    testWidgets('a block made elsewhere appears in Blocked accounts without a refresh', (tester) async {
+      final social = _FakeSocial();
+      await tester.pumpWidget(MaterialApp(home: BlockedAccountsScreen(social: social)));
+      await tester.pumpAndSettle();
+      expect(find.text('You haven’t blocked anyone.'), findsOneWidget);
+
+      // The profile's Block, made through the same repository.
+      await social.block('them');
+      await tester.pumpAndSettle();
+
+      expect(find.text('@zoi'), findsOneWidget);
     });
   });
 }

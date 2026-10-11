@@ -245,6 +245,11 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
       // HOSTED and the HOSTING list.
       case PartyCreated() when own:
         refreshWhenVisible();
+      // The blocked account's profile turns into "you blocked this account"
+      // (or back), and a block purges the follow edges both ways — which is
+      // your own FOLLOWING rail and their FOLLOWERS tile.
+      case BlockChanged(:final userId) when own || userId == _target.userIdOrNull:
+        refreshWhenVisible();
       default:
         break;
     }
@@ -413,9 +418,10 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
     }
     if (!mounted) return;
     _snack('Blocked');
-    // The profiles policy hides the account from us now, so the reload lands
-    // on the "you blocked this account" state rather than the profile.
-    await _retryLoad();
+    // No reload here: block() announces itself, and [onDataChange] reloads
+    // this screen along with every other copy of it. The profiles policy hides
+    // the account from us now, so that reload lands on the "you blocked this
+    // account" state rather than the profile.
   }
 
   Future<void> _unblock(String userId) async {
@@ -427,7 +433,7 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
     }
     if (!mounted) return;
     _snack('Unblocked');
-    await _retryLoad();
+    // Reloaded by [onDataChange], as for a block.
   }
 
   @override

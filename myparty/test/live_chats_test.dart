@@ -8,6 +8,7 @@ import 'package:myparty/data/chat_repository.dart';
 import 'package:myparty/data/chat_source.dart';
 import 'package:myparty/data/direct_chat_repository.dart';
 import 'package:myparty/models/chat_message.dart';
+import 'package:myparty/state/data_changes.dart';
 import 'package:myparty/state/live_refresh.dart';
 import 'package:myparty/ui/screens/messages_screen.dart';
 import 'package:myparty/ui/widgets/mp_bottom_nav.dart';
@@ -285,6 +286,25 @@ void main() {
       expect(repo.fetches, before + 1);
       expect(find.text('4'), findsNothing);
     });
+  });
+
+  testWidgets("a block refetches both lists, so the blocked peer's thread leaves", (tester) async {
+    final parties = _PartyChats([_chat(id: 'p1')]);
+    final direct = _DirectChats([_thread(id: 't1', body: 'hey')]);
+    await _pump(tester, parties, direct: direct);
+    await tester.tap(find.text('Direct'));
+    await tester.pumpAndSettle();
+    expect(find.text('hey'), findsOneWidget);
+    final partyFetches = parties.fetches;
+
+    // get_direct_chats drops a thread with a blocked peer.
+    direct.threads = const [];
+    dataChanges.publish(const BlockChanged(userId: 'peer-t1', blocked: true));
+    await tester.pump(_settled);
+    await tester.pumpAndSettle();
+
+    expect(find.text('hey'), findsNothing);
+    expect(parties.fetches, partyFetches + 1);
   });
 
   group('the Direct list', () {

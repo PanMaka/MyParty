@@ -255,6 +255,10 @@ class _EventsScreenState extends State<EventsScreen> with LiveRefresh<EventsScre
       // server's order rather than be spliced in by a guess.
       case PartyCreated() || PartyCoverChanged():
         refreshWhenVisible();
+      // A block hides the pair's parties from each other: a party the blocked
+      // account hosts leaves both lists.
+      case BlockChanged():
+        refreshWhenVisible();
       default:
         break;
     }
