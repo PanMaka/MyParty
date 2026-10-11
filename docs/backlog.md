@@ -255,6 +255,68 @@ still sees that person's new lines while the chat is open. DMs do not have this
 gap: a block refuses the send itself, so no event is ever written
 (`31_direct_messages.test.sql`, section E).
 
+The Messages list does **not** widen this. Since Phase 34 it holds the same
+`party:{uuid}` topics, but it never renders a payload: any traffic triggers a
+refetch of `get_party_chats`, which goes through the SELECT policy.
+
+### 1.16 A DM thread somebody opens with you appears only on focus or resume
+
+Phase 34a keeps the Direct tab live over the `dm:{uuid}` topics of the threads
+it already lists. A thread that did not exist when the list loaded has no topic
+the client could be holding, so its first line shows up on the next tab focus
+(after 30s) or app resume.
+
+*Why it is still open:* closing it needs a per-user topic, which is a backend
+change, and 34a was kept client-only. Phase 34b (`inbox:{uuid}`) is the fix;
+delete this entry when it merges.
+
+### 1.17 Other people's follows, RSVPs and invitations arrive on focus or resume
+
+A new follower moves your FOLLOWERS tile, an RSVP on your party moves its
+counters, and an invitation adds a row to MY PARTIES, but only when the tab is
+next shown after 30s, or the app comes back after 30s away (`LiveRefresh`). None
+of the three has a topic.
+
+*Why it is still open:* each would be one more signal on a per-user topic,
+fanning out to exactly one recipient (the followee, the host, the invitee), so
+it would be cheap. It was left out to keep Phase 34's backend change to the one
+case focus/resume handles badly: a conversation that goes on while you watch.
+Nothing here polls, and nothing should start to.
+
+### 1.18 The Messages list watches 25 conversations per tab
+
+`ChatListWatcher` holds the topics of the first 25 rows on each tab, newest
+first. A chat further down updates on focus or resume, not live.
+
+*Why it is still open:* the realtime server limits channels per connection, and
+an open `ChatScreen` and the map's future needs share that budget. 25 was a
+guess, not a measurement. Measure the actual limit on the hosted project before
+raising it.
+
+### 1.19 Two pieces of the live-data plumbing have no automated test
+
+`subscribeChatTopic`'s channel sharing (one channel per topic, a holder count,
+the replayed status) and `MainScreen`'s wiring of `visibleTab`/`appResumes`
+are exercised by nothing in `flutter test`. Everything that consumes them is
+tested by setting `visibleTab`/`appResumes` directly or by faking `subscribe`.
+
+*Why it is still open:* the first needs a `SupabaseClient`, and constructing one
+under `flutter test` starts a realtime socket and timers. The second builds its
+four screens with real repositories, since `MainScreen` takes no injection.
+Both are a refactor (a realtime seam, injectable tabs) larger than the code they
+would cover. Check them by hand on a device: open a party chat from the map,
+switch to Messages, and have a second account post in it.
+
+### 1.20 A profile edit does not reach lists that are already loaded
+
+A new avatar or username shows on your own profile at once (`ProfileEditScreen`
+reloads it), but rows that already rendered it, such as the peer side of a DM
+list on someone else's phone, keep the old one until their next refetch.
+
+*Why it is still open:* there is no `ProfileChanged` event, because none of the
+viewer's own lists render the viewer's avatar. The people who would see it are
+other users, and they get it on their next focus or resume.
+
 ---
 
 ## 2. Costed: should the map adopt `party_is_past()`?
@@ -309,6 +371,25 @@ showing dead pins before the wizard changes. Do not take B or C as written.
 ## 3. NOT backlog — decisions that look like gaps
 
 Here so they are not "fixed" by somebody reading §1 and pattern-matching.
+
+- **Widgets never publish a `DataChange`; repositories do, after the server
+  answered.** The screen the tap happened on is optimistic and rolls back on
+  its own. Every other screen hears only confirmed writes, so a rollback is
+  never something two screens have to undo. A widget publishing is how the
+  party detail sheet ended up offering answers that went nowhere.
+- **A hidden tab does not refetch on an event, it marks itself stale.** Four
+  tabs refetching on every write is four round trips for one screen of pixels.
+  `LiveRefresh` refetches the moment the tab is shown.
+- **ALL PARTIES does not nudge its counters on your own RSVP.** On the
+  interested sort they are the sort key, and a locally nudged row would
+  disagree with the server's order and break the keyset cursor. The button is
+  instant; the number moves on the next load.
+- **The chat lists refetch on topic traffic instead of rendering the payload.**
+  Unread counts stay the server's, and a blocked author's line is filtered by
+  the SELECT policy rather than trusted from a broadcast (see §1.15).
+- **No polling, anywhere.** Topics where they already exist, then focus and
+  resume. If something needs to be more live than that, the answer is a signal
+  on a per-user topic (§1.17), not a timer.
 
 - **`credibility_score` ships no score.** Decided, not pending. The column and
   its trigger stay, written and read by nothing. Do not invent a formula.
