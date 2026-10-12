@@ -367,7 +367,7 @@ class _MapPinSheetState extends State<MapPinSheet> {
   /// the write fails. The sheet stays open so the viewer sees it take. On
   /// success [PartyRepository.setRsvp] announces the change, which is what
   /// makes the map refetch its pins and MY PARTIES reload — neither tab
-  /// rebuilds on its own, they live in an IndexedStack.
+  /// rebuilds on its own, they are kept-alive pages.
   Future<void> _answer(MpRsvp status) async {
     if (_saving) return;
     final before = _pin;

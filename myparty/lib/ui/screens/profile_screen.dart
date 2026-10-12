@@ -23,8 +23,7 @@ import 'host_wizard_screen.dart';
 import 'profile_edit_screen.dart';
 import 'settings_screen.dart';
 
-/// Whose profile the screen is showing, and — when it is the owner's — whether
-/// they are previewing how it looks to everybody else.
+/// Whose profile the screen is showing.
 ///
 /// This replaces a `String? userId` paired with a `bool _selfView`, which
 /// spelled four states when only three exist. The missing constraint was
@@ -37,7 +36,7 @@ import 'settings_screen.dart';
 /// is made unrepresentable instead.
 ///
 /// The two render questions are answered here, once, rather than at each of the
-/// six call sites that used to re-derive them from the bool.
+/// call sites that used to re-derive them from the bool.
 sealed class ProfileTarget {
   const ProfileTarget();
 
@@ -58,44 +57,25 @@ sealed class ProfileTarget {
   ///
   /// True only on another user's profile. You cannot follow or report yourself,
   /// and no value of this type makes both this and [showsOwnerSections] true.
-  ///
-  /// The owner's public preview draws a follow button and stays false here.
-  /// That is not a contradiction: the preview renders an inert lookalike, and
-  /// this flag guards the wiring — a repository call and a write against a real
-  /// relationship — not the pixels.
   bool get showsRelationshipActions;
 }
 
 /// The signed-in user's own profile. Carries no uuid on purpose — see
 /// [ProfileTarget.userIdOrNull].
 final class OwnProfile extends ProfileTarget {
-  const OwnProfile({this.previewingPublicView = false});
-
-  /// The ME / PUBLIC segment.
-  ///
-  /// Changes which sections render, and — since the preview is supposed to
-  /// answer "what does a visitor see" — what the action row draws: a visitor
-  /// gets a follow button, never "Host a party" and "Edit profile", so the
-  /// preview draws a follow button too.
-  ///
-  /// It is a drawing, not a relationship. [showsRelationshipActions] stays
-  /// false here, because you cannot follow, message or report yourself and
-  /// nothing in the preview may reach the database on your own row. See
-  /// [FollowButtonPreview].
-  final bool previewingPublicView;
+  const OwnProfile();
 
   @override
   String? get userIdOrNull => null;
 
   @override
-  bool get showsOwnerSections => !previewingPublicView;
+  bool get showsOwnerSections => true;
 
   @override
   bool get showsRelationshipActions => false;
 }
 
-/// Somebody else's profile. There is no public-view toggle because there is no
-/// other view to toggle to.
+/// Somebody else's profile.
 final class OtherProfile extends ProfileTarget {
   const OtherProfile(this.userId);
 
@@ -125,9 +105,8 @@ class ProfileScreen extends StatefulWidget {
   /// Supabase client ever existing, the same way [SettingsScreen] takes one.
   final ProfileRepository? repository;
 
-  /// Injectable for the same reason. Needed now that the FOLLOWING rail loads
-  /// on the owner's public preview too: it used to be unreachable without a
-  /// `userId`, so no test ever caused a [SocialRepository] method to run.
+  /// Injectable for the same reason: the follow button and the FOLLOWING rail
+  /// on another user's profile both reach it.
   final SocialRepository? social;
 
   /// Injectable for the same reason again. [PartyRepository] had to be moved
@@ -151,10 +130,10 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
   late final PartyRepository _parties = widget.parties ?? PartyRepository();
   late final DirectChatRepository _directChats = widget.directChats ?? DirectChatRepository();
 
-  /// Mutable only through the ME / PUBLIC segment, and only ever between the
-  /// two [OwnProfile] values — an [OtherProfile] never becomes an [OwnProfile].
-  late ProfileTarget _target = widget.target;
+  ProfileTarget get _target => widget.target;
 
+  /// Who they follow, and (below) the public parties they hosted. Rendered on
+  /// another user's profile only; `late` so the owner's tab never fetches them.
   late Future<List<Profile>> _theirFollowing = _fetchTheirFollowing();
 
   /// The owner's whole party list, plus the signed cover URLs it renders with.
@@ -215,18 +194,27 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
   /// until the new one lands (see [_settled]).
   @override
   Future<void> liveRefresh() async {
-    final following = _fetchTheirFollowing();
-    final hostedPublicPast = _fetchHostedPublicPast();
-    final myParties = widget.target is OwnProfile ? _loadMyParties() : _myParties;
-    setState(() {
-      _theirFollowing = following;
-      _hostedPublicPast = hostedPublicPast;
-      _myParties = myParties;
-    });
     // A failed half is rendered by its own FutureBuilder; the pull-to-refresh
     // spinner only needs to know that everything has answered.
     Future<void> settle(Future<Object?> f) => f.then((_) {}, onError: (_) {});
-    await Future.wait([_load(), settle(following), settle(hostedPublicPast), settle(myParties)]);
+
+    // Each target refetches only what it renders. Reading the other target's
+    // `late` futures here would start their fetch for nothing.
+    if (widget.target is OwnProfile) {
+      final myParties = _loadMyParties();
+      setState(() {
+        _myParties = myParties;
+      });
+      await Future.wait([_load(), settle(myParties)]);
+    } else {
+      final following = _fetchTheirFollowing();
+      final hostedPublicPast = _fetchHostedPublicPast();
+      setState(() {
+        _theirFollowing = following;
+        _hostedPublicPast = hostedPublicPast;
+      });
+      await Future.wait([_load(), settle(following), settle(hostedPublicPast)]);
+    }
   }
 
   @override
@@ -239,15 +227,12 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
       // optimistic one with anyone else who followed meanwhile.
       case FollowChanged(:final targetUserId) when !own && targetUserId == _target.userIdOrNull:
         refreshWhenVisible();
-      // Your own FOLLOWING rail (the public preview) gained or lost somebody.
-      case FollowChanged() when own:
-        refreshWhenVisible();
       // HOSTED and the HOSTING list.
       case PartyCreated() when own:
         refreshWhenVisible();
       // The blocked account's profile turns into "you blocked this account"
       // (or back), and a block purges the follow edges both ways — which is
-      // your own FOLLOWING rail and their FOLLOWERS tile.
+      // your own FOLLOWERS tile and theirs.
       case BlockChanged(:final userId) when own || userId == _target.userIdOrNull:
         refreshWhenVisible();
       default:
@@ -438,6 +423,7 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
 
   @override
   Widget build(BuildContext context) {
+    final canGoBack = ModalRoute.of(context)?.canPop ?? false;
     return Scaffold(
       backgroundColor: AppColors.bg,
       body: SafeArea(
@@ -449,51 +435,31 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
           padding: const EdgeInsets.only(bottom: 96),
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+              // The back arrow brings its own 48px touch target, so the row
+              // gives up most of its inset to it rather than pushing the title
+              // a whole target's width to the right.
+              padding: EdgeInsets.fromLTRB(canGoBack ? 4 : 16, 10, 16, 0),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
-                    'Profile',
-                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -0.5),
-                  ),
-                  // Only the owner gets the toggle: it previews YOUR public
-                  // profile, and there is no second view of somebody else's.
-                  // The gear beside it is owner chrome for the same reason —
-                  // and it stays put in the public preview, along with the
-                  // segment it sits next to, because previewing your profile
-                  // does not take your own settings away from you.
-                  if (_target case final OwnProfile own)
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(3),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.06),
-                            borderRadius: BorderRadius.circular(99),
-                          ),
-                          child: Row(
-                            children: [
-                              _segment(
-                                'ME',
-                                !own.previewingPublicView,
-                                () => setState(() => _target = const OwnProfile()),
-                              ),
-                              _segment(
-                                'PUBLIC',
-                                own.previewingPublicView,
-                                () => setState(
-                                  () => _target = const OwnProfile(previewingPublicView: true),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        _settingsButton(),
-                      ],
+                  // Somebody else's profile is always a pushed route; the
+                  // owner's is the Profile tab, which is the root route and has
+                  // nothing to go back to. Asked of the route rather than of the
+                  // target, so the arrow appears exactly when the system back
+                  // gesture would do something — and does the same thing.
+                  if (canGoBack)
+                    BackButton(
+                      color: AppColors.text,
+                      style: IconButton.styleFrom(iconSize: 20),
                     ),
+                  const Expanded(
+                    child: Text(
+                      'Profile',
+                      style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -0.5),
+                    ),
+                  ),
+                  // Owner chrome: it opens YOUR privacy tiers, consents and
+                  // account deletion.
+                  if (_target is OwnProfile) _settingsButton(),
                 ],
               ),
             ),
@@ -682,10 +648,10 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
   }
 
   List<Widget> _publicSections(BuildContext context) {
-    // The follow / message / report row used to open this list, gated on an
-    // OtherProfile. It has moved into _actionRow directly under the header,
-    // because the owner now has a pair of buttons in that same slot — and one
-    // widget switching on the target beats two sections each rendering half the
+    // Another user's profile only. The follow / message / report row used to
+    // open this list; it lives in _actionRow directly under the header, because
+    // the owner has a pair of buttons in that same slot — and one widget
+    // switching on the target beats two sections each rendering half the
     // answer to the same question.
     return [
       Padding(
@@ -741,8 +707,7 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
               const SizedBox(width: 9),
               // Was "τα ιδιωτικά πάρτι της Κατερίνας". Not merely a stale
               // literal now: under a real header it would name the wrong
-              // person, and on the owner's own public preview it would name
-              // somebody else entirely. Phrased without a possessive rather
+              // person. Phrased without a possessive rather
               // than interpolating the handle, because Greek would force a
               // gendered article (του/της) onto a schema that stores no gender
               // and has no business guessing one.
@@ -759,9 +724,6 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
       // Was "ΚΟΙΝΟΙ ΦΙΛΟΙ", rendered from the const mpFriends list. There is
       // no friendship in the schema — only the asymmetric follow graph — so
       // this is now who they follow, and it only renders for a real profile.
-      // Now loads on the owner's public preview too, not just on somebody
-      // else's profile: the rail is part of what other people see, so a preview
-      // that omitted it would be previewing the wrong page.
       Padding(
           padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
           child: FutureBuilder<List<Profile>>(
@@ -966,7 +928,7 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
     );
   }
 
-  /// The gear. Sized to the same 32px pill as the segment beside it, and given
+  /// The gear. A 32px circle, and given
   /// a [Semantics] label because an icon-only control that leads to consent and
   /// account deletion is the last place to leave a screen reader guessing.
   Widget _settingsButton() {
@@ -990,23 +952,6 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
     );
   }
 
-  Widget _segment(String label, bool active, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
-        decoration: BoxDecoration(
-          color: active ? Colors.white.withValues(alpha: 0.12) : null,
-          borderRadius: BorderRadius.circular(99),
-        ),
-        child: Text(
-          label,
-          style: AppTextStyles.mono(size: 10.5, color: active ? AppColors.text : AppColors.textAlpha(0.45)),
-        ),
-      ),
-    );
-  }
-
   /// The two header actions.
   ///
   /// Which pair renders is a question about the [ProfileTarget] and about
@@ -1015,40 +960,13 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
   /// wrong pair could appear, and no bool is reintroduced to carry a
   /// distinction the type already carries. `userId` comes out of the pattern,
   /// which is what keeps [FollowButton.targetUserId] and `reports.target_id`
-  /// non-null without a `!` — and it is unavailable in the two [OwnProfile]
-  /// arms, which is what makes it impossible for either to reach the follow
-  /// graph or the report table on your own row.
-  ///
-  /// Three arms rather than two because `previewingPublicView` is matched
-  /// inside the pattern. The preview draws the visitor's row; only
-  /// [OtherProfile] wires it.
+  /// non-null without a `!` — and it is unavailable in the [OwnProfile] arm,
+  /// which is what makes it impossible to reach the follow graph or the report
+  /// table on your own row.
   Widget _actionRow() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
       child: switch (_target) {
-        // The preview draws the visitor's row, not the owner's. "Host a party"
-        // and "Edit profile" are the two things a visitor provably cannot do,
-        // so leaving them here made the one screen whose entire job is showing
-        // what somebody else sees the one screen that got it wrong.
-        //
-        // Inert, and see [FollowButtonPreview] for why it has to be: the live
-        // button would ask the database whether you follow yourself and then
-        // offer you an insert it refuses. The message button is inert for the
-        // same reason rather than a technical one — a preview where one control
-        // acts and the other does not is a worse explanation of itself than one
-        // where nothing does.
-        //
-        // The report menu stays off. It is the one visitor action that is not
-        // about the profile but about escalating it, and an inert ⋯ that opens
-        // an empty menu explains nothing; the row's SHAPE — follow, message —
-        // is what the preview is answering.
-        OwnProfile(previewingPublicView: true) => Row(
-          children: [
-            const Expanded(child: FollowButtonPreview()),
-            const SizedBox(width: 8),
-            Expanded(child: _actionButton('Message')),
-          ],
-        ),
         OwnProfile() => Row(
           children: [
             Expanded(
@@ -1125,9 +1043,8 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
   /// same gradient — because on an [OtherProfile] the two sit side by side and
   /// any drift between them shows immediately.
   ///
-  /// [onTap] is nullable so the PUBLIC preview can draw the button without
-  /// wiring it. A null one is inert and looks identical — which is the point:
-  /// the preview must not invent a disabled style visitors never see.
+  /// A null [onTap] is inert and looks identical — the Message button spends
+  /// its in-flight request that way rather than inventing a disabled style.
   Widget _actionButton(String label, {VoidCallback? onTap, bool primary = false}) {
     return GestureDetector(
       onTap: onTap,

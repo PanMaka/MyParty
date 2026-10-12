@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 
 /// Declaration order IS the bar's left-to-right order and [MainScreen]'s
-/// IndexedStack order, which picks its child by [MpTab.index].
+/// page order, which picks its page by [MpTab.index].
 enum MpTab { map, events, messages, profile }
 
 /// The custom 4-tab bottom bar: the raised gradient map button leads on the
