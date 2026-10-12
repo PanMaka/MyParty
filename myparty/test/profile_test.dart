@@ -86,19 +86,16 @@ class _FakeProfileRepository extends ProfileRepository {
   }
 }
 
-/// The FOLLOWING rail now loads on the owner's public preview as well, so a
-/// [SocialRepository] method actually runs during these tests — it never did
-/// before, which is why only the profile repository used to be injected.
+/// The follow button and the FOLLOWING rail on another user's profile both
+/// reach a [SocialRepository], so one is injected.
 class _FakeSocialRepository extends SocialRepository {
   _FakeSocialRepository({this.following = const []});
 
   final List<Profile> following;
 
-  /// Every follow-graph method the screen reached for, in order. The public
-  /// preview's follow button must add nothing to it — see the PUBLIC preview
-  /// test. `fetchFollowing` is deliberately not recorded: it is the FOLLOWING
-  /// rail's own load, it runs on every profile, and counting it here would
-  /// drown the one signal this list exists for.
+  /// Every follow-graph method the screen reached for, in order.
+  /// `fetchFollowing` is deliberately not recorded: it is the FOLLOWING rail's
+  /// own load, and counting it here would drown the signal this list is for.
   final List<String> calls = [];
 
   @override
@@ -448,27 +445,11 @@ void main() {
       expect(find.text('Edit profile'), findsOneWidget);
 
       expect(find.byType(FollowButton), findsNothing);
-      expect(find.byType(FollowButtonPreview), findsNothing);
       expect(find.byType(PopupMenuButton<String>), findsNothing);
       expect(find.text('Message'), findsNothing);
     });
 
-    testWidgets('the public preview draws the visitor row instead', (tester) async {
-      await _pumpProfile(tester, _FakeProfileRepository());
-
-      await tester.tap(find.text('PUBLIC'));
-      await tester.pumpAndSettle();
-
-      // The two things a visitor provably cannot do are gone, which is the
-      // whole point of a preview: it has to be wrong about nothing.
-      expect(find.text('Host a party'), findsNothing);
-      expect(find.text('Edit profile'), findsNothing);
-
-      expect(find.byType(FollowButtonPreview), findsOneWidget);
-      expect(find.text('Message'), findsOneWidget);
-    });
-
-    testWidgets('the previewed follow button is a drawing, not a follow', (tester) async {
+    testWidgets('the owner has no ME / PUBLIC preview toggle', (tester) async {
       final social = _FakeSocialRepository();
       await tester.pumpWidget(
         MaterialApp(
@@ -481,23 +462,11 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('PUBLIC'));
-      await tester.pumpAndSettle();
-
-      // Never the live widget: it would ask isFollowing about the viewer
-      // themself on mount, and offer a self-follow the `follows` INSERT policy
-      // refuses — a failure snackbar for the database being right.
-      expect(find.byType(FollowButton), findsNothing);
-
-      await tester.tap(find.byType(FollowButtonPreview));
-      await tester.pumpAndSettle();
-
-      // Tapping it reaches nothing at all. Asserted against the repository
-      // rather than against the rendered label, because a button that flipped
-      // to "Following" locally and wrote nothing would look correct here and
-      // still be the bug.
+      expect(find.text('ME'), findsNothing);
+      expect(find.text('PUBLIC'), findsNothing);
+      // Nor the visitor-only sections the preview used to draw on your tab.
+      expect(find.text('PUBLIC PARTIES THEY HOSTED'), findsNothing);
       expect(social.calls, isEmpty);
-      expect(tester.takeException(), isNull);
     });
 
     testWidgets('another user gets the relationship actions', (tester) async {
@@ -537,6 +506,61 @@ void main() {
     });
   });
 
+  group('back button', () {
+    Future<void> pumpPushed(WidgetTester tester, ProfileTarget target) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                    builder: (_) => ProfileScreen(
+                      target: target,
+                      repository: _FakeProfileRepository(),
+                      social: _FakeSocialRepository(),
+                      parties: _FakePartyRepository(),
+                    ),
+                  )),
+                  child: const Text('open'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('another user\'s profile, pushed, has one and it goes back', (tester) async {
+      await pumpPushed(tester, const OtherProfile('someone-else'));
+
+      expect(find.byType(BackButton), findsOneWidget);
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ProfileScreen), findsNothing);
+      expect(find.text('open'), findsOneWidget);
+    });
+
+    testWidgets('the system back does the same thing', (tester) async {
+      await pumpPushed(tester, const OtherProfile('someone-else'));
+
+      // What Android's back button and back gesture dispatch.
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ProfileScreen), findsNothing);
+    });
+
+    testWidgets('the owner\'s profile as the tab root has none', (tester) async {
+      await _pumpProfile(tester, _FakeProfileRepository());
+
+      expect(find.byType(BackButton), findsNothing);
+    });
+  });
+
   group('the settings gear', () {
     testWidgets('opens the settings screen', (tester) async {
       await _pumpProfile(tester, _FakeProfileRepository());
@@ -548,18 +572,6 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Settings'), findsOneWidget);
-    });
-
-    testWidgets('survives the public preview', (tester) async {
-      await _pumpProfile(tester, _FakeProfileRepository());
-
-      await tester.tap(find.text('PUBLIC'));
-      await tester.pumpAndSettle();
-
-      // Previewing your public profile does not make you a stranger to
-      // yourself — the same reasoning that keeps the owner's action row on
-      // screen in this state.
-      expect(find.byIcon(Icons.settings_outlined), findsOneWidget);
     });
 
     testWidgets('the owner sections themselves are gone from the tab', (tester) async {
@@ -828,8 +840,11 @@ void main() {
       expect(find.text('FOLLOWERS'), findsOneWidget);
       expect(find.text('HOSTED'), findsOneWidget);
 
-      await tester.tap(find.text('PUBLIC'));
-      await tester.pumpAndSettle();
+      await _pumpProfile(
+        tester,
+        _FakeProfileRepository(),
+        target: const OtherProfile('someone-else'),
+      );
 
       // Nothing in this row is viewer-dependent any more. The tile that was —
       // "πάρτι φέτος", structurally zero for anyone but the owner because

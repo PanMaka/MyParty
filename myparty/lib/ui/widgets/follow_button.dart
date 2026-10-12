@@ -122,38 +122,8 @@ class _FollowButtonState extends State<FollowButton> {
   }
 }
 
-/// The follow button as a visitor sees it, wired to nothing.
-///
-/// Exists for the owner's PUBLIC preview, where the honest thing to draw in
-/// the action row is what a visitor actually gets — and the one thing it must
-/// not do is act. A real [FollowButton] there would query `isFollowing` about
-/// the viewer themself and, on a tap, attempt a self-follow the `follows`
-/// INSERT policy refuses; the preview would report a failure that is really the
-/// database being right.
-///
-/// It renders through the same [_FollowSkin] as the live button rather than
-/// copying its decoration, which is the whole reason it lives in this file: a
-/// preview that drifts from the thing it previews is worse than no preview.
-/// That includes the label: both read it off [_FollowSkin], so "what visitors
-/// see" cannot become a second copy of the string that someone edits one of.
-///
-/// Always the not-following state: a visitor who already follows you is one of
-/// several audiences, and the preview has to pick the one that is true of
-/// somebody arriving at your profile for the first time.
-class FollowButtonPreview extends StatelessWidget {
-  const FollowButtonPreview({super.key, this.compact = false});
-
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) => _FollowSkin(following: false, compact: compact);
-}
-
-/// Every pixel of both buttons, so neither can drift from the other.
-///
-/// A null [onTap] is how the live button already spends its first frames, while
-/// `isFollowing` is in flight — so the inert preview is not a new visual state,
-/// it is a state the button was always able to be in.
+/// Every pixel of the button. A null [onTap] is how it spends its first frames,
+/// while `isFollowing` is in flight.
 class _FollowSkin extends StatelessWidget {
   const _FollowSkin({required this.following, required this.compact, this.onTap});
 

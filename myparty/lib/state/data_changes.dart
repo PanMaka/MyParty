@@ -4,7 +4,7 @@ import 'mp_store.dart';
 
 /// Something the viewer just wrote, announced to every screen that shows it.
 ///
-/// The tabs live in an IndexedStack and pushed screens outlive the tab under
+/// The tabs are kept alive in a PageView and pushed screens outlive the tab under
 /// them, so a screen built once never rebuilds because another one wrote
 /// something: a follow on someone's profile would leave every other copy of
 /// that profile on its old count, and a party hosted from the wizard would
