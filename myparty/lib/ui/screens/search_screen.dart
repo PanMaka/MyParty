@@ -12,7 +12,7 @@ import '../widgets/mp_bottom_nav.dart' show MpTab;
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
 import '../widgets/map_pin_sheet.dart';
-import 'profile_screen.dart';
+import '../widgets/user_link.dart';
 
 /// Unified search over people and parties.
 ///
@@ -163,11 +163,10 @@ class _SearchScreenState extends State<SearchScreen> with LiveRefresh<SearchScre
     }
   }
 
-  void _openProfile(Profile profile) {
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => ProfileScreen(target: OtherProfile(profile.id)),
-    ));
-  }
+  /// The app-wide door to a profile — see [openUserProfile]. The whole tile is
+  /// already one large target, so it calls the helper rather than wrapping a
+  /// [UserLink] inside a second tap handler.
+  void _openProfile(Profile profile) => openUserProfile(context, profile.id);
 
   /// The same sheet the map opens, deliberately. `search_parties` returns
   /// `lat`/`lon` so a hit is a [MapPartyPin], which means the report action and

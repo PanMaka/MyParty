@@ -274,7 +274,10 @@ void main() {
 
       expect(find.byType(PartyCard), findsNWidgets(2));
       expect(find.text('Techno Monday'), findsOneWidget);
-      expect(find.text('@vinyl_room · Psyrri'), findsOneWidget);
+      // Two pieces since Phase 36: the handle is a link to the host's profile
+      // and the area is not.
+      expect(find.text('@vinyl_room'), findsOneWidget);
+      expect(find.text(' · Psyrri'), findsWidgets);
 
       // The hype bar went with mpParties -- a percentage with no column behind
       // it. What stands in its place is the real counter it was a picture of.

@@ -7,6 +7,7 @@ import '../theme/app_theme.dart';
 import 'dashed_border.dart';
 import 'diagonal_placeholder.dart';
 import 'party_detail_sheet.dart';
+import 'user_link.dart';
 
 /// Full party card for the "ALL PARTIES" list — cover, name/host, a
 /// public/private accent (solid purple = PUBLIC, dashed red = PRIVATE,
@@ -140,13 +141,35 @@ class PartyCard extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, letterSpacing: -0.3, height: 1.15)),
-                        Text(
-                          item.area == null
-                              ? '@${item.hostUsername}'
-                              : '@${item.hostUsername} · ${item.area}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 12, color: AppColors.textAlpha(0.65)),
+                        // The handle opens the host; the rest of the cover
+                        // still opens the party. The line sits at the bottom
+                        // of the cover, so its extra reach goes up, over the
+                        // title.
+                        Row(
+                          children: [
+                            Flexible(
+                              child: UserLink(
+                                userId: item.hostId,
+                                username: item.hostUsername,
+                                hitSlop: const EdgeInsets.only(top: 14),
+                                child: Text(
+                                  '@${item.hostUsername}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(fontSize: 12, color: AppColors.textAlpha(0.65)),
+                                ),
+                              ),
+                            ),
+                            if (item.area != null)
+                              Flexible(
+                                child: Text(
+                                  ' · ${item.area}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(fontSize: 12, color: AppColors.textAlpha(0.65)),
+                                ),
+                              ),
+                          ],
                         ),
                       ],
                     ),

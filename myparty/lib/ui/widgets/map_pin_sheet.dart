@@ -12,6 +12,7 @@ import '../theme/app_theme.dart';
 import 'diagonal_placeholder.dart';
 import 'privacy_badge.dart';
 import 'report_sheet.dart';
+import 'user_link.dart';
 
 /// The party sheet, opened by tapping a map pin OR a search hit.
 ///
@@ -291,10 +292,19 @@ class _MapPinSheetState extends State<MapPinSheet> {
           const SizedBox(height: 7),
           _factRow(Icons.place_outlined, pin.area!),
         ],
-        if (pin.hostUsername != null) ...[
-          const SizedBox(height: 7),
-          _factRow(Icons.person_outline, '@${pin.hostUsername}'),
-        ],
+        if (pin.hostUsername != null)
+          // The 7px gap moved inside the link so it counts toward the target.
+          // It is the last row of the column, so the rest of the reach goes
+          // up over the rows above, which take no taps of their own.
+          UserLink(
+            userId: pin.hostId,
+            username: pin.hostUsername,
+            hitSlop: const EdgeInsets.only(top: 10),
+            child: Padding(
+              padding: const EdgeInsets.only(top: 7),
+              child: _factRow(Icons.person_outline, '@${pin.hostUsername}'),
+            ),
+          ),
       ],
     );
   }

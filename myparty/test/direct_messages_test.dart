@@ -19,6 +19,7 @@ import 'package:myparty/ui/screens/chat_screen.dart';
 import 'package:myparty/ui/screens/messages_screen.dart';
 import 'package:myparty/ui/screens/profile_screen.dart';
 import 'package:myparty/ui/widgets/privacy_badge.dart';
+import 'package:myparty/ui/widgets/user_link.dart';
 
 // Phase 33: direct messages, the Direct tab, and Block / Unblock.
 //
@@ -364,11 +365,38 @@ void main() {
       final chats = _FakeDirectChats(threads: [_thread('t1')]);
       await pumpMessages(tester, chats);
 
-      await tester.tap(find.text('@zoi'));
+      // The preview, not the handle: the handle opens the peer's profile.
+      await tester.tap(find.text('see you there'));
       await tester.pumpAndSettle();
 
       expect(find.byType(ChatScreen), findsOneWidget);
       expect(chats.historyFor, ['t1']);
+    });
+
+    testWidgets("a row's handle opens the peer's profile, not the thread", (tester) async {
+      final opened = <String?>[];
+      final previous = userProfileScreenBuilder;
+      addTearDown(() => userProfileScreenBuilder = previous);
+      userProfileScreenBuilder = (target) {
+        opened.add(target.userIdOrNull);
+        return Scaffold(appBar: AppBar(), body: const Text('PROFILE'));
+      };
+
+      final chats = _FakeDirectChats(threads: [_thread('t1')]);
+      await pumpMessages(tester, chats);
+
+      await tester.tap(find.text('@zoi'));
+      await tester.pumpAndSettle();
+      expect(find.text('PROFILE'), findsOneWidget);
+      expect(find.byType(ChatScreen), findsNothing);
+      expect(chats.historyFor, isEmpty);
+
+      // Back lands on the Direct list, unchanged.
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.text('@zoi'), findsOneWidget);
+
+      expect(opened, ['peer-t1']);
     });
 
     testWidgets('pages by keyset cursor, never by offset', (tester) async {

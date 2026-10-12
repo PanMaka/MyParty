@@ -5,6 +5,7 @@ import '../../models/feed_post.dart';
 import '../../utils/english_date.dart';
 import '../theme/app_theme.dart';
 import 'report_sheet.dart';
+import 'user_link.dart';
 
 /// Comments on a post.
 ///
@@ -277,8 +278,11 @@ class _CommentsSheetState extends State<_CommentsSheet> {
   Widget _tile(PostComment comment) {
     final mine = comment.authorId == _uid;
 
+    // The tile's top inset lives inside the author line, so the link to the
+    // author's profile can use it. Same pixels on screen. Its downward reach
+    // stops at the comment body, which is hit-tested first.
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 9),
+      padding: const EdgeInsets.only(bottom: 9),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -286,14 +290,21 @@ class _CommentsSheetState extends State<_CommentsSheet> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Text(comment.authorUsername,
-                        style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
-                    const SizedBox(width: 7),
-                    Text(formatPostAgeEn(comment.createdAt),
-                        style: TextStyle(fontSize: 11, color: AppColors.textAlpha(0.45))),
-                  ],
+                UserLink(
+                  userId: comment.authorId,
+                  username: comment.authorUsername,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 9),
+                    child: Row(
+                      children: [
+                        Text(comment.authorUsername,
+                            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                        const SizedBox(width: 7),
+                        Text(formatPostAgeEn(comment.createdAt),
+                            style: TextStyle(fontSize: 11, color: AppColors.textAlpha(0.45))),
+                      ],
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 3),
                 Text(comment.body,
@@ -301,7 +312,11 @@ class _CommentsSheetState extends State<_CommentsSheet> {
               ],
             ),
           ),
-          _overflow(comment, mine),
+          // The 9px the tile no longer insets at the top.
+          Padding(
+            padding: const EdgeInsets.only(top: 9),
+            child: _overflow(comment, mine),
+          ),
         ],
       ),
     );
