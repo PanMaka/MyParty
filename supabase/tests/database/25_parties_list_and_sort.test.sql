@@ -16,7 +16,7 @@
 --   PUBLIC        'aaaaaaaa-...0002' Syntagma Afterparty, now + 2 days
 begin;
 set search_path to public, extensions;
-select plan(21);
+select plan(23);
 
 -- ===========================================================================
 -- 0. Fixtures
@@ -88,6 +88,21 @@ select throws_ok(
   '22P02',
   null,
   'an unknown sort value is refused by the enum, not silently defaulted'
+);
+
+-- 20261013153808: the row carries the party's position, for Directions. The
+-- fixture's point is known exactly, so this checks lat and lon are not
+-- swapped -- st_point takes (lon, lat), the classic place to cross them.
+select is(
+  (select lat from public.get_parties_list('soonest') where party_id = 'eeeeeeee-0000-0000-0000-000000000001'),
+  37.9755::double precision,
+  'get_parties_list returns the party''s latitude as lat'
+);
+
+select is(
+  (select lon from public.get_parties_list('soonest') where party_id = 'eeeeeeee-0000-0000-0000-000000000001'),
+  23.7348::double precision,
+  'and its longitude as lon'
 );
 
 -- ===========================================================================

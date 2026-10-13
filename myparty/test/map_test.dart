@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:url_launcher_platform_interface/url_launcher_platform_interface.dart';
 
 import 'package:myparty/data/party_repository.dart';
 import 'package:myparty/models/map_party_pin.dart';
@@ -16,6 +17,9 @@ import 'package:myparty/ui/widgets/map_base.dart';
 import 'package:myparty/ui/widgets/map_pin_sheet.dart';
 import 'package:myparty/ui/widgets/mp_drop_shape.dart';
 import 'package:myparty/ui/widgets/mp_map_pin.dart';
+import 'package:myparty/utils/directions.dart';
+
+import 'support/fake_url_launcher.dart';
 
 /// Stands in for the real repository. Subclasses rather than implements so it
 /// stays in sync with the real constructor, and overrides the one method that
@@ -1319,16 +1323,43 @@ void main() {
       expect(find.byTooltip('Group chat'), findsNothing);
     });
 
-    testWidgets('both public and private sheets carry a Directions button', (tester) async {
-      // A placeholder for now -- present and tappable, wired to nothing.
+    testWidgets('both public and private sheets open Google Maps directions to the pin', (tester) async {
+      // A private pin reaches only its host and invitees (the map and search
+      // RPCs are invoker-rights), so handing its coordinates on exposes
+      // nothing the viewer was not already shown. The URL shape itself is
+      // covered by directions_test.dart.
+      final launcher = FakeUrlLauncher();
+      final previous = UrlLauncherPlatform.instance;
+      UrlLauncherPlatform.instance = launcher;
+      addTearDown(() => UrlLauncherPlatform.instance = previous);
+
       final repository = _FakePartyRepository(const []);
       for (final isPrivate in [false, true]) {
+        launcher.launched.clear();
         await pumpSheet(tester, full(isPrivate: isPrivate), repository);
         expect(find.text('Directions'), findsOneWidget, reason: 'isPrivate: $isPrivate');
         await tapAnswer(tester, 'Directions');
         expect(tester.takeException(), isNull);
+        expect(launcher.launched, [
+          (
+            directionsUri(lat: _athens.lat, lng: _athens.lon).toString(),
+            PreferredLaunchMode.externalApplication,
+          ),
+        ], reason: 'isPrivate: $isPrivate');
         expect(repository.rsvpWrites, isEmpty);
       }
+    });
+
+    testWidgets('a Directions link that cannot be opened says so', (tester) async {
+      final launcher = FakeUrlLauncher()..result = false;
+      final previous = UrlLauncherPlatform.instance;
+      UrlLauncherPlatform.instance = launcher;
+      addTearDown(() => UrlLauncherPlatform.instance = previous);
+
+      await pumpSheet(tester, full(), _FakePartyRepository(const []));
+      await tapAnswer(tester, 'Directions');
+      await tester.pump();
+      expect(find.text("Couldn't open Google Maps"), findsOneWidget);
     });
 
     testWidgets('a private party shows no counts in the sheet at all', (tester) async {

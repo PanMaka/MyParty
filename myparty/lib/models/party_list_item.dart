@@ -61,6 +61,16 @@ class PartyListItem {
   final int sortGroup;
   final int sortRank;
 
+  /// The party's position, for Directions. Nullable for decoding safety only:
+  /// `parties.location` is NOT NULL, so a real row always carries both.
+  ///
+  /// Present on private rows too, which exposes nothing: `get_parties_list` is
+  /// invoker-rights, so a private row reaches only its host and invitees —
+  /// the same people `search_parties` and the map already give it to
+  /// (20261013153808).
+  final double? lat;
+  final double? lng;
+
   const PartyListItem({
     required this.partyId,
     required this.title,
@@ -80,6 +90,8 @@ class PartyListItem {
     required this.isInvited,
     required this.sortGroup,
     required this.sortRank,
+    this.lat,
+    this.lng,
   });
 
   factory PartyListItem.fromRow(Map<String, dynamic> row) {
@@ -106,6 +118,8 @@ class PartyListItem {
       isInvited: (row['is_invited'] as bool?) ?? false,
       sortGroup: row['sort_group'] as int,
       sortRank: row['sort_rank'] as int,
+      lat: (row['lat'] as num?)?.toDouble(),
+      lng: (row['lon'] as num?)?.toDouble(),
     );
   }
 
@@ -158,6 +172,8 @@ class PartyListItem {
       isInvited: isInvited,
       sortGroup: sortGroup,
       sortRank: sortRank,
+      lat: lat,
+      lng: lng,
     );
   }
 }

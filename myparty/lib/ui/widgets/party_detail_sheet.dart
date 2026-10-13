@@ -7,6 +7,7 @@ import '../screens/chat_screen.dart';
 import '../screens/story_viewer_screen.dart';
 import '../theme/app_theme.dart';
 import 'diagonal_placeholder.dart';
+import '../../utils/directions.dart';
 import '../../utils/share_party.dart';
 import 'privacy_badge.dart';
 import 'user_link.dart';
@@ -229,12 +230,16 @@ class PartyDetailSheet extends StatelessWidget {
                         ],
                         Expanded(
                           child: OutlinedButton(
-                            // Still a placeholder, and for a reason that did
-                            // NOT go away with mpParties: this list is not a
-                            // spatial query, so the row carries no coordinates
-                            // to hand a maps intent. Directions work from the
-                            // map, which has them.
-                            onPressed: () => comingSoon(context),
+                            // Google Maps from the viewer's own position.
+                            // The row has carried the party's coordinates
+                            // since 20261013153808, under the same policy
+                            // that let the viewer open this sheet at all.
+                            onPressed: () => openDirections(
+                              context,
+                              lat: item.lat,
+                              lng: item.lng,
+                              address: item.area,
+                            ),
                             style: _secondaryStyle,
                             child: const Text('Directions', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
                           ),
@@ -460,17 +465,5 @@ Widget _cta({
         ),
       ),
     ),
-  );
-}
-
-/// For the affordances that are STILL placeholders after Phase 18.
-///
-/// That is now only "Directions", and for a reason mpParties was never
-/// responsible for: this list is not a spatial query, so the row carries no
-/// coordinates. Chat and stories stopped needing this the moment the sheet had
-/// a uuid.
-void comingSoon(BuildContext context) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(content: Text('Coming soon'), behavior: SnackBarBehavior.floating),
   );
 }

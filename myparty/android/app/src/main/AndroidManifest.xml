@@ -94,6 +94,14 @@
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
+        <!-- Directions (lib/utils/directions.dart): url_launcher hands an
+             https://www.google.com/maps/dir/ link to whatever handles it, the
+             Maps app or a browser. Android 11+ hides other apps' intent
+             filters unless declared here, and the launch then fails. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>

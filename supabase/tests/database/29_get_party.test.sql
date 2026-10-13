@@ -9,7 +9,7 @@
 -- blocked_user).
 begin;
 set search_path to public, extensions;
-select plan(16);
+select plan(18);
 
 select is(
   (select prosecdef from pg_proc where oid = 'public.get_party(uuid)'::regprocedure),
@@ -45,6 +45,23 @@ select is(
    from public.get_party('aaaaaaaa-0000-0000-0000-000000000001')),
   '(,)',
   'and the private party''s counters are NULL, as on every other surface'
+);
+
+-- 20261013153808: an invitee gets the private party's position, for
+-- Directions -- the same position search_parties and the map already give
+-- them. The stranger's empty results below are the negative half: no row,
+-- so no coordinates either.
+select isnt(
+  (select lat from public.get_party('aaaaaaaa-0000-0000-0000-000000000001')),
+  null,
+  'and its coordinates'
+);
+
+select is(
+  (select row(lat, lon)::text from public.get_party('aaaaaaaa-0000-0000-0000-000000000001')),
+  (select row(st_y(location::geometry), st_x(location::geometry))::text
+   from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000001'),
+  'which are parties.location, lat and lon the right way round'
 );
 
 -- THE headline negative: a stranger holding the private party's link.

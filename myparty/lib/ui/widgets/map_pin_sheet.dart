@@ -6,6 +6,7 @@ import '../../models/map_party_pin.dart';
 import '../../state/mp_store.dart';
 import '../screens/chat_screen.dart';
 import '../../state/data_changes.dart';
+import '../../utils/directions.dart';
 import '../../utils/english_date.dart';
 import '../../utils/share_party.dart';
 import '../theme/app_theme.dart';
@@ -455,11 +456,9 @@ class _MapPinSheetState extends State<MapPinSheet> {
     );
   }
 
-  /// Directions to the party. A PLACEHOLDER: deliberately inert for now —
-  /// no snackbar, no navigation — until the maps hand-off is built. This
-  /// sheet is the right home for it because it is fed by a spatial query, so
-  /// [MapPartyPin.lat]/[MapPartyPin.lng] are already here to hand over (the
-  /// Parties-tab sheet's own Directions button has no coordinates to give).
+  /// Directions to the party, in Google Maps from the viewer's own position.
+  /// [MapPartyPin.lat]/[MapPartyPin.lng] came from the map or search RPC,
+  /// which only hand a private party to its host and invitees.
   ///
   /// Secondary styling, under the RSVP answers: it is a utility, not the
   /// sheet's call to action.
@@ -467,7 +466,7 @@ class _MapPinSheetState extends State<MapPinSheet> {
     return SizedBox(
       width: double.infinity,
       child: OutlinedButton.icon(
-        onPressed: () {},
+        onPressed: () => openDirections(context, lat: _pin.lat, lng: _pin.lng, address: _pin.area),
         icon: const Icon(Icons.directions_outlined, size: 18),
         label: const Text('Directions', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
         style: OutlinedButton.styleFrom(
