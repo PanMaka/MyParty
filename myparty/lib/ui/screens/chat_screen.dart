@@ -10,6 +10,7 @@ import '../../models/chat_message.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
 import '../widgets/privacy_badge.dart';
+import '../widgets/user_link.dart';
 
 /// One conversation: a party's group chat, or a 1-on-1 direct thread.
 ///
@@ -36,6 +37,8 @@ class ChatScreen extends StatefulWidget {
         partyRepository = repository,
         directRepository = null,
         peerAvatarUrl = null,
+        peerId = null,
+        peerUsername = null,
         isDirect = false;
 
   /// A 1-on-1 thread. [threadId] comes from
@@ -43,7 +46,8 @@ class ChatScreen extends StatefulWidget {
   const ChatScreen.direct({
     super.key,
     required String threadId,
-    required String peerUsername,
+    required String this.peerUsername,
+    this.peerId,
     this.peerAvatarUrl,
     DirectChatRepository? repository,
   })  : conversationId = threadId,
@@ -60,6 +64,11 @@ class ChatScreen extends StatefulWidget {
   final bool isPrivate;
   final int? memberCount;
   final String? peerAvatarUrl;
+
+  /// The other person in a direct thread, for the header's link to their
+  /// profile. Null on a party chat, and the header is then not a link.
+  final String? peerId;
+  final String? peerUsername;
   final bool isDirect;
 
   /// Injectable for tests; production callers let them default.
@@ -410,8 +419,13 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget _header(BuildContext context) {
     final tint = widget.isPrivate ? AppColors.private : AppColors.purple;
 
+    // The vertical padding sits on the row's children rather than on the
+    // container, so the peer's avatar and name — a link to their profile in a
+    // direct thread — reach the header's full height. Same pixels on screen.
+    const rowInset = EdgeInsets.only(top: 8, bottom: 12);
+
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
+      padding: const EdgeInsets.symmetric(horizontal: 14),
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.08))),
         gradient: LinearGradient(
@@ -422,46 +436,64 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       child: Row(
         children: [
-          IconButton(
-            onPressed: () => Navigator.of(context).pop(),
-            icon: const Icon(Icons.chevron_left, size: 26),
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
+          Padding(
+            padding: rowInset,
+            child: IconButton(
+              onPressed: () => Navigator.of(context).pop(),
+              icon: const Icon(Icons.chevron_left, size: 26),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+            ),
           ),
           const SizedBox(width: 8),
-          _headerAvatar(tint),
-          const SizedBox(width: 11),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+            child: UserLink(
+              userId: widget.peerId,
+              username: widget.peerUsername,
+              child: Padding(
+                padding: rowInset,
+                child: Row(
                   children: [
-                    Flexible(
-                      child: Text(widget.title,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700)),
-                    ),
-                    // A DM has no privacy tier to badge: it is always exactly
-                    // two people.
-                    if (!widget.isDirect) ...[
-                      const SizedBox(width: 6),
-                      PrivacyBadge(isPrivate: widget.isPrivate),
-                    ],
+                    _headerAvatar(tint),
+                    const SizedBox(width: 11),
+                    Expanded(child: _headerTitle()),
                   ],
                 ),
-                if (widget.memberCount case final count?)
-                  Text(
-                    widget.isPrivate
-                        ? '$count ${count == 1 ? 'member' : 'members'} · invited only'
-                        : '$count ${count == 1 ? 'member' : 'members'}',
-                    style: TextStyle(fontSize: 11, color: AppColors.textAlpha(0.5)),
-                  ),
-              ],
+              ),
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _headerTitle() {
+    return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+      Row(
+        children: [
+          Flexible(
+            child: Text(widget.title,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700)),
+          ),
+          // A DM has no privacy tier to badge: it is always exactly
+          // two people.
+          if (!widget.isDirect) ...[
+            const SizedBox(width: 6),
+            PrivacyBadge(isPrivate: widget.isPrivate),
+          ],
+        ],
+      ),
+      if (widget.memberCount case final count?)
+        Text(
+          widget.isPrivate
+              ? '$count ${count == 1 ? 'member' : 'members'} · invited only'
+              : '$count ${count == 1 ? 'member' : 'members'}',
+          style: TextStyle(fontSize: 11, color: AppColors.textAlpha(0.5)),
+        ),
+              ],
     );
   }
 
@@ -531,24 +563,39 @@ class _ChatScreenState extends State<ChatScreen> {
       );
     }
 
+    // The avatar and the name open the author's profile; the bubble keeps its
+    // long press. The avatar's link owns the 9px gap beside it and reaches down
+    // the row to a 44px height. The name's reach stops where the bubble starts:
+    // the bubble is hit-tested first, so a press on it is never the name's.
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
-          width: 28,
-          height: 28,
-          decoration: const BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: LinearGradient(colors: [Color(0xFF232C40), Color(0xFF1A2030)]),
+        UserLink(
+          userId: msg.authorId,
+          username: msg.authorUsername,
+          hitSlop: const EdgeInsets.only(bottom: 8),
+          child: Padding(
+            padding: const EdgeInsets.only(right: 9),
+            child: Container(
+              width: 28,
+              height: 28,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(colors: [Color(0xFF232C40), Color(0xFF1A2030)]),
+              ),
+            ),
           ),
         ),
-        const SizedBox(width: 9),
         Flexible(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(msg.authorUsername,
-                  style: TextStyle(fontSize: 10.5, color: AppColors.textAlpha(0.45))),
+              UserLink(
+                userId: msg.authorId,
+                username: msg.authorUsername,
+                child: Text(msg.authorUsername,
+                    style: TextStyle(fontSize: 10.5, color: AppColors.textAlpha(0.45))),
+              ),
               const SizedBox(height: 3),
               GestureDetector(
                 onLongPress: _source.canHideOthersMessages ? () => _showMessageActions(msg) : null,

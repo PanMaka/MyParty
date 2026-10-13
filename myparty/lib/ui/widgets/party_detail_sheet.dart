@@ -9,6 +9,7 @@ import '../theme/app_theme.dart';
 import 'diagonal_placeholder.dart';
 import '../../utils/share_party.dart';
 import 'privacy_badge.dart';
+import 'user_link.dart';
 
 Future<void> showPartyDetailSheet(
   BuildContext context,
@@ -347,7 +348,9 @@ class PartyDetailSheet extends StatelessWidget {
           Positioned(
             left: 16,
             right: 16,
-            bottom: 12,
+            // The 12px inset lives inside the host line now (below), so the
+            // line's tap target can use it. Same pixels on screen.
+            bottom: 0,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -355,20 +358,31 @@ class PartyDetailSheet extends StatelessWidget {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontSize: 23, fontWeight: FontWeight.w800, letterSpacing: -0.5, height: 1.1)),
-                const SizedBox(height: 4),
-                Text(
-                  // Replaces `sub` ("Private · Dimitris invited you"), built
-                  // from columns instead of from a hand-written string. The
-                  // invited clause is only true when it is true: is_invited is
-                  // a property of the CALLER, like my_rsvp_status.
-                  [
-                    item.isPrivate ? 'Private' : 'Public',
-                    '@${item.hostUsername}',
-                    if (item.isPrivate && item.isInvited) 'you are invited',
-                  ].join(' · '),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 12.5, color: AppColors.textAlpha(0.68)),
+                // The whole byline opens the host, as a byline does. Its
+                // padding is the 4px gap and the 12px inset it replaced, and
+                // the remaining reach goes up over the title — the only side
+                // still inside the cover.
+                UserLink(
+                  userId: item.hostId,
+                  username: item.hostUsername,
+                  hitSlop: const EdgeInsets.only(top: 12),
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 4, bottom: 12),
+                    child: Text(
+                      // Replaces `sub` ("Private · Dimitris invited you"), built
+                      // from columns instead of from a hand-written string. The
+                      // invited clause is only true when it is true: is_invited is
+                      // a property of the CALLER, like my_rsvp_status.
+                      [
+                        item.isPrivate ? 'Private' : 'Public',
+                        '@${item.hostUsername}',
+                        if (item.isPrivate && item.isInvited) 'you are invited',
+                      ].join(' · '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12.5, color: AppColors.textAlpha(0.68)),
+                    ),
+                  ),
                 ),
               ],
             ),

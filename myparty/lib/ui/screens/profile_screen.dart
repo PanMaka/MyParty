@@ -18,6 +18,7 @@ import '../widgets/follow_button.dart';
 import '../widgets/mp_bottom_nav.dart' show MpTab;
 import '../widgets/profile_party_card.dart';
 import '../widgets/report_sheet.dart';
+import '../widgets/user_link.dart';
 import 'chat_screen.dart';
 import 'host_wizard_screen.dart';
 import 'profile_edit_screen.dart';
@@ -75,7 +76,8 @@ final class OwnProfile extends ProfileTarget {
   bool get showsRelationshipActions => false;
 }
 
-/// Somebody else's profile.
+/// Somebody else's profile — or, when [userId] turns out to be the viewer's,
+/// their own: [ProfileScreen] reads it as [OwnProfile] then.
 final class OtherProfile extends ProfileTarget {
   const OtherProfile(this.userId);
 
@@ -130,7 +132,17 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
   late final PartyRepository _parties = widget.parties ?? PartyRepository();
   late final DirectChatRepository _directChats = widget.directChats ?? DirectChatRepository();
 
-  ProfileTarget get _target => widget.target;
+  /// [ProfileScreen.target], with the viewer's own id read as [OwnProfile].
+  ///
+  /// A name or avatar anywhere in the app opens `OtherProfile(id)` without
+  /// knowing who is signed in (see `openUserProfile`), so tapping yourself
+  /// arrives here as an "other" profile. It is answered here, once, from the
+  /// session — otherwise it would render a Follow button and a Report menu
+  /// pointed at yourself, and none of your own sections.
+  late final ProfileTarget _target = switch (widget.target) {
+    OtherProfile(:final userId) when userId == _profiles.currentUserId => const OwnProfile(),
+    final target => target,
+  };
 
   /// Who they follow, and (below) the public parties they hosted. Rendered on
   /// another user's profile only; `late` so the owner's tab never fetches them.
@@ -148,10 +160,10 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
   /// `publicOnly` because the heading says public; see [PartyRepository].
   late Future<List<PartySummary>> _hostedPublicPast = _fetchHostedPublicPast();
 
-  Future<List<Profile>> _fetchTheirFollowing() => _social.fetchFollowing(userId: widget.target.userIdOrNull);
+  Future<List<Profile>> _fetchTheirFollowing() => _social.fetchFollowing(userId: _target.userIdOrNull);
 
   Future<List<PartySummary>> _fetchHostedPublicPast() => _parties.fetchHostedParties(
-        hostId: widget.target.userIdOrNull,
+        hostId: _target.userIdOrNull,
         window: PartyWindow.past,
         publicOnly: true,
         limit: 3,
@@ -185,7 +197,9 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
   }
 
   /// The signed-in user's own profile is the Profile tab; anybody else's is a
-  /// pushed screen, visible for as long as it is mounted.
+  /// pushed screen, visible for as long as it is mounted. Asked of the DECLARED
+  /// target, not [_target]: your own profile opened from a name elsewhere is a
+  /// pushed screen too, and must not wait for the Profile tab to be shown.
   @override
   MpTab? get liveTab => widget.target is OwnProfile ? MpTab.profile : null;
 
@@ -200,7 +214,7 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
 
     // Each target refetches only what it renders. Reading the other target's
     // `late` futures here would start their fetch for nothing.
-    if (widget.target is OwnProfile) {
+    if (_target is OwnProfile) {
       final myParties = _loadMyParties();
       setState(() {
         _myParties = myParties;
@@ -219,7 +233,7 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
 
   @override
   void onDataChange(DataChange change) {
-    final own = widget.target is OwnProfile;
+    final own = _target is OwnProfile;
     switch (change) {
       // Their FOLLOWERS tile moved on the server. On the screen the tap
       // happened on it has already moved optimistically; the refetch is what
@@ -357,6 +371,7 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
         builder: (_) => ChatScreen.direct(
           threadId: threadId,
           peerUsername: profile?.username ?? '',
+          peerId: userId,
           peerAvatarUrl: _profiles.avatarUrl(profile?.avatarPath),
           repository: widget.directChats,
         ),
@@ -744,21 +759,25 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
                       for (final f in people.take(3))
                         Padding(
                           padding: const EdgeInsets.only(right: 9),
-                          child: Column(
-                            children: [
-                              Container(
-                                width: 52,
-                                height: 52,
-                                clipBehavior: Clip.antiAlias,
-                                decoration: const BoxDecoration(shape: BoxShape.circle),
-                                child: DiagonalStripePlaceholder(colors: f.placeholderColors),
-                              ),
-                              const SizedBox(height: 5),
-                              Text(
-                                f.username,
-                                style: TextStyle(fontSize: 10.5, color: AppColors.textAlpha(0.55)),
-                              ),
-                            ],
+                          child: UserLink(
+                            userId: f.id,
+                            username: f.username,
+                            child: Column(
+                              children: [
+                                Container(
+                                  width: 52,
+                                  height: 52,
+                                  clipBehavior: Clip.antiAlias,
+                                  decoration: const BoxDecoration(shape: BoxShape.circle),
+                                  child: DiagonalStripePlaceholder(colors: f.placeholderColors),
+                                ),
+                                const SizedBox(height: 5),
+                                Text(
+                                  f.username,
+                                  style: TextStyle(fontSize: 10.5, color: AppColors.textAlpha(0.55)),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                     ],

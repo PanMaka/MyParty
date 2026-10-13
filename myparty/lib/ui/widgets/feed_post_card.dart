@@ -9,6 +9,7 @@ import 'follow_button.dart';
 import 'post_comments_sheet.dart';
 import 'privacy_badge.dart';
 import 'report_sheet.dart';
+import 'user_link.dart';
 
 /// One real `party_posts` row. Replaces `_KapsimoCard`, which hardcoded a
 /// single design-mock post and pulled its like count out of `MpStore._likes`.
@@ -134,33 +135,47 @@ class FeedPostCard extends StatelessWidget {
       padding: const EdgeInsets.all(13),
       child: Row(
         children: [
-          Container(
-            width: 36,
-            height: 36,
-            clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(borderRadius: BorderRadius.circular(11)),
-            child: DiagonalStripePlaceholder(
-              colors: _avatarColors(post.authorId),
+          // The author's avatar and name open their profile. The avatar's link
+          // owns the gap beside it, so the target is 46px wide.
+          UserLink(
+            userId: post.authorId,
+            username: post.authorUsername,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: Container(
+                width: 36,
+                height: 36,
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(borderRadius: BorderRadius.circular(11)),
+                child: DiagonalStripePlaceholder(
+                  colors: _avatarColors(post.authorId),
+                ),
+              ),
             ),
           ),
-          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(post.authorUsername,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
-                    ),
-                    const SizedBox(width: 6),
-                    PrivacyBadge(
-                      isPrivate: post.partyIsPrivate,
-                    ),
-                  ],
+                // The whole name line, so the link can reach past the line's
+                // own height; inside the one-line Row it could not.
+                UserLink(
+                  userId: post.authorId,
+                  username: post.authorUsername,
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: Text(post.authorUsername,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+                      ),
+                      const SizedBox(width: 6),
+                      PrivacyBadge(
+                        isPrivate: post.partyIsPrivate,
+                      ),
+                    ],
+                  ),
                 ),
                 Text('${formatPostAgeEn(post.createdAt)} · ${post.partyTitle}',
                     maxLines: 1,

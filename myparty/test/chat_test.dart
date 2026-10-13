@@ -9,6 +9,7 @@ import 'package:myparty/data/chat_source.dart';
 import 'package:myparty/models/chat_message.dart';
 import 'package:myparty/ui/screens/chat_screen.dart';
 import 'package:myparty/ui/screens/messages_screen.dart';
+import 'package:myparty/ui/widgets/user_link.dart';
 
 /// Stands in for the real repository. Subclasses rather than implements so it
 /// stays in sync with the real constructor, and overrides every method that
@@ -143,6 +144,40 @@ Widget _chat(_FakeChatRepository repo) => MaterialApp(
     );
 
 void main() {
+  testWidgets("an author's name opens their profile, and a long press on the bubble still hides", (tester) async {
+    final opened = <String?>[];
+    final previous = userProfileScreenBuilder;
+    addTearDown(() => userProfileScreenBuilder = previous);
+    userProfileScreenBuilder = (target) {
+      opened.add(target.userIdOrNull);
+      return Scaffold(appBar: AppBar(), body: const Text('PROFILE'));
+    };
+
+    final repo = _FakeChatRepository(uid: 'me-id', history: [
+      _msg(id: 'm1', body: 'πάμε;', authorId: 'stef-id', authorUsername: 'stefanos', minute: 1),
+    ]);
+    await tester.pumpWidget(_chat(repo));
+    await tester.pumpAndSettle();
+
+    // The bubble right under the name keeps its own gesture.
+    await tester.longPress(find.text('πάμε;'));
+    await tester.pumpAndSettle();
+    expect(find.text('Hide message'), findsOneWidget);
+    expect(opened, isEmpty);
+    Navigator.of(tester.element(find.text('Hide message'))).pop();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('stefanos'));
+    await tester.pumpAndSettle();
+    expect(find.text('PROFILE'), findsOneWidget);
+    expect(opened, ['stef-id']);
+
+    // Back to the same chat, message still there.
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('πάμε;'), findsOneWidget);
+  });
+
   testWidgets('the chat renders real history, not the old mock seed', (tester) async {
     final repo = _FakeChatRepository(history: [
       _msg(id: 'm1', body: 'πρώτο', minute: 1),

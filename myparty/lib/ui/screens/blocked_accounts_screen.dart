@@ -7,6 +7,7 @@ import '../../state/live_refresh.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
 import '../widgets/mp_bottom_nav.dart' show MpTab;
+import '../widgets/user_link.dart';
 
 /// The people you have blocked, each with an Unblock button.
 ///
@@ -142,18 +143,30 @@ class _BlockedAccountsScreenState extends State<BlockedAccountsScreen> with Live
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(
             children: [
-              ClipOval(
-                child: SizedBox(
-                  width: 40,
-                  height: 40,
-                  child: DiagonalStripePlaceholder(colors: profile.placeholderColors),
-                ),
-              ),
-              const SizedBox(width: 12),
+              // Opens their profile, which says "You blocked this account"
+              // and offers Unblock there too.
               Expanded(
-                child: Text('@${profile.username}',
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                child: UserLink(
+                  userId: profile.id,
+                  username: profile.username,
+                  child: Row(
+                    children: [
+                      ClipOval(
+                        child: SizedBox(
+                          width: 40,
+                          height: 40,
+                          child: DiagonalStripePlaceholder(colors: profile.placeholderColors),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text('@${profile.username}',
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                      ),
+                    ],
+                  ),
+                ),
               ),
               TextButton(
                 onPressed: busy ? null : () => _unblock(profile),

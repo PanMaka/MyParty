@@ -12,6 +12,7 @@ import '../../state/live_refresh.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
 import '../widgets/mp_bottom_nav.dart' show MpTab;
+import '../widgets/user_link.dart';
 import 'chat_screen.dart';
 
 /// The chat list, in two tabs: **Parties** (group chats, `get_party_chats`)
@@ -553,6 +554,7 @@ class _DirectChatsTabState extends State<_DirectChatsTab>
       builder: (_) => ChatScreen.direct(
         threadId: thread.threadId,
         peerUsername: thread.peerUsername,
+        peerId: thread.peerId,
         peerAvatarUrl: widget.repository.avatarUrl(thread.peerAvatarPath),
         repository: widget.repository,
       ),
@@ -615,26 +617,39 @@ class _DirectChatsTabState extends State<_DirectChatsTab>
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
         child: Row(
           children: [
-            Container(
-              width: 50,
-              height: 50,
-              clipBehavior: Clip.antiAlias,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: tint.withValues(alpha: 0.6), width: 1.5),
+            // The avatar and the handle open the peer's profile; the rest of
+            // the row still opens the thread. The avatar is the full-size
+            // target; the handle is a link exactly its own size, so that no
+            // part of the preview line under it stops opening the thread.
+            UserLink(
+              userId: thread.peerId,
+              username: thread.peerUsername,
+              child: Container(
+                width: 50,
+                height: 50,
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: tint.withValues(alpha: 0.6), width: 1.5),
+                ),
+                child: avatarUrl == null
+                    ? placeholder
+                    : Image.network(avatarUrl, fit: BoxFit.cover, errorBuilder: (_, _, _) => placeholder),
               ),
-              child: avatarUrl == null
-                  ? placeholder
-                  : Image.network(avatarUrl, fit: BoxFit.cover, errorBuilder: (_, _, _) => placeholder),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('@${thread.peerUsername}',
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700)),
+                  UserLink(
+                    userId: thread.peerId,
+                    username: thread.peerUsername,
+                    minTapSize: 0,
+                    child: Text('@${thread.peerUsername}',
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700)),
+                  ),
                   Padding(
                     padding: const EdgeInsets.only(top: 2),
                     child: Text(
