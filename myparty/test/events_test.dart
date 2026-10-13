@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher_platform_interface/url_launcher_platform_interface.dart';
 
 import 'package:myparty/data/party_repository.dart';
 import 'package:myparty/models/map_party_pin.dart';
@@ -14,6 +15,8 @@ import 'package:myparty/ui/widgets/map_pin_sheet.dart';
 import 'package:myparty/ui/widgets/mp_bottom_nav.dart';
 import 'package:myparty/ui/widgets/party_card.dart';
 import 'package:myparty/ui/widgets/party_detail_sheet.dart';
+
+import 'support/fake_url_launcher.dart';
 
 /// Answers [PartyRepository.fetchMyParties] from a list instead of the network.
 ///
@@ -118,6 +121,8 @@ PartyListItem _item({
   bool isInvited = false,
   int sortGroup = 1,
   int sortRank = 0,
+  double? lat = 37.9755,
+  double? lng = 23.7348,
 }) {
   return PartyListItem(
     partyId: id,
@@ -138,6 +143,8 @@ PartyListItem _item({
     isInvited: isInvited,
     sortGroup: isPrivate ? 0 : sortGroup,
     sortRank: sortRank,
+    lat: lat,
+    lng: lng,
   );
 }
 
@@ -694,6 +701,54 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Directions'), findsOneWidget);
+    });
+
+    for (final isPrivate in [false, true]) {
+      testWidgets('Directions on a ${isPrivate ? 'private' : 'public'} detail sheet opens Google Maps at the party', (tester) async {
+        // The row has carried coordinates since 20261013153808. A private row
+        // reaches only its host and invitees, so the private sheet handing
+        // them on exposes nothing the list did not already send.
+        final launcher = FakeUrlLauncher();
+        final previous = UrlLauncherPlatform.instance;
+        UrlLauncherPlatform.instance = launcher;
+        addTearDown(() => UrlLauncherPlatform.instance = previous);
+
+        await tester.pumpWidget(_card(_item(id: 'p', title: 'Rooftop', isPrivate: isPrivate)));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Rooftop'));
+        await tester.pumpAndSettle();
+
+        final button = find.descendant(of: find.byType(PartyDetailSheet), matching: find.text('Directions'));
+        await tester.ensureVisible(button);
+        await tester.tap(button);
+        await tester.pump();
+
+        expect(launcher.launched, [
+          (
+            'https://www.google.com/maps/dir/?api=1&destination=37.9755%2C23.7348',
+            PreferredLaunchMode.externalApplication,
+          ),
+        ]);
+      });
+    }
+
+    testWidgets('a row without coordinates falls back to its area', (tester) async {
+      final launcher = FakeUrlLauncher();
+      final previous = UrlLauncherPlatform.instance;
+      UrlLauncherPlatform.instance = launcher;
+      addTearDown(() => UrlLauncherPlatform.instance = previous);
+
+      await tester.pumpWidget(_card(_item(id: 'p', title: 'Rooftop', area: 'Νέα Σμύρνη', lat: null, lng: null)));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Rooftop'));
+      await tester.pumpAndSettle();
+      final button = find.descendant(of: find.byType(PartyDetailSheet), matching: find.text('Directions'));
+      await tester.ensureVisible(button);
+      await tester.tap(button);
+      await tester.pump();
+
+      expect(launcher.launched, hasLength(1));
+      expect(Uri.parse(launcher.launched.single.$1).queryParameters['destination'], 'Νέα Σμύρνη');
     });
 
     testWidgets('the card carries a group chat pill on a private party only', (tester) async {
