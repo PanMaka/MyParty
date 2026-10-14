@@ -12,7 +12,8 @@ Delete an entry when it ships. If an entry turns out to be a decision rather
 than a gap, move it to §3 instead of deleting it.
 
 Last swept: 2026-08-22, after Phase 14B. Phase 39 updated 1.12 and 1.17 and
-added 1.21-1.24 (2026-10-14).
+added 1.21-1.24 (2026-10-14). Phase 40 shipped 1.24 (invite_to_party) and
+added 1.25-1.26.
 
 ---
 
@@ -355,15 +356,26 @@ so it counts no-shows and misses walk-ins.
 is a location fact about a person at a time) and a host-side flow. Until then
 the label is honest about tense, not about presence.
 
-### 1.24 A host cannot invite more people after creating a private party
+### 1.25 Nobody is told they were invited
 
-The dashboard's Edit is the details step only. The invite step is not offered.
+Phase 40's `invite_to_party` and invite links write an `invitations` row. The
+party shows up in the guest's MY PARTIES, with an "Invited by @host" badge on
+its card and sheet, but nothing tells the guest it is there.
 
-*Why it is still open:* a client batch insert into `invitations` fails whole
-when any one invitee's `invite_policy` refuses the host, because the INSERT
-policy calls `accepts_invite_from` per row. `create_party_with_invites`
-already drops those people server-side, so the fix is a sibling function
-(`invite_to_party`) with the same filtering, not a client insert.
+*Why it is still open:* there is no in-app notification inbox, and push is
+proximity-only. A "you were invited" push is a new notification kind for the
+existing queue and worker, with the same gotcha 11 caveat as 1.22.
+
+### 1.26 A link opened while signed out survives only while the app is running
+
+A party or invite link opened before sign-in waits in `PartyLinks.pending`,
+which lives in memory. It opens once the user has signed in, unless the app
+is killed first (an email-confirmation round trip, for example). Then it is
+gone and has to be tapped again.
+
+*Why it is still open:* persisting it means writing a party id or an invite
+token to device storage before the user has an account. Once the user has an
+account it is cheap, but nobody has decided it is worth doing.
 
 ---
 
