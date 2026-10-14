@@ -95,25 +95,39 @@ select throws_ok(
 
 -- ============================================================
 -- 2. parties.area -- the neighbourhood label, same shape as bio.
+--
+-- Since 20261014113214 a host edits a party through update_party and holds no
+-- UPDATE on the table, so the "host can" assertions go through the function
+-- (which is definer, so the CHECK still fires inside it), and the empty-string
+-- case -- which update_party normalises to NULL before it reaches the column --
+-- is asserted against the column directly, as postgres.
 -- ============================================================
 select lives_ok(
-  $$ update public.parties set area = 'Κουκάκι'
-     where id = 'aaaaaaaa-0000-0000-0000-000000000002' $$,
+  $$ select public.update_party(
+       'aaaaaaaa-0000-0000-0000-000000000002', 'Syntagma Afterparty',
+       'Open afterparty, everyone welcome.', 'Κουκάκι',
+       (select starts_at from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
+       null, 37.9758, 23.7351) $$,
   'a host can label their party with a neighbourhood');
 
+select throws_ok(
+  $$ select public.update_party(
+       'aaaaaaaa-0000-0000-0000-000000000002', 'Syntagma Afterparty', null,
+       repeat('a', 81),
+       (select starts_at from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
+       null, 37.9758, 23.7351) $$,
+  '23514',
+  null,
+  'area is capped at 80 -- it is a place name, not a sentence');
+
+reset role;
 select throws_ok(
   $$ update public.parties set area = ''
      where id = 'aaaaaaaa-0000-0000-0000-000000000002' $$,
   '23514',
   null,
   'area rejects the empty string -- NULL means "the host did not say" and nothing else does');
-
-select throws_ok(
-  $$ update public.parties set area = repeat('a', 81)
-     where id = 'aaaaaaaa-0000-0000-0000-000000000002' $$,
-  '23514',
-  null,
-  'area is capped at 80 -- it is a place name, not a sentence');
+select tests.authenticate_as('11111111-1111-1111-1111-111111111111'); -- host
 
 
 -- ============================================================
@@ -191,7 +205,14 @@ where id = '11111111-1111-1111-1111-111111111111';
 -- `party-covers` is {party_id}/..., not {user_id}/... -- the opposite of
 -- `avatars`. A host reaching for "my folder" is the natural error and it
 -- produces a path that looks entirely plausible.
+--
+-- As postgres since 20261014113214: no client can write cover_path any more,
+-- so the CHECK now guards the definer functions that do (confirm_party_cover,
+-- confirm_party_cover_replacement) -- the second lock behind their own path
+-- checks, and asserted at the privilege level those functions run at.
 -- ============================================================
+reset role;
+
 select throws_ok(
   $$ update public.parties
      set cover_path = '11111111-1111-1111-1111-111111111111/cover.jpg'
