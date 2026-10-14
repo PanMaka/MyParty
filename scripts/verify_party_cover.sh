@@ -250,4 +250,34 @@ still_there=$(docker exec "$STORAGE_CONTAINER" sh -c "test -f '$OLD_DISK' && ech
 [ "$still_there" = "no" ] || fail "THE OLD COVER IS STILL ON DISK at $OLD_DISK"
 pass "cleanup removes the old cover from storage.objects AND the disk, and keeps the current one"
 
+# ============================================================
+step "6. the hourly sweep collects what cleanup never got to"
+# ============================================================
+# An upload the host never confirmed (or whose cleanup call never happened):
+# a replacement key, PUT, then nothing.
+upload_url "$HOST_JWT" "$PARTY" true
+[ "$STATUS" = 200 ] || fail "replacement upload-url: $STATUS $BODY"
+ABANDONED=$(jget "$BODY" path); ABANDONED_TOKEN=$(jget "$BODY" token)
+code=$(put_signed "$ABANDONED" "$ABANDONED_TOKEN" "$WORKDIR/cover.jpg" image/jpeg)
+[ "$code" = 200 ] || fail "abandoned PUT: $code"
+ABANDONED_DISK=$(docker exec "$STORAGE_CONTAINER" sh -c "find /mnt -path '*$ABANDONED*' -type f 2>/dev/null" | tr -d '\r' | head -1)
+[ -n "$ABANDONED_DISK" ] || fail "could not find the abandoned upload on disk"
+sql "update storage.objects set created_at = now() - interval '1 hour'
+     where bucket_id = 'party-covers' and name = '$ABANDONED'" >/dev/null
+
+# What the cron job runs. pg_net dispatches after this statement commits.
+swept=$(sql "select public.sweep_party_covers()")
+[ "$swept" -ge 1 ] || fail "the sweep found nothing to delete"
+for _ in $(seq 1 20); do
+  [ "$(sql "select count(*) from storage.objects where bucket_id = 'party-covers' and name = '$ABANDONED'")" = 0 ] && break
+  sleep 1
+done
+[ "$(sql "select count(*) from storage.objects where bucket_id = 'party-covers' and name = '$ABANDONED'")" = 0 ] \
+  || fail "the sweep did not remove the abandoned upload from storage.objects"
+still_there=$(docker exec "$STORAGE_CONTAINER" sh -c "test -f '$ABANDONED_DISK' && echo yes || echo no" | tr -d '\r')
+[ "$still_there" = "no" ] || fail "THE ABANDONED UPLOAD IS STILL ON DISK at $ABANDONED_DISK"
+[ "$(sql "select count(*) from storage.objects where bucket_id = 'party-covers' and name = '$NEW_PATH'")" = 1 ] \
+  || fail "the sweep deleted a CURRENT cover"
+pass "sweep_party_covers removes an abandoned upload from storage.objects and the disk, and spares the current cover"
+
 printf '\n\033[32mAll party cover checks passed.\033[0m\n'

@@ -27,7 +27,7 @@
 -- stranger 4444, second_host 6666; crowd 0c0c...01-04.
 begin;
 set search_path to public, extensions;
-select plan(85);
+select plan(91);
 
 
 -- ===========================================================================
@@ -665,6 +665,51 @@ select results_eq(
   $$ select * from public.party_cover_stale_objects('dddddddd-0000-0000-0000-000000000003') $$,
   $$ values ('dddddddd-0000-0000-0000-000000000003/cover'::text) $$,
   'stale = the replaced cover only: not the current one, and not a fresh upload that may still be in flight'
+);
+
+
+-- ===========================================================================
+-- I. The hourly sweep (20261014115206) -- the safety net under cleanup.
+-- ===========================================================================
+select throws_ok(
+  $$ select * from public.stale_party_cover_objects() $$,
+  '42501', null,
+  'the all-parties stale list is not a client function -- not even for a host');
+select throws_ok(
+  $$ select public.sweep_party_covers() $$,
+  '42501', null,
+  'nor is the sweep');
+
+reset role;
+-- An object in the folder of a party that does not exist: nobody's cover, and
+-- no host to run cleanup for it. Only the sweep can collect it.
+insert into storage.objects (bucket_id, name, owner, created_at) values
+  ('party-covers', 'dddddddd-0000-0000-0000-0000000000ff/0e0e0e0e-0000-4000-8000-000000000003',
+   '11111111-1111-1111-1111-111111111111', now() - interval '1 hour');
+
+select set_eq(
+  $$ select n from public.stale_party_cover_objects() n
+     where n like 'dddddddd-%' $$,
+  $$ values ('dddddddd-0000-0000-0000-000000000003/cover'),
+            ('dddddddd-0000-0000-0000-0000000000ff/0e0e0e0e-0000-4000-8000-000000000003') $$,
+  'the sweep''s stale list: the replaced cover and the orphan -- not the current cover, not the in-flight upload'
+);
+
+select set_eq(
+  $$ select * from public.party_cover_stale_objects('dddddddd-0000-0000-0000-000000000003') $$,
+  $$ select n from public.stale_party_cover_objects('dddddddd-0000-0000-0000-000000000003') n $$,
+  'the host-facing list and the sweep''s agree on one party -- one definition of stale'
+);
+
+select ok(
+  public.sweep_party_covers() >= 2,
+  'the sweep asks Storage to delete them (pg_net dispatches after COMMIT, so the bytes are scripts/verify_party_cover.sh''s to check)'
+);
+
+select is(
+  (select schedule from cron.job where jobname = 'party-cover-sweep'),
+  '17 * * * *',
+  'party-cover-sweep is scheduled hourly'
 );
 
 
