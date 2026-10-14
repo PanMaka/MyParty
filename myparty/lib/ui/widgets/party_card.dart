@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../data/party_repository.dart';
 import '../../models/party_list_item.dart';
 import '../../state/mp_store.dart' show MpRsvp;
 import '../../utils/english_date.dart';
@@ -40,10 +41,15 @@ class PartyCard extends StatelessWidget {
     super.key,
     required this.item,
     required this.onRsvp,
+    required this.repository,
     this.coverUrl,
   });
 
   final PartyListItem item;
+
+  /// Handed to [showPartyDetailSheet], which needs it to tell the host's own
+  /// party (their dashboard) from anyone else's (the sheet).
+  final PartyRepository repository;
 
   /// The signed cover URL, or null for a party whose host uploaded none.
   ///
@@ -79,7 +85,13 @@ class PartyCard extends StatelessWidget {
             // The card's own answer callback, handed on: the sheet's
             // Going / Interested / Coming used to close the sheet and save
             // nothing, because it was opened with no callback at all.
-            onTap: () => showPartyDetailSheet(context, item, coverUrl: coverUrl, onRsvp: onRsvp),
+            onTap: () => showPartyDetailSheet(
+              context,
+              item,
+              repository: repository,
+              coverUrl: coverUrl,
+              onRsvp: onRsvp,
+            ),
             child: SizedBox(
               height: 158,
               child: Stack(

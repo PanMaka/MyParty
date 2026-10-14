@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show protected;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../models/host_party_stats.dart';
 import '../models/hosted_parties.dart';
 import '../models/map_party_pin.dart';
 import '../models/map_time_window.dart';
@@ -11,6 +13,7 @@ import '../models/party_summary.dart';
 import '../models/rsvp_party.dart';
 import '../state/data_changes.dart';
 import '../state/mp_store.dart' show MpRsvp;
+import 'party_host_channel.dart';
 
 /// Which end of the calendar a party list is asking for.
 enum PartyWindow {
@@ -547,6 +550,150 @@ class PartyRepository {
       'user_id': userId,
       'status': status == MpRsvp.going ? 'going' : 'interested',
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // The host dashboard (Phase 39). Every call below is host-only on the
+  // server and answers anyone else with a 42501; nothing here re-checks it.
+  // ---------------------------------------------------------------------------
+
+  /// The dashboard's header and aggregates, or null if the party is gone.
+  ///
+  /// Works for cancelled and finished parties, unlike [fetchParty]: a host
+  /// looks at their dashboard after the night is over.
+  Future<HostPartyStats?> fetchHostStats(String partyId) async {
+    final rows = await _client.rpc('get_party_host_stats', params: {'p_party_id': partyId}) as List;
+    if (rows.isEmpty) return null;
+    return HostPartyStats.fromRow(rows.first as Map<String, dynamic>);
+  }
+
+  /// Cumulative going/interested per bucket. [bucket] null lets the server
+  /// choose (hourly under 72 hours, daily beyond).
+  ///
+  /// Sends the device's UTC offset, so a "day" is the host's day. An offset
+  /// rather than a zone name for the reason [fetchPartiesNearUser] gives; a
+  /// daily RSVP chart can absorb the one DST night it gets wrong.
+  Future<RsvpTimeline> fetchRsvpTimeline(String partyId, {StatsBucket? bucket}) async {
+    final rows = await _client.rpc('get_party_rsvp_timeline', params: {
+      'p_party_id': partyId,
+      'p_bucket': bucket?.name,
+      'p_utc_offset_minutes': DateTime.now().timeZoneOffset.inMinutes,
+    }) as List;
+    return RsvpTimeline.fromRows(rows.cast<Map<String, dynamic>>());
+  }
+
+  /// One page of the guest list, newest first. [goingOnly] false is the
+  /// Interested tab and lists everyone, going included.
+  Future<PartyGuestPage> fetchGuests(
+    String partyId, {
+    required bool goingOnly,
+    PartyGuest? after,
+    int limit = 30,
+  }) async {
+    final rows = await _client.rpc('get_party_guests', params: {
+      'p_party_id': partyId,
+      'p_going_only': goingOnly,
+      'p_cursor_created_at': after?.createdAt.toUtc().toIso8601String(),
+      'p_cursor_user_id': after?.userId,
+      'p_limit': limit,
+    }) as List;
+    final guests = rows.map((row) => PartyGuest.fromRow(row as Map<String, dynamic>)).toList();
+    return PartyGuestPage(
+      guests: guests,
+      cursor: guests.length < limit ? null : guests.last,
+    );
+  }
+
+  /// Joins the party's `party_host:{uuid}` topic. Overridden in tests.
+  PartyHostChannel subscribeHostTopic(String partyId) => subscribePartyHostTopic(_client, partyId);
+
+  /// Saves the edit form through `update_party` — the only way to edit a
+  /// party since 20261014113214 revoked the table UPDATE. Announces
+  /// [PartyUpdated]; the write is [writePartyEdit].
+  Future<void> updateParty(PartyEdit edit) async {
+    await writePartyEdit(edit);
+    dataChanges.publish(PartyUpdated(partyId: edit.partyId));
+  }
+
+  @protected
+  Future<void> writePartyEdit(PartyEdit edit) async {
+    await _client.rpc('update_party', params: {
+      'p_party_id': edit.partyId,
+      'p_title': edit.title,
+      'p_description': edit.description,
+      'p_area': edit.area,
+      'p_starts_at': edit.startsAt.toUtc().toIso8601String(),
+      'p_ends_at': edit.endsAt?.toUtc().toIso8601String(),
+      'p_lat': edit.lat,
+      'p_lon': edit.lng,
+    });
+  }
+
+  /// Cancels the party, one-way. Announces [PartyCancelled]; the write is
+  /// [writeCancel].
+  Future<void> cancelParty(String partyId) async {
+    await writeCancel(partyId);
+    dataChanges.publish(PartyCancelled(partyId: partyId));
+  }
+
+  @protected
+  Future<void> writeCancel(String partyId) async {
+    await _client.rpc('cancel_party', params: {'p_party_id': partyId});
+  }
+
+  /// Replaces a party's cover: a FRESH key from the edge function
+  /// (`replace: true`), the PUT, then `confirm_party_cover_replacement`, which
+  /// checks Storage has the bytes before repointing `cover_path`.
+  ///
+  /// Then asks `party-cover/cleanup` to delete what nothing points at any
+  /// more, best-effort: if that call never happens (the app is killed, the
+  /// network drops) the hourly `party-cover-sweep` collects it.
+  ///
+  /// The cover choice is a replacement only for now; preset covers
+  /// (docs/backlog.md 1.21) will be a sibling of this that ends in the same
+  /// cleanup call.
+  Future<String> replaceCover(String partyId, Uint8List bytes) async {
+    final path = await putReplacementCover(partyId, bytes);
+    dataChanges.publish(PartyCoverChanged(partyId: partyId));
+    unawaited(cleanUpCovers(partyId).catchError((_) {}));
+    return path;
+  }
+
+  @protected
+  Future<String> putReplacementCover(String partyId, Uint8List bytes) async {
+    final contentType = coverContentType(bytes);
+    if (contentType == null) {
+      throw ArgumentError('A cover must be a JPEG or a PNG');
+    }
+
+    final signed = await _client.functions.invoke(
+      'party-cover/upload-url',
+      body: {'party_id': partyId, 'replace': true},
+    );
+    final data = signed.data as Map?;
+    final path = data?['path'] as String?;
+    final token = data?['token'] as String?;
+    if (path == null || token == null) {
+      throw StateError('Could not get an upload URL for the cover');
+    }
+
+    await _client.storage.from('party-covers').uploadBinaryToSignedUrl(
+          path,
+          token,
+          bytes,
+          FileOptions(contentType: contentType),
+        );
+
+    final confirmed = await _client.rpc('confirm_party_cover_replacement', params: {
+      'p_party_id': partyId,
+      'p_path': path,
+    });
+    return confirmed as String;
+  }
+
+  @protected
+  Future<void> cleanUpCovers(String partyId) async {
+    await _client.functions.invoke('party-cover/cleanup', body: {'party_id': partyId});
   }
 }
 

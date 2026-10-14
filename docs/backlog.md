@@ -12,7 +12,7 @@ Delete an entry when it ships. If an entry turns out to be a decision rather
 than a gap, move it to §3 instead of deleting it.
 
 Last swept: 2026-08-22, after Phase 14B. Phase 39 updated 1.12 and 1.17 and
-added 1.21-1.23 (2026-10-14).
+added 1.21-1.24 (2026-10-14).
 
 ---
 
@@ -354,6 +354,16 @@ so it counts no-shows and misses walk-ins.
 *Why it is still open:* a check-in is a new table, a new consent question (it
 is a location fact about a person at a time) and a host-side flow. Until then
 the label is honest about tense, not about presence.
+
+### 1.24 A host cannot invite more people after creating a private party
+
+The dashboard's Edit is the details step only. The invite step is not offered.
+
+*Why it is still open:* a client batch insert into `invitations` fails whole
+when any one invitee's `invite_policy` refuses the host, because the INSERT
+policy calls `accepts_invite_from` per row. `create_party_with_invites`
+already drops those people server-side, so the fix is a sibling function
+(`invite_to_party`) with the same filtering, not a client insert.
 
 ---
 

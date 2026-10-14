@@ -111,6 +111,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin, Li
       // the pin's sheet shows.
       case PartyCreated() || PartyCoverChanged() || BlockChanged():
         refreshWhenVisible();
+      // The host moved, renamed or cancelled one of their pins.
+      case PartyUpdated() || PartyCancelled():
+        refreshWhenVisible();
       default:
         break;
     }

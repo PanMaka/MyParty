@@ -33,6 +33,11 @@ PartyListItem _item({bool isPrivate = false}) => PartyListItem(
     );
 
 class _FakePartyRepository extends PartyRepository {
+  /// A viewer who hosts none of the fixtures, so every party opens its sheet
+  /// rather than the host dashboard.
+  @override
+  String? get currentUserId => 'viewer';
+
   _FakePartyRepository({this.party, this.fail = false});
 
   final PartyListItem? party;

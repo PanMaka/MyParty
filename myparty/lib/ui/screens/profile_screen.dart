@@ -20,6 +20,7 @@ import '../widgets/profile_party_card.dart';
 import '../widgets/report_sheet.dart';
 import '../widgets/user_link.dart';
 import 'chat_screen.dart';
+import 'host_dashboard_screen.dart';
 import 'host_wizard_screen.dart';
 import 'profile_edit_screen.dart';
 import 'settings_screen.dart';
@@ -243,6 +244,9 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
         refreshWhenVisible();
       // HOSTED and the HOSTING list.
       case PartyCreated() when own:
+        refreshWhenVisible();
+      // An edit renames or moves a hosted card; a cancellation drops it.
+      case PartyUpdated() || PartyCancelled() || PartyCoverChanged() when own:
         refreshWhenVisible();
       // The blocked account's profile turns into "you blocked this account"
       // (or back), and a block purges the follow edges both ways — which is
@@ -656,6 +660,12 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
                 // not sign. The card draws the same placeholder either way,
                 // which is the truth in both cases: there is no image here.
                 coverUrl: covers[party.id],
+                // This list is the viewer's OWN hosted parties, so every card
+                // opens its host dashboard -- the only door to a finished
+                // party's dashboard, since MY PARTIES drops finished parties.
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => HostDashboardScreen(partyId: party.id, repository: _parties),
+                )),
               ),
             ),
       ],

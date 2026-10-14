@@ -24,6 +24,11 @@ import 'support/fake_url_launcher.dart';
 /// lazily — no client is ever constructed here, the same trick `map_test.dart`
 /// relies on.
 class _FakePartyRepository extends PartyRepository {
+  /// A viewer who hosts none of the fixtures, so every party opens its sheet
+  /// rather than the host dashboard.
+  @override
+  String? get currentUserId => 'viewer';
+
   _FakePartyRepository(
     this.rsvps, {
     this.fail = false,
@@ -203,7 +208,7 @@ Widget _card(PartyListItem item, {void Function(MpRsvp)? onRsvp}) {
   return MaterialApp(
     home: Scaffold(
       body: SingleChildScrollView(
-        child: PartyCard(item: item, onRsvp: onRsvp ?? (_) {}),
+        child: PartyCard(item: item, repository: _FakePartyRepository(const []), onRsvp: onRsvp ?? (_) {}),
       ),
     ),
   );

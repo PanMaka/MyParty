@@ -118,6 +118,11 @@ class _FakeSocialRepository extends SocialRepository {
 /// possible -- it was the last repository still building one in its
 /// constructor, which is why nothing had ever faked a party.
 class _FakePartyRepository extends PartyRepository {
+  /// A viewer who hosts none of the fixtures, so every party opens its sheet
+  /// rather than the host dashboard.
+  @override
+  String? get currentUserId => 'viewer';
+
   _FakePartyRepository({
     this.mineUpcoming = const [],
     this.minePast = const [],

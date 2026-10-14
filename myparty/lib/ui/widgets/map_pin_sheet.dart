@@ -5,6 +5,7 @@ import '../../models/feed_post.dart';
 import '../../models/map_party_pin.dart';
 import '../../state/mp_store.dart';
 import '../screens/chat_screen.dart';
+import '../screens/host_dashboard_screen.dart';
 import '../../state/data_changes.dart';
 import '../../utils/directions.dart';
 import '../../utils/english_date.dart';
@@ -30,27 +31,56 @@ import 'user_link.dart';
 /// opt out of covers: `party-covers` is private, the path in the payload is a
 /// storage key and not a URL, and a sheet with no way to sign it would draw
 /// the placeholder forever with nothing to say why.
+///
+/// **The host never gets this sheet** (Phase 39): their own party opens
+/// [HostDashboardScreen] instead. The check lives here, not at the three call
+/// sites, so a fourth door cannot forget it. [asGuest] is the dashboard's
+/// "View as guest" — the sheet as a guest sees it, in preview mode.
 Future<void> showMapPinSheet(
   BuildContext context,
   MapPartyPin pin, {
   required PartyRepository repository,
+  bool asGuest = false,
 }) {
+  if (!asGuest && isOwnParty(pin.hostId, repository)) {
+    return Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => HostDashboardScreen(partyId: pin.id, repository: repository),
+    ));
+  }
   return showModalBottomSheet(
     context: context,
     backgroundColor: Colors.transparent,
     isScrollControlled: true,
-    builder: (_) => MapPinSheet(pin: pin, repository: repository),
+    builder: (_) => MapPinSheet(pin: pin, repository: repository, preview: asGuest),
   );
 }
 
+/// Whether the signed-in viewer hosts the party — the one test both party
+/// sheets use to send a host to their dashboard.
+bool isOwnParty(String? hostId, PartyRepository repository) {
+  final me = repository.currentUserId;
+  return hostId != null && me != null && hostId == me;
+}
+
 class MapPinSheet extends StatefulWidget {
-  const MapPinSheet({super.key, required this.pin, required this.repository, this.share});
+  const MapPinSheet({
+    super.key,
+    required this.pin,
+    required this.repository,
+    this.share,
+    this.preview = false,
+  });
 
   final MapPartyPin pin;
   final PartyRepository repository;
 
   /// The system share sheet by default; tests record instead.
   final ShareText? share;
+
+  /// The host previewing their own party as a guest: a banner says so, and
+  /// RSVP, chat and report are disabled — a host answering their own party,
+  /// or reporting it, from a preview is never what they meant.
+  final bool preview;
 
   @override
   State<MapPinSheet> createState() => _MapPinSheetState();
@@ -131,6 +161,23 @@ class _MapPinSheetState extends State<MapPinSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (widget.preview) ...[
+                Container(
+                  key: const Key('guest-preview-banner'),
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                  decoration: BoxDecoration(
+                    color: AppColors.purple.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppColors.purple.withValues(alpha: 0.4)),
+                  ),
+                  child: const Text(
+                    'Preview — this is what your guests see',
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
               _header(live),
               const SizedBox(height: 14),
               _cover(),
@@ -199,7 +246,7 @@ class _MapPinSheetState extends State<MapPinSheet> {
         // that rule exists to keep out — so no icon there.
         if (pin.isPrivate)
           IconButton(
-            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+            onPressed: widget.preview ? null : () => Navigator.of(context).push(MaterialPageRoute(
               builder: (_) => ChatScreen(
                 partyId: pin.id,
                 partyTitle: pin.title,
@@ -225,7 +272,7 @@ class _MapPinSheetState extends State<MapPinSheet> {
         // PartyDetailSheet — is backed by a real `parties` row, so
         // pin.id is the uuid `reports.target_id` needs.
         IconButton(
-          onPressed: () => showReportSheet(
+          onPressed: widget.preview ? null : () => showReportSheet(
             context,
             target: ReportTarget.party,
             targetId: pin.id,
@@ -495,7 +542,7 @@ class _MapPinSheetState extends State<MapPinSheet> {
     return SizedBox(
       width: double.infinity,
       child: ElevatedButton(
-        onPressed: _saving ? null : onTap,
+        onPressed: _saving || widget.preview ? null : onTap,
         style: ElevatedButton.styleFrom(
           padding: const EdgeInsets.symmetric(vertical: 14),
           backgroundColor: Colors.transparent,

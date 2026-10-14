@@ -104,6 +104,9 @@ class _SearchScreenState extends State<SearchScreen> with LiveRefresh<SearchScre
       // parties alike, so the hits are no longer what the server would say.
       case BlockChanged():
         refreshWhenVisible();
+      // The viewer edited or cancelled a party that may be among the hits.
+      case PartyUpdated() || PartyCancelled():
+        refreshWhenVisible();
       default:
         break;
     }

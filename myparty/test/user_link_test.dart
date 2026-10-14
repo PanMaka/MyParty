@@ -56,6 +56,9 @@ class _FakeSocial extends SocialRepository {
 
 class _FakeParties extends PartyRepository {
   @override
+  String? get currentUserId => _me;
+
+  @override
   Future<List<PartySummary>> fetchHostedParties({
     String? hostId,
     required PartyWindow window,
@@ -122,7 +125,7 @@ void main() {
       home: Scaffold(
         body: Builder(
           builder: (context) => TextButton(
-            onPressed: () => showPartyDetailSheet(context, item),
+            onPressed: () => showPartyDetailSheet(context, item, repository: _FakeParties()),
             child: const Text('open'),
           ),
         ),
@@ -177,7 +180,14 @@ void main() {
   });
 
   testWidgets('tapping yourself as host opens YOUR profile, not a stranger view of it', (tester) async {
-    await openSheet(tester, _item(isPrivate: false, hostId: _me, hostUsername: 'nikos'));
+    // The sheet widget itself, not showPartyDetailSheet: since Phase 39 that
+    // sends a host to their dashboard instead (host_dashboard_test.dart). The
+    // byline still has to do the right thing for whoever it does render for.
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PartyDetailSheet(item: _item(isPrivate: false, hostId: _me, hostUsername: 'nikos')),
+      ),
+    ));
 
     await tester.tap(find.text('Public · @nikos'));
     await tester.pumpAndSettle();
