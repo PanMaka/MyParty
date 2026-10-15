@@ -3,7 +3,9 @@
 // A copy of post-media's shape, for the same reasons, and read that file first:
 // the bucket has a SELECT policy following party visibility, so reads are
 // signed client-side under RLS (PartyRepository.signedCoverUrls) and only the
-// upload side needs the service key. One route.
+// upload side needs the service key. Two routes: upload-url (first cover, or a
+// replacement with replace: true) and cleanup (delete what a replacement left
+// behind).
 //
 // WHAT THIS FUNCTION DOES NOT CONTAIN: any notion of who may set a cover. It
 // asks Postgres with the CALLER'S OWN JWT via
@@ -55,19 +57,27 @@ Deno.serve(async (req) => {
   }
 
   // ----------------------------------------------------------------
-  // POST /party-cover/upload-url  { party_id }
+  // POST /party-cover/upload-url  { party_id, replace?: boolean }
+  //
+  // replace: false (the default) is the one-shot first cover at
+  // {party_id}/cover. replace: true asks for a FRESH key from
+  // party_cover_replace_target -- a replacement never overwrites, so
+  // upsert: false holds for both.
   // ----------------------------------------------------------------
   if (route === 'upload-url') {
     const partyId = payload.party_id;
     if (typeof partyId !== 'string') {
       return json({ error: 'party_id is required' }, 400);
     }
+    const replace = payload.replace === true;
 
-    const { data: path, error } = await asUser.rpc('party_cover_upload_target', {
-      p_party_id: partyId,
-    });
+    const { data: path, error } = await asUser.rpc(
+      replace ? 'party_cover_replace_target' : 'party_cover_upload_target',
+      { p_party_id: partyId },
+    );
 
-    // 42501: not the host, the party already has a cover, or it is cancelled.
+    // 42501: not the host, the party is cancelled, or (first cover only) it
+    // already has one.
     if (error || !path) {
       return json({ error: error?.message ?? 'no pending cover for that party' }, 403);
     }
@@ -87,6 +97,42 @@ Deno.serve(async (req) => {
       token: data.token,
       expires_in: UPLOAD_URL_TTL_SECONDS,
     });
+  }
+
+  // ----------------------------------------------------------------
+  // POST /party-cover/cleanup  { party_id }
+  //
+  // After a replacement is confirmed: delete the objects nothing points at
+  // any more. WHICH objects is party_cover_stale_objects' answer, asked with
+  // the caller's JWT (host-only); this route only executes that list, through
+  // the Storage API so the bytes go with the row (gotcha 7).
+  // ----------------------------------------------------------------
+  if (route === 'cleanup') {
+    const partyId = payload.party_id;
+    if (typeof partyId !== 'string') {
+      return json({ error: 'party_id is required' }, 400);
+    }
+
+    const { data: stale, error } = await asUser.rpc('party_cover_stale_objects', {
+      p_party_id: partyId,
+    });
+    if (error) {
+      return json({ error: error.message }, 403);
+    }
+
+    const names = (stale ?? []) as string[];
+    if (names.length === 0) {
+      return json({ removed: 0 });
+    }
+
+    const { error: removeError } = await asService.storage
+      .from('party-covers')
+      .remove(names);
+    if (removeError) {
+      return json({ error: removeError.message }, 500);
+    }
+
+    return json({ removed: names.length });
   }
 
   return json({ error: 'unknown route' }, 404);

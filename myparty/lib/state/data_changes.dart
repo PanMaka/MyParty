@@ -59,6 +59,22 @@ final class PartyCreated extends DataChange {
   final String partyId;
 }
 
+/// The viewer edited [partyId]'s details (title, times, place, description)
+/// through `update_party`. Every list showing the party is out of date.
+final class PartyUpdated extends DataChange {
+  const PartyUpdated({required this.partyId});
+
+  final String partyId;
+}
+
+/// The viewer cancelled [partyId]. It leaves the map, the lists and its link
+/// (they all filter on status = 'published'); only its host dashboard stays.
+final class PartyCancelled extends DataChange {
+  const PartyCancelled({required this.partyId});
+
+  final String partyId;
+}
+
 /// The viewer's read marker for a conversation moved to now, so its unread
 /// count is zero. [direct] tells a DM thread id from a party id.
 final class ConversationRead extends DataChange {

@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 
+import '../../data/party_repository.dart';
 import '../../models/party_list_item.dart';
 import '../../state/mp_store.dart' show MpRsvp;
 import '../../utils/english_date.dart';
 import '../screens/chat_screen.dart';
+import '../screens/host_dashboard_screen.dart';
+import 'map_pin_sheet.dart' show isOwnParty;
 import '../screens/story_viewer_screen.dart';
 import '../theme/app_theme.dart';
 import 'diagonal_placeholder.dart';
@@ -12,12 +15,23 @@ import '../../utils/share_party.dart';
 import 'privacy_badge.dart';
 import 'user_link.dart';
 
+/// The ALL PARTIES card's sheet and a party link's.
+///
+/// [repository] is required for the same reason [showMapPinSheet] requires
+/// one, plus a second: it is how this knows the viewer is the HOST, who gets
+/// [HostDashboardScreen] instead of an attendee sheet for their own party.
 Future<void> showPartyDetailSheet(
   BuildContext context,
   PartyListItem item, {
+  required PartyRepository repository,
   String? coverUrl,
   ValueChanged<MpRsvp>? onRsvp,
 }) {
+  if (isOwnParty(item.hostId, repository)) {
+    return Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => HostDashboardScreen(partyId: item.partyId, repository: repository),
+    ));
+  }
   return showModalBottomSheet(
     context: context,
     isScrollControlled: true,

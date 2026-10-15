@@ -24,6 +24,11 @@ class _FakeSocial extends SocialRepository {
 }
 
 class _FakeParties extends PartyRepository {
+  /// A viewer who hosts none of the fixtures, so every party opens its sheet
+  /// rather than the host dashboard.
+  @override
+  String? get currentUserId => 'viewer';
+
   _FakeParties({this.results = const PartySearchResults(upcoming: [], past: [])});
 
   final PartySearchResults results;

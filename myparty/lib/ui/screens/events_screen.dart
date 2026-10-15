@@ -255,6 +255,10 @@ class _EventsScreenState extends State<EventsScreen> with LiveRefresh<EventsScre
       // server's order rather than be spliced in by a guess.
       case PartyCreated() || PartyCoverChanged():
         refreshWhenVisible();
+      // An edit can move a hosted party in both lists' order (its start time
+      // is the sort key); a cancellation drops it from both.
+      case PartyUpdated() || PartyCancelled():
+        refreshWhenVisible();
       // A block hides the pair's parties from each other: a party the blocked
       // account hosts leaves both lists.
       case BlockChanged():
@@ -530,6 +534,7 @@ class _EventsScreenState extends State<EventsScreen> with LiveRefresh<EventsScre
           padding: const EdgeInsets.only(bottom: 14),
           child: PartyCard(
             item: item,
+            repository: _repository,
             coverUrl: _coverUrls[item.partyId],
             onRsvp: (status) => _setRsvp(item, status),
           ),

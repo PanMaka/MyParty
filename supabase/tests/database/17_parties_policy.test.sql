@@ -477,15 +477,24 @@ select isnt_empty(
 
 select tests.authenticate_as('11111111-1111-1111-1111-111111111111');
 
-select lives_ok(
+-- Since 20261014113214 the gotcha-3 half of this no longer has a client path
+-- to break: authenticated holds no UPDATE on parties, and hosts edit through
+-- update_party (definer). So the first assertion is now the refusal, and the
+-- other two prove the edit path that replaced it still reaches a PRIVATE row.
+select throws_ok(
   $$ update public.parties set title = 'Syntagma Afterparty (moved)'
      where id = 'aaaaaaaa-0000-0000-0000-000000000002' $$,
-  'a host can still update their own PUBLIC party'
+  '42501',
+  null,
+  'a host can no longer UPDATE parties directly -- edits go through update_party'
 );
 select lives_ok(
-  $$ update public.parties set title = 'Rooftop Pregame (moved)'
-     where id = 'aaaaaaaa-0000-0000-0000-000000000001' $$,
-  'a host can still update their own PRIVATE party -- host_id short-circuits the new row'
+  $$ select public.update_party(
+       'aaaaaaaa-0000-0000-0000-000000000001', 'Rooftop Pregame (moved)',
+       'Invite-only pregame before we head out.', 'Σύνταγμα',
+       (select starts_at from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000001'),
+       null, 37.9755, 23.7348) $$,
+  'a host can still edit their own PRIVATE party, through update_party'
 );
 select is(
   (select title from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000001'),

@@ -7,6 +7,7 @@ import 'package:latlong2/latlong.dart';
 import '../../data/party_repository.dart';
 import '../../data/profile_repository.dart';
 import '../../data/social_repository.dart';
+import '../../models/host_party_stats.dart';
 import '../../models/profile.dart';
 import '../../utils/english_date.dart';
 import '../../utils/share_party.dart';
@@ -17,6 +18,12 @@ import 'chat_screen.dart';
 import 'location_picker_screen.dart';
 
 /// The 4-step "host a party" wizard: details → public/private → invite → review.
+///
+/// With [edit] set it is the host dashboard's **Edit party** instead: the
+/// details step alone, prefilled, saving through `update_party` and popping
+/// `true`. Privacy is not editable (20261014113214 explains why), and the
+/// invite step is not offered — adding guests to an existing party is in
+/// docs/backlog.md.
 class HostWizardScreen extends StatefulWidget {
   const HostWizardScreen({
     super.key,
@@ -26,7 +33,15 @@ class HostWizardScreen extends StatefulWidget {
     this.picker,
     this.locate,
     this.share,
+    this.edit,
+    this.editCoverUrl,
   });
+
+  /// The party being edited, as the dashboard last fetched it. Null creates.
+  final HostPartyStats? edit;
+
+  /// Its current cover, already signed, so the tile shows what is there.
+  final String? editCoverUrl;
 
   /// Injectable so widget tests can fake every repository, as the map and
   /// profile screens do. Until the cover and the map picker arrived this was
@@ -102,9 +117,26 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
 
   static const _titles = ['Details', 'Who sees it?', 'Invite people', 'Ready?'];
 
+  bool get _editing => widget.edit != null;
+
   @override
   void initState() {
     super.initState();
+    final edit = widget.edit;
+    if (edit != null) {
+      // Prefilled from the row. The venue field is `area` here: at creation
+      // the typed address was folded into the description and cannot be split
+      // back out, so the description comes back verbatim, address and all.
+      _nameController.text = edit.title;
+      _addressController.text = edit.area ?? '';
+      _descController.text = edit.description ?? '';
+      _pickedPoint = LatLng(edit.lat, edit.lng);
+      _selectedDate = DateTime(edit.startsAt.year, edit.startsAt.month, edit.startsAt.day);
+      _selectedTime = TimeOfDay(hour: edit.startsAt.hour, minute: edit.startsAt.minute);
+      _private = edit.isPrivate;
+      _following = Future.value(const []);
+      return;
+    }
     // Kicked off once here rather than in build(): a FutureBuilder fed
     // straight from a method call re-queries on every rebuild, and this
     // screen rebuilds on each keystroke and step change.
@@ -124,6 +156,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
   }
 
   String get _ctaLabel {
+    if (_editing) return 'Save changes';
     switch (_step) {
       case 1:
         return 'Continue';
@@ -137,6 +170,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
   }
 
   String get _footLabel {
+    if (_editing) return 'Guests see the change the next time they open the party';
     switch (_step) {
       case 1:
         return '4 fields, 20 seconds';
@@ -154,6 +188,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
   Color get _accent => _private ? AppColors.pink : AppColors.purple;
 
   Future<void> _next() async {
+    if (_editing) return _save();
     if (_step == 1 && _addressController.text.trim().isEmpty && _pickedPoint == null) {
       setState(() => _whereMissing = true);
       return;
@@ -218,6 +253,73 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
+  }
+
+  /// Edit mode's submit: `update_party`, then the cover if a new one was
+  /// picked. A failed cover does not undo the saved details, the same split
+  /// the create path makes.
+  ///
+  /// The end time is not on the form. If the party had one, it moves by as
+  /// much as the start did, so a 4-hour party stays 4 hours long and a later
+  /// start can never land after its own end (which `update_party` refuses).
+  Future<void> _save() async {
+    final edit = widget.edit!;
+    final title = _nameController.text.trim();
+    if (title.isEmpty) {
+      setState(() => _submitError = 'Give the party a name.');
+      return;
+    }
+    if (_submitting) return;
+    setState(() {
+      _submitting = true;
+      _submitError = null;
+    });
+
+    final start = _startsAt;
+    final end = edit.endsAt?.add(start.difference(edit.startsAt));
+    final point = _pickedPoint ?? LatLng(edit.lat, edit.lng);
+    final area = _addressController.text.trim();
+    final description = _descController.text.trim();
+
+    try {
+      await _repository.updateParty(PartyEdit(
+        partyId: edit.partyId,
+        title: title,
+        description: description.isEmpty ? null : description,
+        area: area.isEmpty ? null : area,
+        startsAt: start,
+        endsAt: end,
+        lat: point.latitude,
+        lng: point.longitude,
+      ));
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _submitting = false;
+          _submitError = 'That did not save. Try again.';
+        });
+      }
+      return;
+    }
+
+    var coverFailed = false;
+    if (_cover != null) {
+      try {
+        await _repository.replaceCover(edit.partyId, _cover!);
+      } catch (_) {
+        coverFailed = true;
+      }
+    }
+    if (!mounted) return;
+    if (coverFailed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Saved, but the new cover didn’t upload.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+    Navigator.of(context).pop(true);
   }
 
   Future<LatLng> _resolveLocation() async {
@@ -308,7 +410,8 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('STEP $_step OF 4', style: AppTextStyles.mono(size: 10, color: AppColors.textAlpha(0.45))),
+                        Text(_editing ? 'EDIT PARTY' : 'STEP $_step OF 4',
+                            style: AppTextStyles.mono(size: 10, color: AppColors.textAlpha(0.45))),
                         Text(_titles[_step - 1], style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
                       ],
                     ),
@@ -320,6 +423,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
                 ],
               ),
             ),
+            if (!_editing)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
               child: Row(
@@ -404,6 +508,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
     String? error,
     ValueChanged<String>? onChanged,
     double bottomPadding = 13,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     return Padding(
       padding: EdgeInsets.only(bottom: bottomPadding),
@@ -416,6 +521,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
             controller: controller,
             maxLines: maxLines,
             onChanged: onChanged,
+            inputFormatters: inputFormatters,
             style: mono
                 ? AppTextStyles.mono(size: 14, weight: FontWeight.w600, color: AppColors.text)
                 : const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600),
@@ -470,7 +576,11 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
       final picked = await showDatePicker(
         context: context,
         initialDate: _selectedDate,
-        firstDate: DateTime.now().subtract(const Duration(days: 1)),
+        // An edited party may already be in the past; its own date must stay
+        // pickable or the picker asserts.
+        firstDate: _editing && _selectedDate.isBefore(DateTime.now())
+            ? _selectedDate
+            : DateTime.now().subtract(const Duration(days: 1)),
         lastDate: DateTime.now().add(const Duration(days: 365)),
       );
       if (picked != null) setState(() => _selectedDate = picked);
@@ -491,14 +601,27 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
       children: [
         _coverTile(),
         _field('NAME', _nameController),
-        _field(
-          'ADDRESS OR VENUE',
-          _addressController,
-          hint: 'e.g. 12 Example Street, Athens',
-          error: _whereMissing ? 'This field is necessary' : null,
-          bottomPadding: 0,
-          onChanged: (_) => setState(() => _whereMissing = false),
-        ),
+        if (_editing)
+          // `parties.area`: one line, 80 characters, enforced by a CHECK.
+          _field(
+            'AREA OR VENUE (OPTIONAL)',
+            _addressController,
+            hint: 'e.g. Psiri',
+            bottomPadding: 0,
+            inputFormatters: [
+              LengthLimitingTextInputFormatter(80),
+              FilteringTextInputFormatter.deny(RegExp(r'[\n\r]')),
+            ],
+          )
+        else
+          _field(
+            'ADDRESS OR VENUE',
+            _addressController,
+            hint: 'e.g. 12 Example Street, Athens',
+            error: _whereMissing ? 'This field is necessary' : null,
+            bottomPadding: 0,
+            onChanged: (_) => setState(() => _whereMissing = false),
+          ),
         _orDivider(),
         _mapPickBox(),
         Row(
@@ -527,7 +650,23 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(15),
-          child: cover == null
+          child: cover == null && widget.editCoverUrl != null
+              ? Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.network(widget.editCoverUrl!, fit: BoxFit.cover, errorBuilder: (_, _, _) => const SizedBox.shrink()),
+                    Positioned(
+                      right: 8,
+                      bottom: 8,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(9)),
+                        child: const Text('Change cover', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
+                      ),
+                    ),
+                  ],
+                )
+              : cover == null
               ? DiagonalStripePlaceholder(
                   colors: const [Color(0xFF171320), Color(0xFF12101A)],
                   borderRadius: BorderRadius.circular(15),
@@ -644,12 +783,17 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
                           ),
                         ),
                         const Text('Change', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.purpleLight)),
-                        const SizedBox(width: 6),
-                        GestureDetector(
-                          key: const Key('wizard-pick-clear'),
-                          onTap: () => setState(() => _pickedPoint = null),
-                          child: Icon(Icons.close, size: 18, color: AppColors.textAlpha(0.5)),
-                        ),
+                        // An existing party always has a place; clearing it
+                        // would mean "wherever the phone is", which is a
+                        // create-time fallback, not an edit.
+                        if (!_editing) ...[
+                          const SizedBox(width: 6),
+                          GestureDetector(
+                            key: const Key('wizard-pick-clear'),
+                            onTap: () => setState(() => _pickedPoint = null),
+                            child: Icon(Icons.close, size: 18, color: AppColors.textAlpha(0.5)),
+                          ),
+                        ],
                       ],
                     ),
             ),

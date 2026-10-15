@@ -205,6 +205,11 @@ class _FakeProfiles extends ProfileRepository {
 }
 
 class _FakeParties extends PartyRepository {
+  /// A viewer who hosts none of the fixtures, so every party opens its sheet
+  /// rather than the host dashboard.
+  @override
+  String? get currentUserId => 'viewer';
+
   @override
   Future<List<PartySummary>> fetchHostedParties({
     String? hostId,

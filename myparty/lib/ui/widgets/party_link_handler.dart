@@ -80,6 +80,7 @@ class _PartyLinkHandlerState extends State<PartyLinkHandler> {
     await showPartyDetailSheet(
       context,
       item,
+      repository: _parties,
       coverUrl: coverUrl,
       onRsvp: (status) => _answer(item, status),
     );

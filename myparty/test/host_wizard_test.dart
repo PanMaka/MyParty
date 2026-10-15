@@ -12,6 +12,11 @@ import 'package:myparty/models/profile.dart';
 import 'package:myparty/ui/screens/host_wizard_screen.dart';
 
 class _FakePartyRepository extends PartyRepository {
+  /// A viewer who hosts none of the fixtures, so every party opens its sheet
+  /// rather than the host dashboard.
+  @override
+  String? get currentUserId => 'viewer';
+
   _FakePartyRepository({this.failCover = false});
 
   final bool failCover;

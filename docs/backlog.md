@@ -11,7 +11,8 @@ you whether the reason still holds.
 Delete an entry when it ships. If an entry turns out to be a decision rather
 than a gap, move it to §3 instead of deleting it.
 
-Last swept: 2026-08-22, after Phase 14B.
+Last swept: 2026-08-22, after Phase 14B. Phase 39 updated 1.12 and 1.17 and
+added 1.21-1.24 (2026-10-14).
 
 ---
 
@@ -175,17 +176,18 @@ the map spot required and the address a label only.
 *What it costs to leave:* a host who types an address across town and skips the
 map pins the party where they are standing.
 
-### 1.12 A party's cover cannot be changed or removed
+### 1.12 A party's cover can be replaced but never removed
 
-`party_cover_upload_target` answers only while `cover_path is null`, and the
-edge function signs with `upsert: false` — one cover per party, set in the
-wizard. Same shape as 1.1.
+Phase 39 (`20261014113214`) added replacement: a fresh `{party_id}/{uuid}` key
+per upload, `confirm_party_cover_replacement`, and `party-cover/cleanup`
+deleting what nothing points at. Same shape as 1.1, and now the same gap:
+there is no "no cover" choice in the edit form.
 
-*Why it is still open:* replacing needs the ordering `ProfileRepository.
-replaceAvatar` already solves (new object, repoint, delete old), plus an edit-
-party screen to put the button on; neither exists.
+*Why it is still open:* removal is one more branch of the edit form's cover
+choice, and it lands naturally with the preset covers (1.21), which need the
+same "cover_path goes null, cleanup runs" path.
 
-*What it costs to leave:* a wrong cover stays until the party is cancelled.
+*What it costs to leave:* a host who wants no picture has to pick another one.
 
 ### 1.13 Party links open the app only for builds signed with a listed key
 
@@ -264,7 +266,10 @@ refetch of `get_party_chats`, which goes through the SELECT policy.
 A new follower moves your FOLLOWERS tile, an RSVP on your party moves its
 counters, and an invitation adds a row to MY PARTIES, but only when the tab is
 next shown after 30s, or the app comes back after 30s away (`LiveRefresh`). None
-of the three has a topic.
+of the three has a topic **outside the host dashboard**: since Phase 39 an RSVP
+on your party signals `party_host:{uuid}` (`20261014113213`), which only the
+open dashboard holds. The MY PARTIES row and the map pin for that same party
+still update on focus or resume.
 
 *Why it is still open:* each would be one more signal on a per-user topic,
 fanning out to exactly one recipient (the followee, the host, the invitee), so
@@ -312,6 +317,53 @@ list on someone else's phone, keep the old one until their next refetch.
 *Why it is still open:* there is no `ProfileChanged` event, because none of the
 viewer's own lists render the viewer's avatar. The people who would see it are
 other users, and they get it on their next focus or resume.
+
+### 1.21 Preset cover photos
+
+Hosts can only upload their own cover. The intended feature is a set of stock
+party photos a host picks instead of uploading, in the create wizard and in
+the dashboard's Edit.
+
+*Why it is still open:* it needs the photos themselves, somewhere public to
+serve them from, and a way for a party to point at one —
+`parties_cover_path_own_folder` only admits keys in the party's own folder, so
+a preset is either a new column (`cover_preset`) or a widened CHECK. Phase 39
+built the cover replacement so a preset slots in without a second cleanup
+path: choosing one clears `cover_path`, and the same `party-cover/cleanup`
+call removes the uploaded object it replaced.
+
+### 1.22 Guests are not told when a party is cancelled or edited
+
+`cancel_party` and `update_party` (Phase 39) change the party and notify
+nobody. A cancelled party just disappears from the map, the lists and its link;
+a moved start time shows only on the next fetch.
+
+*Why it is still open:* it is a new notification kind with its own fan-out
+(every rsvp'd guest and, for a private party, every invitee), and gotcha 11
+applies: the delivery path would need per-user variants of whatever visibility
+helper it calls. The queue (`notification_jobs`) and worker already exist.
+
+*What it costs to leave:* a guest can turn up to a cancelled party.
+
+### 1.23 "Here now" is going_count, not a check-in
+
+The dashboard and the sheets say "N here now" once a party has started, and
+the number is `going_count`, i.e. who said they would come. Nobody checks in,
+so it counts no-shows and misses walk-ins.
+
+*Why it is still open:* a check-in is a new table, a new consent question (it
+is a location fact about a person at a time) and a host-side flow. Until then
+the label is honest about tense, not about presence.
+
+### 1.24 A host cannot invite more people after creating a private party
+
+The dashboard's Edit is the details step only. The invite step is not offered.
+
+*Why it is still open:* a client batch insert into `invitations` fails whole
+when any one invitee's `invite_policy` refuses the host, because the INSERT
+policy calls `accepts_invite_from` per row. `create_party_with_invites`
+already drops those people server-side, so the fix is a sibling function
+(`invite_to_party`) with the same filtering, not a client insert.
 
 ---
 

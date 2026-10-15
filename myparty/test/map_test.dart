@@ -30,6 +30,11 @@ import 'support/fake_url_launcher.dart';
 /// tests: the RPC call used to be `Supabase.instance.client.rpc` inside
 /// `MapScreen`, which has no seam and cannot run under `flutter test`.
 class _FakePartyRepository extends PartyRepository {
+  /// A viewer who hosts none of the fixtures, so every party opens its sheet
+  /// rather than the host dashboard.
+  @override
+  String? get currentUserId => 'viewer';
+
   _FakePartyRepository(this.pins);
 
   final List<MapPartyPin> pins;
