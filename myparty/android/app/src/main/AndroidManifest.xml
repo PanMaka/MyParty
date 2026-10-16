@@ -63,6 +63,10 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" android:host="mypartycorp.com" android:pathPrefix="/p/" />
+                <!-- Invite links, https://mypartycorp.com/i#<token> (Phase 40). The
+                     token is in the fragment, which path matching ignores, so the
+                     path is exactly "/i". Same host, same verification. -->
+                <data android:scheme="https" android:host="mypartycorp.com" android:path="/i" />
             </intent-filter>
             <!-- Off: links are read by app_links (PartyLinks), not by Flutter's
                  built-in deep linking, which would otherwise ALSO push "/p/<id>"

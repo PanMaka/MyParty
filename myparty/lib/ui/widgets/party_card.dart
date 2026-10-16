@@ -7,6 +7,7 @@ import '../../utils/english_date.dart';
 import '../theme/app_theme.dart';
 import 'dashed_border.dart';
 import 'diagonal_placeholder.dart';
+import 'invited_badge.dart';
 import 'party_detail_sheet.dart';
 import 'user_link.dart';
 
@@ -153,6 +154,11 @@ class PartyCard extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, letterSpacing: -0.3, height: 1.15)),
+                        if (item.isInvited)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4, bottom: 2),
+                            child: InvitedBadge(hostUsername: item.hostUsername),
+                          ),
                         // The handle opens the host; the rest of the cover
                         // still opens the party. The line sits at the bottom
                         // of the cover, so its extra reach goes up, over the

@@ -25,6 +25,13 @@ class PartyLinks {
   /// The id of the most recent party link not yet opened, or null.
   static final ValueNotifier<String?> pending = ValueNotifier<String?>(null);
 
+  /// An invite-link TOKEN (`/i#<token>`) waiting to be redeemed, kept apart
+  /// from [pending] because it is a different act: a party id only opens a
+  /// party, a token grants an invitation first. In memory only, like
+  /// [pending] — a link tapped before sign-in survives until the user signs
+  /// in, not an app kill (docs/backlog.md 1.26).
+  static final ValueNotifier<String?> pendingInvite = ValueNotifier<String?>(null);
+
   static StreamSubscription<Uri>? _subscription;
 
   static void start({AppLinks? appLinks}) {
@@ -41,6 +48,11 @@ class PartyLinks {
   @visibleForTesting
   static void receive(Uri uri) {
     final id = partyIdFromLink(uri);
-    if (id != null) pending.value = id;
+    if (id != null) {
+      pending.value = id;
+      return;
+    }
+    final token = inviteTokenFromLink(uri);
+    if (token != null) pendingInvite.value = token;
   }
 }

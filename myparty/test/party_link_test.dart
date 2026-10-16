@@ -56,4 +56,42 @@ void main() {
       test(link, () => expect(partyIdFromLink(Uri.parse(link)), isNull));
     }
   });
+
+  group('invite links', () {
+    const token = 'Ab3_Zx-9Ab3_Zx-9Ab3_Zx-9Ab3_Zx-9Ab3_Zx-9Ab3';
+
+    test('builds https://mypartycorp.com/i#<token>, the token in the fragment', () {
+      final link = inviteLink(token);
+      expect(link.toString(), 'https://mypartycorp.com/i#$token');
+      expect(link.path, '/i', reason: 'the request path carries no secret');
+      expect(inviteTokenFromLink(link), token);
+    });
+
+    test('accepts a trailing slash', () {
+      expect(inviteTokenFromLink(Uri.parse('https://mypartycorp.com/i/#$token')), token);
+    });
+
+    for (final link in [
+      'http://mypartycorp.com/i#$token', // not https
+      'https://www.mypartycorp.com/i#$token', // not our one host
+      'https://evil.example/i#$token',
+      'https://mypartycorp.com:8443/i#$token',
+      'https://user@mypartycorp.com/i#$token',
+      'https://mypartycorp.com/i/$token', // token in the path, where logs see it
+      'https://mypartycorp.com/i?t=$token',
+      'https://mypartycorp.com/i?x=1#$token',
+      'https://mypartycorp.com/p#$token',
+      'https://mypartycorp.com/i#${token.substring(1)}', // 42 characters
+      'https://mypartycorp.com/i#${token}A', // 44
+      'https://mypartycorp.com/i#${token.substring(1)}+', // not url-safe
+      'https://mypartycorp.com/i',
+    ]) {
+      test('refuses $link', () => expect(inviteTokenFromLink(Uri.parse(link)), isNull));
+    }
+
+    test('a party link is not an invite link, and the reverse', () {
+      expect(inviteTokenFromLink(Uri.parse('https://mypartycorp.com/p/3f2a9c1e-7b4d-4e8a-9c2f-1d5e6a7b8c90')), isNull);
+      expect(partyIdFromLink(inviteLink(token)), isNull);
+    });
+  });
 }

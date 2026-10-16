@@ -69,6 +69,10 @@ class MapPartyPin {
   /// arrangement as `profiles.avatar_path`.
   final String? coverPath;
 
+  /// The VIEWER holds an invitation to this party — like [myRsvpStatus], a
+  /// property of who is asking. Every RPC that builds a pin sends it.
+  final bool isInvited;
+
   const MapPartyPin({
     required this.id,
     required this.lat,
@@ -85,6 +89,7 @@ class MapPartyPin {
     this.hostUsername,
     this.myRsvpStatus,
     this.coverPath,
+    this.isInvited = false,
   });
 
   factory MapPartyPin.fromRpcRow(Map<String, dynamic> row, {required String fallbackId}) {
@@ -113,6 +118,7 @@ class MapPartyPin {
       hostUsername: row['host_username'] as String?,
       myRsvpStatus: row['my_rsvp_status'] as String?,
       coverPath: row['cover_path'] as String?,
+      isInvited: (row['is_invited'] as bool?) ?? false,
     );
   }
 
@@ -232,6 +238,7 @@ class MapPartyPin {
       hostUsername: hostUsername,
       myRsvpStatus: next,
       coverPath: coverPath,
+      isInvited: isInvited,
     );
   }
 }

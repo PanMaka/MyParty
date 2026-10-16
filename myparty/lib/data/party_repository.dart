@@ -567,21 +567,6 @@ class PartyRepository {
     return HostPartyStats.fromRow(rows.first as Map<String, dynamic>);
   }
 
-  /// Cumulative going/interested per bucket. [bucket] null lets the server
-  /// choose (hourly under 72 hours, daily beyond).
-  ///
-  /// Sends the device's UTC offset, so a "day" is the host's day. An offset
-  /// rather than a zone name for the reason [fetchPartiesNearUser] gives; a
-  /// daily RSVP chart can absorb the one DST night it gets wrong.
-  Future<RsvpTimeline> fetchRsvpTimeline(String partyId, {StatsBucket? bucket}) async {
-    final rows = await _client.rpc('get_party_rsvp_timeline', params: {
-      'p_party_id': partyId,
-      'p_bucket': bucket?.name,
-      'p_utc_offset_minutes': DateTime.now().timeZoneOffset.inMinutes,
-    }) as List;
-    return RsvpTimeline.fromRows(rows.cast<Map<String, dynamic>>());
-  }
-
   /// One page of the guest list, newest first. [goingOnly] false is the
   /// Interested tab and lists everyone, going included.
   Future<PartyGuestPage> fetchGuests(
@@ -695,6 +680,128 @@ class PartyRepository {
   Future<void> cleanUpCovers(String partyId) async {
     await _client.functions.invoke('party-cover/cleanup', body: {'party_id': partyId});
   }
+
+  // ---------------------------------------------------------------------------
+  // Invites, invite links and removing a guest (Phase 40, 20261014133500).
+  // Host-only on the server except redeemInvite, which is anyone signed in.
+  // ---------------------------------------------------------------------------
+
+  /// The host's followers, alphabetical, filtered by [query] (a substring of
+  /// the username), each marked if already invited or answered.
+  Future<InvitableFollowerPage> fetchInvitableFollowers(
+    String partyId, {
+    String? query,
+    InvitableFollower? after,
+    int limit = 50,
+  }) async {
+    final rows = await _client.rpc('get_invitable_followers', params: {
+      'p_party_id': partyId,
+      'p_query': query,
+      'p_cursor_username': after?.username,
+      'p_cursor_id': after?.userId,
+      'p_limit': limit,
+    }) as List;
+    final followers = rows.map((row) => InvitableFollower.fromRow(row as Map<String, dynamic>)).toList();
+    return InvitableFollowerPage(
+      followers: followers,
+      cursor: followers.length < limit ? null : followers.last,
+    );
+  }
+
+  /// Invites [userIds]. Returns how many invitations were written: people
+  /// already invited, block-paired, or whose invite setting refuses the host
+  /// are skipped server-side, so this can be fewer than asked. Announces
+  /// [PartyGuestsChanged]; the write is [writeInvites].
+  Future<int> inviteToParty(String partyId, List<String> userIds) async {
+    final written = await writeInvites(partyId, userIds);
+    dataChanges.publish(PartyGuestsChanged(partyId: partyId));
+    return written;
+  }
+
+  @protected
+  Future<int> writeInvites(String partyId, List<String> userIds) async {
+    final written = await _client.rpc('invite_to_party', params: {
+      'p_party_id': partyId,
+      'p_invitee_ids': userIds,
+    });
+    return written as int;
+  }
+
+  /// Everyone invited to the party, newest first — the dashboard's Invited
+  /// tab, which is the only place a link guest who never answered shows up.
+  Future<PartyInviteePage> fetchInvitees(String partyId, {PartyInvitee? after, int limit = 30}) async {
+    final rows = await _client.rpc('get_party_invitees', params: {
+      'p_party_id': partyId,
+      'p_cursor_created_at': after?.createdAt.toUtc().toIso8601String(),
+      'p_cursor_user_id': after?.userId,
+      'p_limit': limit,
+    }) as List;
+    final invitees = rows.map((row) => PartyInvitee.fromRow(row as Map<String, dynamic>)).toList();
+    return PartyInviteePage(invitees: invitees, cursor: invitees.length < limit ? null : invitees.last);
+  }
+
+  /// Takes [userId] off the guest list: their invitation, their RSVP and
+  /// their way back in through a link. Only a direct invite brings them back.
+  /// Announces [PartyGuestsChanged]; the write is [writeRemoval].
+  Future<void> removeGuest(String partyId, String userId) async {
+    await writeRemoval(partyId, userId);
+    dataChanges.publish(PartyGuestsChanged(partyId: partyId));
+  }
+
+  @protected
+  Future<void> writeRemoval(String partyId, String userId) async {
+    await _client.rpc('remove_party_guest', params: {'p_party_id': partyId, 'p_user_id': userId});
+  }
+
+  /// The party's active invite link, or null if it has none.
+  Future<InviteLinkStatus?> fetchInviteLink(String partyId) async {
+    final rows = await _client.rpc('get_party_invite_link', params: {'p_party_id': partyId}) as List;
+    if (rows.isEmpty) return null;
+    return InviteLinkStatus.fromRow(rows.first as Map<String, dynamic>);
+  }
+
+  /// Creates the party's invite link, revoking the previous one, and returns
+  /// the token. This is the only time the token exists outside the link
+  /// itself: the server keeps its hash. Private parties only.
+  Future<String> createInviteLink(String partyId, {int? maxUses}) async {
+    final token = await _client.rpc('create_party_invite_link', params: {
+      'p_party_id': partyId,
+      'p_max_uses': maxUses,
+    });
+    return token as String;
+  }
+
+  Future<void> disableInviteLink(String partyId) async {
+    await _client.rpc('disable_party_invite_link', params: {'p_party_id': partyId});
+  }
+
+  /// Opens an invite link as the signed-in user: returns the party it
+  /// grants, or throws. Every refusal from the server is the same
+  /// "invite link not valid" (see [InviteRefused]), apart from the rate limit.
+  /// Announces [InviteRedeemed]; the call is [writeRedeem].
+  Future<String> redeemInvite(String token) async {
+    final partyId = await writeRedeem(token);
+    dataChanges.publish(InviteRedeemed(partyId: partyId));
+    return partyId;
+  }
+
+  @protected
+  Future<String> writeRedeem(String token) async {
+    try {
+      final partyId = await _client.rpc('redeem_party_invite', params: {'p_token': token});
+      return partyId as String;
+    } on PostgrestException catch (e) {
+      throw InviteRefused(rateLimited: e.message.contains('rate limit'));
+    }
+  }
+}
+
+/// An invite link that did not let the viewer in. [rateLimited] is the one
+/// reason the server distinguishes, because it says nothing about the party.
+class InviteRefused implements Exception {
+  const InviteRefused({this.rateLimited = false});
+
+  final bool rateLimited;
 }
 
 /// Party search results, already split the way they are rendered.

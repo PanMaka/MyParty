@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' show RealtimeSubscribeStatus;
 
+import 'package:myparty/data/invite_link_store.dart';
 import 'package:myparty/data/party_host_channel.dart';
 import 'package:myparty/data/party_repository.dart';
 import 'package:myparty/data/profile_repository.dart';
@@ -16,6 +17,8 @@ import 'package:myparty/models/profile.dart';
 import 'package:myparty/state/data_changes.dart';
 import 'package:myparty/ui/screens/host_dashboard_screen.dart';
 import 'package:myparty/ui/screens/host_wizard_screen.dart';
+import 'package:myparty/ui/screens/invite_followers_screen.dart';
+import 'package:myparty/ui/widgets/invite_link_sheet.dart';
 import 'package:myparty/ui/widgets/map_pin_sheet.dart';
 import 'package:myparty/ui/widgets/party_detail_sheet.dart';
 import 'package:myparty/ui/widgets/user_link.dart';
@@ -64,16 +67,18 @@ PartyGuest _guest(String name, {bool going = false, bool follows = false}) => Pa
     );
 
 class _FakeRepo extends PartyRepository {
-  _FakeRepo({HostPartyStats? stats, RsvpTimeline? timeline, this.statsGate})
-      : stats = stats ?? _stats(),
-        timeline = timeline ??
-            RsvpTimeline(bucket: StatsBucket.day, points: [
-              RsvpTimelinePoint(at: DateTime(2026, 10, 1), going: 1, interested: 3),
-              RsvpTimelinePoint(at: DateTime(2026, 10, 2), going: 3, interested: 8),
-            ]);
+  _FakeRepo({HostPartyStats? stats, this.statsGate, this.link}) : stats = stats ?? _stats();
 
   HostPartyStats stats;
-  RsvpTimeline timeline;
+
+  /// The party's active invite link as the server would describe it.
+  InviteLinkStatus? link;
+  int tokensMade = 0;
+  final List<int?> linkMaxUses = [];
+  int linksDisabled = 0;
+
+  final List<List<String>> invitesSent = [];
+  final List<String> removed = [];
 
   /// When set, stats wait for it: lets a test look at the loading state.
   final Completer<void>? statsGate;
@@ -99,7 +104,59 @@ class _FakeRepo extends PartyRepository {
   }
 
   @override
-  Future<RsvpTimeline> fetchRsvpTimeline(String partyId, {StatsBucket? bucket}) async => timeline;
+  Future<InvitableFollowerPage> fetchInvitableFollowers(
+    String partyId, {
+    String? query,
+    InvitableFollower? after,
+    int limit = 50,
+  }) async {
+    final all = [
+      const InvitableFollower(userId: 'u-dee', username: 'dee', avatarPath: null, alreadyInvited: false, rsvpStatus: null),
+      const InvitableFollower(userId: 'u-eli', username: 'eli', avatarPath: null, alreadyInvited: true, rsvpStatus: null),
+      const InvitableFollower(userId: 'u-fay', username: 'fay', avatarPath: null, alreadyInvited: false, rsvpStatus: 'going'),
+    ];
+    final q = query?.toLowerCase();
+    return InvitableFollowerPage(
+      followers: [for (final f in all) if (q == null || f.username.contains(q)) f],
+      cursor: null,
+    );
+  }
+
+  @override
+  Future<int> writeInvites(String partyId, List<String> userIds) async {
+    invitesSent.add(userIds);
+    return userIds.length;
+  }
+
+  @override
+  Future<PartyInviteePage> fetchInvitees(String partyId, {PartyInvitee? after, int limit = 30}) async {
+    return PartyInviteePage(invitees: [
+      PartyInvitee(
+          userId: 'u-gus', username: 'gus', avatarPath: null, rsvpStatus: null, viaLink: true, createdAt: DateTime.utc(2026, 10, 2)),
+      PartyInvitee(
+          userId: 'u-ana', username: 'ana', avatarPath: null, rsvpStatus: 'going', viaLink: false, createdAt: DateTime.utc(2026, 10, 1)),
+    ], cursor: null);
+  }
+
+  @override
+  Future<void> writeRemoval(String partyId, String userId) async => removed.add(userId);
+
+  @override
+  Future<InviteLinkStatus?> fetchInviteLink(String partyId) async => link;
+
+  @override
+  Future<String> createInviteLink(String partyId, {int? maxUses}) async {
+    tokensMade += 1;
+    linkMaxUses.add(maxUses);
+    link = InviteLinkStatus(createdAt: DateTime.utc(2026, 10, 16, 12, tokensMade), maxUses: maxUses, useCount: 0);
+    return 'tok${tokensMade}_'.padRight(43, 'x');
+  }
+
+  @override
+  Future<void> disableInviteLink(String partyId) async {
+    linksDisabled += 1;
+    link = null;
+  }
 
   @override
   Future<PartyGuestPage> fetchGuests(String partyId, {required bool goingOnly, PartyGuest? after, int limit = 30}) async {
@@ -164,12 +221,13 @@ void _tall(WidgetTester tester) {
   addTearDown(tester.view.reset);
 }
 
-Widget _dashboard(_FakeRepo repo) => MaterialApp(
+Widget _dashboard(_FakeRepo repo, {InviteLinkStore? store}) => MaterialApp(
       home: HostDashboardScreen(
         partyId: _partyId,
         repository: repo,
         profiles: _FakeProfiles(),
         share: (text) async => _shared.add(text),
+        linkStore: store ?? InviteLinkStore(),
       ),
     );
 
@@ -221,7 +279,11 @@ Future<void> _tapDoor(WidgetTester tester, void Function(BuildContext) open) asy
 }
 
 void main() {
-  setUp(_shared.clear);
+  setUp(() {
+    _shared.clear();
+    // InviteLinkStore's device storage, empty for every test.
+    SharedPreferences.setMockInitialValues({});
+  });
 
   group('routing: the host gets the dashboard, everyone else the sheet', () {
     testWidgets('a map pin / search hit / MY PARTIES row of your own party', (tester) async {
@@ -281,8 +343,7 @@ void main() {
     expect(find.descendant(of: find.byKey(const Key('tile-going')), matching: find.text('3')), findsOneWidget);
     expect(find.descendant(of: find.byKey(const Key('tile-interested')), matching: find.text('8')), findsOneWidget);
     expect(find.byKey(const Key('tile-coming')), findsNothing);
-    expect(find.byKey(const Key('tile-here-now')), findsNothing, reason: 'not live yet');
-    expect(find.byType(LineChart), findsOneWidget);
+    expect(find.text('RSVPS OVER TIME'), findsNothing, reason: 'the chart was removed in Phase 40');
 
     // Going tab first: the two going guests, no GOING badge (it is the tab).
     await tester.scrollUntilVisible(find.text('@ana'), 200);
@@ -309,32 +370,20 @@ void main() {
     expect(find.descendant(of: find.byKey(const Key('tile-coming')), matching: find.text('2')), findsOneWidget);
     expect(find.byKey(const Key('tile-going')), findsNothing);
     expect(find.byKey(const Key('tile-interested')), findsNothing);
-    expect(find.text('COMING OVER TIME'), findsOneWidget);
+    expect(find.text('COMING OVER TIME'), findsNothing);
     await tester.scrollUntilVisible(find.text('Coming · 2'), 200);
     expect(find.textContaining('Interested ·'), findsNothing);
+    expect(find.byKey(const Key('tab-invited')), findsOneWidget);
   });
 
-  testWidgets('a live party adds "Here now", captioned as what it is', (tester) async {
+  testWidgets('a live party shows its phase, and no "Here now" tile any more', (tester) async {
     _tall(tester);
     await tester.pumpWidget(_dashboard(_FakeRepo(stats: _stats(isLive: true))));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('phase-live')), findsOneWidget);
-    expect(find.descendant(of: find.byKey(const Key('tile-here-now')), matching: find.text('3')), findsOneWidget);
-    expect(find.text('said they’d come'), findsOneWidget);
-  });
-
-  testWidgets('no RSVPs yet: the empty state offers the share sheet', (tester) async {
-    final repo = _FakeRepo(timeline: const RsvpTimeline(bucket: StatsBucket.hour, points: []));
-    _tall(tester);
-    await tester.pumpWidget(_dashboard(repo));
-    await tester.pumpAndSettle();
-
-    expect(find.text('No RSVPs yet — share your party'), findsOneWidget);
-    expect(find.byType(LineChart), findsNothing);
-
-    await tester.tap(find.descendant(of: find.byKey(const Key('chart-empty')), matching: find.text('Share')));
-    expect(_shared.single, contains('https://mypartycorp.com/p/$_partyId'));
+    expect(find.byKey(const Key('tile-here-now')), findsNothing);
+    expect(find.text('Here now'), findsNothing);
   });
 
   testWidgets('cancelling asks first; "Keep it" writes nothing, confirming cancels', (tester) async {
@@ -426,6 +475,219 @@ void main() {
     // Back on the dashboard, which refetched.
     expect(find.byType(HostWizardScreen), findsNothing);
     expect(repo.statsFetches, greaterThan(fetchesBefore));
+  });
+
+  group('Invite people', () {
+    testWidgets('followers: locked rows cannot be picked, the rest are sent', (tester) async {
+      _tall(tester);
+      final repo = _FakeRepo();
+      await tester.pumpWidget(_dashboard(repo));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('dashboard-invite')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('invite-followers')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(InviteFollowersScreen), findsOneWidget);
+      expect(find.text('@dee'), findsOneWidget);
+      expect(find.text('Invited'), findsOneWidget, reason: 'eli is already invited');
+      expect(find.text('Going'), findsOneWidget, reason: 'fay already answered');
+      expect(find.byType(Checkbox), findsOneWidget, reason: 'only dee is selectable');
+
+      final send = tester.widget<ElevatedButton>(find.byKey(const Key('send-invites')));
+      expect(send.onPressed, isNull, reason: 'nothing selected yet');
+
+      await tester.tap(find.byKey(const Key('follower-u-eli')));
+      await tester.tap(find.byKey(const Key('follower-u-dee')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('send-invites')));
+      await tester.pumpAndSettle();
+
+      expect(repo.invitesSent, [
+        ['u-dee'],
+      ]);
+      expect(find.byType(InviteFollowersScreen), findsNothing);
+      expect(find.text('Invited 1 person.'), findsOneWidget);
+    });
+
+    testWidgets('search narrows the list on the server', (tester) async {
+      _tall(tester);
+      await tester.pumpWidget(MaterialApp(
+        home: InviteFollowersScreen(partyId: _partyId, isPrivate: false, repository: _FakeRepo(), profiles: _FakeProfiles()),
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byKey(const Key('invite-search')), 'fa');
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      expect(find.text('@fay'), findsOneWidget);
+      expect(find.text('@dee'), findsNothing);
+    });
+
+    testWidgets('a public party offers its ordinary link, not an invite link', (tester) async {
+      _tall(tester);
+      await tester.pumpWidget(_dashboard(_FakeRepo()));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('dashboard-invite')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('invite-with-link')), findsNothing);
+      await tester.tap(find.byKey(const Key('share-party-link')));
+      await tester.pumpAndSettle();
+      expect(_shared.single, contains('https://mypartycorp.com/p/$_partyId'));
+    });
+
+    testWidgets('a private party: create a link with a max-uses limit, then copy and share it', (tester) async {
+      _tall(tester);
+      final repo = _FakeRepo(stats: _stats(isPrivate: true, going: 1, interested: 1));
+      await tester.pumpWidget(_dashboard(repo));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('dashboard-invite')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('invite-with-link')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(InviteLinkSheet), findsOneWidget);
+      await tester.tap(find.byKey(const Key('max-uses-25')));
+      await tester.tap(find.byKey(const Key('create-link')));
+      await tester.pumpAndSettle();
+
+      expect(repo.linkMaxUses, [25]);
+      final shown = tester.widget<Text>(find.byKey(const Key('invite-link-text'))).data!;
+      expect(shown, startsWith('https://mypartycorp.com/i#tok1_'), reason: 'the token rides in the fragment');
+      expect(find.text('0 of 25 joined'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('share-link')));
+      await tester.pump();
+      expect(_shared.single, contains(shown));
+      expect(_shared.single, isNot(contains('Rooftop Night')), reason: 'a private party is shared without its title');
+    });
+
+    testWidgets('the same link on another device cannot be shown, and says what a new one costs', (tester) async {
+      _tall(tester);
+      // The server has an active link; this device's storage has no token for it.
+      final repo = _FakeRepo(
+        stats: _stats(isPrivate: true, going: 1, interested: 1),
+        link: InviteLinkStatus(createdAt: DateTime.utc(2026, 10, 1), maxUses: null, useCount: 4),
+      );
+      await tester.pumpWidget(_dashboard(repo));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('dashboard-invite')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('invite-with-link')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('link-other-device')), findsOneWidget);
+      expect(find.textContaining('turns the old one off'), findsOneWidget);
+      expect(find.byKey(const Key('copy-link')), findsNothing);
+      expect(find.text('4 joined'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('regenerate-link')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('stops working straight away'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('confirm-link-action')));
+      await tester.pumpAndSettle();
+
+      expect(repo.tokensMade, 1);
+      expect(find.byKey(const Key('copy-link')), findsOneWidget, reason: 'this device holds the new one');
+    });
+
+    testWidgets('a token saved on this device is offered again after reopening', (tester) async {
+      _tall(tester);
+      final store = InviteLinkStore();
+      final created = DateTime.utc(2026, 10, 3);
+      await store.save(_partyId, 'saved_'.padRight(43, 'y'), created);
+      final repo = _FakeRepo(
+        stats: _stats(isPrivate: true, going: 1, interested: 1),
+        link: InviteLinkStatus(createdAt: created, maxUses: 10, useCount: 10),
+      );
+      await tester.pumpWidget(_dashboard(repo, store: store));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('dashboard-invite')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('invite-with-link')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('copy-link')), findsOneWidget);
+      expect(find.textContaining('Used up'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('disable-link')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirm-link-action')));
+      await tester.pumpAndSettle();
+
+      expect(repo.linksDisabled, 1);
+      expect(await store.tokenFor(_partyId, created), isNull, reason: 'a turned-off link is forgotten here too');
+      expect(find.byKey(const Key('create-link')), findsOneWidget);
+    });
+
+    test('a stored token is trusted only for the link it was made for', () async {
+      final store = InviteLinkStore();
+      await store.save(_partyId, 'old_'.padRight(43, 'z'), DateTime.utc(2026, 10, 1));
+      expect(await store.tokenFor(_partyId, DateTime.utc(2026, 10, 2)), isNull,
+          reason: 'regenerated elsewhere: offering this would share a dead link');
+    });
+  });
+
+  group('Removing a guest', () {
+    testWidgets('the Invited tab lists link guests who never answered, and Remove asks first', (tester) async {
+      _tall(tester);
+      final repo = _FakeRepo(stats: _stats(isPrivate: true, going: 1, interested: 1));
+      await tester.pumpWidget(_dashboard(repo));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('tab-invited')));
+      await tester.pumpAndSettle();
+      expect(find.text('@gus'), findsOneWidget);
+      expect(find.text('VIA LINK'), findsOneWidget);
+      expect(find.text('NO ANSWER'), findsOneWidget);
+      expect(find.descendant(of: find.byType(UserLink), matching: find.text('COMING')), findsOneWidget,
+          reason: 'a private party says Coming, not Going');
+
+      await tester.tap(find.byKey(const Key('remove-u-gus')));
+      await tester.pumpAndSettle();
+      expect(find.text('Remove @gus?'), findsOneWidget);
+      expect(find.textContaining('won’t let them back in'), findsOneWidget);
+
+      await tester.tap(find.text('Keep'));
+      await tester.pumpAndSettle();
+      expect(repo.removed, isEmpty);
+
+      final before = repo.statsFetches;
+      await tester.tap(find.byKey(const Key('remove-u-gus')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirm-remove-guest')));
+      await tester.pumpAndSettle();
+
+      expect(repo.removed, ['u-gus']);
+      expect(find.text('Removed @gus.'), findsOneWidget);
+      expect(repo.statsFetches, greaterThan(before), reason: 'PartyGuestsChanged refreshes the counts');
+    });
+
+    testWidgets('removing from a public party says the party stays visible to them', (tester) async {
+      _tall(tester);
+      await tester.pumpWidget(_dashboard(_FakeRepo()));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('remove-u-ana')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('they can still see it'), findsOneWidget);
+    });
+
+    testWidgets('a cancelled party offers neither Remove nor Invite people', (tester) async {
+      _tall(tester);
+      await tester.pumpWidget(_dashboard(_FakeRepo(stats: _stats(status: 'cancelled'))));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('remove-u-ana')), findsNothing);
+      expect(find.byKey(const Key('dashboard-invite')), findsNothing);
+    });
   });
 
   test('a replaced cover is announced and asks for cleanup of the old one', () async {

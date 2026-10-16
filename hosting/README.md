@@ -46,6 +46,29 @@ the comment at the top of it for why. Keep it that way: rendering a party's deta
 here would need a server reading the database outside the viewer's session, which
 is exactly what the parties policy exists to prevent.
 
+## 3. `/i` → `mypartycorp.com/i/index.html` — required for invite links (Phase 40)
+
+Invite links are `https://mypartycorp.com/i#<token>` (`inviteLink` in
+`party_link.dart`). The token is in the **fragment**, which browsers never send to
+the server, so every invite link requests exactly `/i`. Without a rewrite,
+someone without the app gets a 404. Serve `i/index.html` for `/i` (a rewrite, not
+a redirect):
+
+- Cloudflare Pages: the `_redirects` file next to this README's site folder
+  (`mypartycorp.com/_redirects`) already holds the rule, `/i  /i/index.html  200`,
+  together with the `/p/*` one.
+- Netlify `_redirects`: the same file works unchanged.
+- Vercel: `{ "rewrites": [{ "source": "/i", "destination": "/i/index.html" }] }`
+- nginx: `location = /i { try_files /i/index.html =404; }`
+
+Like the `/p/` page it is static and says nothing about the party. It must also
+**never run a script**: a script could read the fragment, and the fragment is the
+key. Its Content-Security-Policy forbids scripts, so keep it that way.
+
+The Android intent filter claims `/i` too (`android:path="/i"` in
+`AndroidManifest.xml`). Verification is per host, so the existing
+`assetlinks.json` already covers it; nothing in that file changes.
+
 ## Testing before the domain serves the file
 
 Without a verified `assetlinks.json`, Android 12+ opens these links in the browser.
@@ -54,6 +77,10 @@ To test the app's handling anyway, either send the intent straight to the app:
 ```
 adb shell am start -W -a android.intent.action.VIEW \
   -d "https://mypartycorp.com/p/<party uuid>" com.example.myparty
+
+# An invite link. Quote it: the # would start a comment in the shell.
+adb shell am start -W -a android.intent.action.VIEW \
+  -d "'https://mypartycorp.com/i#<43-character token>'" com.example.myparty
 ```
 
 or approve the domain for the app by hand (what the user would do under Settings →

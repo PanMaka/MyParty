@@ -38,11 +38,23 @@ class _FakePartyRepository extends PartyRepository {
   @override
   String? get currentUserId => 'viewer';
 
-  _FakePartyRepository({this.party, this.fail = false});
+  _FakePartyRepository({this.party, this.fail = false, this.redeemsTo, this.refusal});
 
   final PartyListItem? party;
   final bool fail;
+
+  /// What redeeming an invite token answers: a party id, or [refusal].
+  final String? redeemsTo;
+  final InviteRefused? refusal;
+  final redeemed = <String>[];
   final fetched = <String>[];
+
+  @override
+  Future<String> writeRedeem(String token) async {
+    redeemed.add(token);
+    if (refusal != null) throw refusal!;
+    return redeemsTo!;
+  }
   final rsvpWrites = <MpRsvp>[];
 
   @override
@@ -60,11 +72,17 @@ class _FakePartyRepository extends PartyRepository {
   Future<String?> signedCoverUrl(String? coverPath, {int expiresIn = 3600}) async => null;
 }
 
-Future<void> _mount(WidgetTester tester, _FakePartyRepository repo, ValueNotifier<String?> pending) async {
+Future<void> _mount(
+  WidgetTester tester,
+  _FakePartyRepository repo,
+  ValueNotifier<String?> pending, {
+  ValueNotifier<String?>? pendingInvite,
+}) async {
   await tester.pumpWidget(MaterialApp(
     home: PartyLinkHandler(
       repository: repo,
       pending: pending,
+      pendingInvite: pendingInvite ?? ValueNotifier<String?>(null),
       child: const Scaffold(body: Text('home')),
     ),
   ));
@@ -189,4 +207,70 @@ void main() {
       expect(announced.single.status, MpRsvp.going);
     });
   });
+
+  testWidgets('a party you are invited to says who invited you; one you are not, says nothing', (tester) async {
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: PartyDetailSheet(item: _item(isPrivate: true)))));
+    expect(find.text('Invited by @zoi'), findsOneWidget);
+
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: PartyDetailSheet(item: _item()))));
+    expect(find.byKey(const Key('invited-badge')), findsNothing);
+  });
+
+  group('invite links (/i#token)', () {
+    testWidgets('a token waiting from before sign-in is redeemed, then its party opens', (tester) async {
+      final repo = _FakePartyRepository(party: _item(isPrivate: true), redeemsTo: _id);
+      final announced = <InviteRedeemed>[];
+      final sub = dataChanges.stream.listen((c) {
+        if (c is InviteRedeemed) announced.add(c);
+      });
+      addTearDown(sub.cancel);
+      final pendingInvite = ValueNotifier<String?>(_token);
+
+      await _mount(tester, repo, ValueNotifier<String?>(null), pendingInvite: pendingInvite);
+
+      expect(repo.redeemed, [_token]);
+      expect(repo.fetched, [_id], reason: 'opened through get_party, like any party link');
+      expect(find.byType(PartyDetailSheet), findsOneWidget);
+      expect(pendingInvite.value, isNull, reason: 'consumed, so it is never redeemed twice');
+      expect(announced.single.partyId, _id, reason: 'MY PARTIES and the map hear about the new party');
+    });
+
+    testWidgets('every refusal reads the same', (tester) async {
+      final repo = _FakePartyRepository(refusal: const InviteRefused());
+      await _mount(tester, repo, ValueNotifier<String?>(null), pendingInvite: ValueNotifier<String?>(_token));
+
+      expect(find.text('This invite link doesn’t work any more.'), findsOneWidget);
+      expect(find.byType(PartyDetailSheet), findsNothing);
+      expect(repo.fetched, isEmpty);
+    });
+
+    testWidgets('the rate limit is the one refusal that says something else', (tester) async {
+      final repo = _FakePartyRepository(refusal: const InviteRefused(rateLimited: true));
+      await _mount(tester, repo, ValueNotifier<String?>(null), pendingInvite: ValueNotifier<String?>(_token));
+
+      expect(find.textContaining('Try again in a while'), findsOneWidget);
+    });
+  });
+
+  group('PartyLinks.receive, invite links', () {
+    tearDown(() {
+      PartyLinks.pending.value = null;
+      PartyLinks.pendingInvite.value = null;
+    });
+
+    test('an invite link becomes a pending token, not a pending party', () {
+      PartyLinks.receive(Uri.parse('https://mypartycorp.com/i#$_token'));
+      expect(PartyLinks.pendingInvite.value, _token);
+      expect(PartyLinks.pending.value, isNull);
+    });
+
+    test('a party link still becomes a pending party', () {
+      PartyLinks.receive(Uri.parse('https://mypartycorp.com/p/$_id'));
+      expect(PartyLinks.pending.value, _id);
+      expect(PartyLinks.pendingInvite.value, isNull);
+    });
+  });
 }
+
+/// 43 url-safe characters: the shape create_party_invite_link produces.
+const _token = 'Ab3_Zx-9Ab3_Zx-9Ab3_Zx-9Ab3_Zx-9Ab3_Zx-9Ab3';

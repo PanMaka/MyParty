@@ -348,9 +348,11 @@ helper it calls. The queue (`notification_jobs`) and worker already exist.
 
 ### 1.23 "Here now" is going_count, not a check-in
 
-The dashboard and the sheets say "N here now" once a party has started, and
+The attendee sheets and cards say "N here now" once a party has started, and
 the number is `going_count`, i.e. who said they would come. Nobody checks in,
-so it counts no-shows and misses walk-ins.
+so it counts no-shows and misses walk-ins. The host dashboard no longer shows
+it: its "Here now" tile was removed in Phase 40, so this gap is about the
+attendee surfaces only.
 
 *Why it is still open:* a check-in is a new table, a new consent question (it
 is a location fact about a person at a time) and a host-side flow. Until then
@@ -376,6 +378,51 @@ gone and has to be tapped again.
 *Why it is still open:* persisting it means writing a party id or an invite
 token to device storage before the user has an account. Once the user has an
 account it is cheap, but nobody has decided it is worth doing.
+
+### 1.27 iOS has no universal links, for `/p` or `/i`
+
+On iPhone, a party link or an invite link always opens the browser, which
+shows the static fallback page. Android claims both paths through its verified
+intent filter.
+
+*Why it is still open:* there is no Apple Team ID yet, and universal links need
+one. Three pieces are needed:
+
+- `ios/Runner/Runner.entitlements` with
+  `com.apple.developer.associated-domains = ["applinks:mypartycorp.com"]`, wired
+  in as `CODE_SIGN_ENTITLEMENTS` for the Runner target.
+- `hosting/mypartycorp.com/.well-known/apple-app-site-association`: JSON with
+  `applinks.details[].appIDs = ["<TEAMID>.<bundle id>"]` and
+  `components` for `/p/*` and `/i`. Invite links carry their token in the
+  fragment, so the `/i` component matches on path only. Serve it with
+  `Content-Type: application/json`, no redirect, no `.json` extension.
+- The Team ID and a real bundle id (see 1.28) to put in both.
+
+`app_links` already handles universal links on iOS, so no Dart changes.
+
+### 1.28 The app id is still Flutter's placeholder: must fix before launch
+
+Android `applicationId` and `namespace` are `com.example.myparty`
+(`android/app/build.gradle.kts`), and so is the iOS
+`PRODUCT_BUNDLE_IDENTIFIER`. Google Play rejects `com.example.*` packages.
+
+*Why it is still open:* changing it is cheap in code and expensive everywhere
+else, so it should be done once, deliberately:
+
+- **`assetlinks.json`** names the package. Change both together, and redeploy
+  the file before shipping the build, or party and invite links stop opening
+  the app.
+- **Existing installs.** To Android a new applicationId is a different app.
+  Installed copies don't update; they sit beside the new one, keeping their
+  own sign-in and local storage. That includes invite-link tokens the host
+  saved on the device (`InviteLinkStore`), so a host would have to make a new
+  link. Before any public release this only affects test phones.
+- **Firebase.** If push is configured, `google-services.json` is tied to the
+  package name and needs a new Android app in the Firebase project.
+- **Kotlin package.** `namespace` and the `MainActivity` package directory
+  should move with it.
+- iOS: the bundle id goes into the Apple app record and 1.27's
+  `apple-app-site-association`.
 
 ---
 

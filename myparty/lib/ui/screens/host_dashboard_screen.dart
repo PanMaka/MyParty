@@ -1,7 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' show RealtimeSubscribeStatus;
+
+import '../../data/invite_link_store.dart';
 
 import '../../data/party_host_channel.dart';
 import '../../data/party_repository.dart';
@@ -11,17 +14,19 @@ import '../../models/map_party_pin.dart';
 import '../../state/data_changes.dart';
 import '../../state/live_refresh.dart';
 import '../../utils/english_date.dart';
+import '../../utils/party_link.dart';
 import '../../utils/share_party.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
 import '../widgets/follower_split_bar.dart';
+import '../widgets/invite_link_sheet.dart';
 import '../widgets/map_pin_sheet.dart';
 import '../widgets/mp_bottom_nav.dart' show MpTab;
 import '../widgets/privacy_badge.dart';
-import '../widgets/rsvp_timeline_chart.dart';
 import '../widgets/skeleton_box.dart';
 import '../widgets/user_link.dart';
 import 'host_wizard_screen.dart';
+import 'invite_followers_screen.dart';
 
 /// What a host sees when they open their own party, from any door — a map
 /// pin, a search hit, MY PARTIES, ALL PARTIES, a party link, or their own
@@ -29,9 +34,10 @@ import 'host_wizard_screen.dart';
 /// the viewer is the host, so no door can forget to.
 ///
 /// Every number comes from host-only server functions (20261014113213): the
-/// header and aggregates from `get_party_host_stats`, the chart from
-/// `get_party_rsvp_timeline`, the list from `get_party_guests`. Nothing here
-/// computes a count.
+/// header and aggregates from `get_party_host_stats`, the Going/Interested
+/// lists from `get_party_guests`, the Invited list from `get_party_invitees`.
+/// Nothing here computes a count. (`get_party_rsvp_timeline` still exists and
+/// is still fed; the chart that drew it was removed in Phase 40.)
 ///
 /// **Live** the same two ways as the Direct tab: [LiveRefresh] for the
 /// viewer's own writes and app resumes, plus the `party_host:{uuid}` topic for
@@ -43,6 +49,7 @@ class HostDashboardScreen extends StatefulWidget {
     this.repository,
     this.profiles,
     this.share,
+    this.linkStore,
   });
 
   final String partyId;
@@ -53,6 +60,9 @@ class HostDashboardScreen extends StatefulWidget {
 
   /// The system share sheet by default; tests record instead.
   final ShareText? share;
+
+  /// This device's copy of invite-link tokens; tests hand in their own.
+  final InviteLinkStore? linkStore;
 
   @override
   State<HostDashboardScreen> createState() => _HostDashboardScreenState();
@@ -69,12 +79,9 @@ class _HostDashboardScreenState extends State<HostDashboardScreen> with LiveRefr
   bool _statsFailed = false;
   String? _coverUrl;
 
-  RsvpTimeline? _timeline;
-  bool _timelineFailed = false;
-
-  /// The guest tab on screen: true = Going (or Coming), false = Interested.
-  bool _goingTab = true;
-  final Map<bool, _GuestList> _guests = {true: _GuestList(), false: _GuestList()};
+  /// The guest tab on screen. A private party has no Interested tab.
+  _GuestTab _tab = _GuestTab.going;
+  final Map<_GuestTab, _GuestList> _guests = {for (final t in _GuestTab.values) t: _GuestList()};
 
   bool _cancelling = false;
 
@@ -142,7 +149,8 @@ class _HostDashboardScreenState extends State<HostDashboardScreen> with LiveRefr
       case RsvpChanged(:final partyId) ||
             PartyUpdated(:final partyId) ||
             PartyCoverChanged(:final partyId) ||
-            PartyCancelled(:final partyId) when partyId == widget.partyId:
+            PartyCancelled(:final partyId) ||
+            PartyGuestsChanged(:final partyId) when partyId == widget.partyId:
         refreshWhenVisible();
       case BlockChanged():
         // A block hides that guest from the list (not from the numbers).
@@ -156,11 +164,12 @@ class _HostDashboardScreenState extends State<HostDashboardScreen> with LiveRefr
     final coverBefore = _stats?.coverPath;
     await Future.wait([
       _loadStats(),
-      _loadTimeline(),
-      _loadGuests(_goingTab, reset: true),
+      _loadGuests(_tab, reset: true),
     ]);
-    // The other tab is fetched again the next time it is shown.
-    _guests[!_goingTab] = _GuestList();
+    // The other tabs are fetched again the next time they are shown.
+    for (final t in _GuestTab.values) {
+      if (t != _tab) _guests[t] = _GuestList();
+    }
     final stats = _stats;
     if (stats != null && stats.coverPath != coverBefore) unawaited(_loadCover(stats.coverPath));
   }
@@ -172,8 +181,8 @@ class _HostDashboardScreenState extends State<HostDashboardScreen> with LiveRefr
       setState(() {
         _stats = stats;
         _statsFailed = stats == null;
-        // A private party has one guest tab.
-        if (stats != null && stats.isPrivate) _goingTab = true;
+        // A private party has no Interested tab.
+        if (stats != null && stats.isPrivate && _tab == _GuestTab.interested) _tab = _GuestTab.going;
       });
     } catch (_) {
       if (mounted) setState(() => _statsFailed = _stats == null);
@@ -189,32 +198,18 @@ class _HostDashboardScreenState extends State<HostDashboardScreen> with LiveRefr
     }
   }
 
-  Future<void> _loadTimeline() async {
-    try {
-      final timeline = await _repository.fetchRsvpTimeline(widget.partyId);
-      if (mounted) {
-        setState(() {
-          _timeline = timeline;
-          _timelineFailed = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) setState(() => _timelineFailed = _timeline == null);
-    }
-  }
-
-  Future<void> _loadGuests(bool goingOnly, {bool reset = false}) async {
-    final list = _guests[goingOnly]!;
+  Future<void> _loadGuests(_GuestTab tab, {bool reset = false}) async {
+    final list = _guests[tab]!;
     if (list.loading) return;
     final after = reset ? null : list.cursor;
     setState(() => list.loading = true);
     try {
-      final page = await _repository.fetchGuests(widget.partyId, goingOnly: goingOnly, after: after);
+      final (rows, cursor) = await _fetchRows(tab, after);
       if (!mounted) return;
       setState(() {
         if (reset) list.items.clear();
-        list.items.addAll(page.guests);
-        list.cursor = page.cursor;
+        list.items.addAll(rows);
+        list.cursor = cursor;
         list.loaded = true;
         list.failed = false;
       });
@@ -225,9 +220,55 @@ class _HostDashboardScreenState extends State<HostDashboardScreen> with LiveRefr
     }
   }
 
-  void _showTab(bool going) {
-    setState(() => _goingTab = going);
-    if (!_guests[going]!.loaded) unawaited(_loadGuests(going, reset: true));
+  /// One page of [tab], as rows the list draws. Going/Interested read rsvps
+  /// (`get_party_guests`); Invited reads invitations (`get_party_invitees`),
+  /// which is where someone who joined through a link and never answered is.
+  Future<(List<_GuestRow>, Object?)> _fetchRows(_GuestTab tab, Object? after) async {
+    final private = _stats?.isPrivate ?? false;
+    if (tab == _GuestTab.invited) {
+      final page = await _repository.fetchInvitees(widget.partyId, after: after as PartyInvitee?);
+      return (
+        [
+          for (final i in page.invitees)
+            _GuestRow(
+              userId: i.userId,
+              username: i.username,
+              avatarPath: i.avatarPath,
+              badges: [
+                if (i.viaLink) ('VIA LINK', null),
+                switch (i.rsvpStatus) {
+                  'going' => (private ? 'COMING' : 'GOING', AppColors.purpleLight),
+                  'interested' => ('INTERESTED', AppColors.purpleLight),
+                  _ => ('NO ANSWER', null),
+                },
+              ],
+            ),
+        ],
+        page.cursor,
+      );
+    }
+    final goingOnly = tab == _GuestTab.going;
+    final page = await _repository.fetchGuests(widget.partyId, goingOnly: goingOnly, after: after as PartyGuest?);
+    return (
+      [
+        for (final g in page.guests)
+          _GuestRow(
+            userId: g.userId,
+            username: g.username,
+            avatarPath: g.avatarPath,
+            badges: [
+              if (g.followsHost) ('FOLLOWS YOU', null),
+              if (!goingOnly && g.going) ('GOING', AppColors.purpleLight),
+            ],
+          ),
+      ],
+      page.cursor,
+    );
+  }
+
+  void _showTab(_GuestTab tab) {
+    setState(() => _tab = tab);
+    if (!_guests[tab]!.loaded) unawaited(_loadGuests(tab, reset: true));
   }
 
   // ---------------------------------------------------------------- actions
@@ -236,6 +277,136 @@ class _HostDashboardScreenState extends State<HostDashboardScreen> with LiveRefr
     (widget.share ?? systemShare)(
       partyShareText(partyId: stats.partyId, title: stats.title, isPrivate: stats.isPrivate),
     );
+  }
+
+  /// The two ways to invite. A public party's link is its ordinary /p/ link
+  /// (it already opens for everyone); a private party's is an invite link,
+  /// which grants an invitation and is managed in its own sheet.
+  Future<void> _invite(HostPartyStats stats) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.sheet,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (sheet) => SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 10),
+            ListTile(
+              key: const Key('invite-followers'),
+              leading: const Icon(Icons.group_add_outlined),
+              title: const Text('Invite followers'),
+              subtitle: const Text('Pick people who follow you'),
+              onTap: () {
+                Navigator.of(sheet).pop();
+                _inviteFollowers(stats);
+              },
+            ),
+            if (stats.isPrivate)
+              ListTile(
+                key: const Key('invite-with-link'),
+                leading: const Icon(Icons.link),
+                title: const Text('Invite with link'),
+                subtitle: const Text('Anyone who opens it gets an invitation'),
+                onTap: () {
+                  Navigator.of(sheet).pop();
+                  showInviteLinkSheet(
+                    context,
+                    partyId: stats.partyId,
+                    repository: _repository,
+                    store: widget.linkStore,
+                    share: widget.share,
+                  );
+                },
+              )
+            else ...[
+              ListTile(
+                key: const Key('share-party-link'),
+                leading: const Icon(Icons.ios_share),
+                title: const Text('Share link'),
+                subtitle: const Text('Your party is public, so the link opens it for anyone'),
+                onTap: () {
+                  Navigator.of(sheet).pop();
+                  _share(stats);
+                },
+              ),
+              ListTile(
+                key: const Key('copy-party-link'),
+                leading: const Icon(Icons.copy),
+                title: const Text('Copy link'),
+                onTap: () async {
+                  Navigator.of(sheet).pop();
+                  await Clipboard.setData(ClipboardData(text: partyLink(stats.partyId).toString()));
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Link copied.'), behavior: SnackBarBehavior.floating),
+                  );
+                },
+              ),
+            ],
+            const SizedBox(height: 10),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _inviteFollowers(HostPartyStats stats) async {
+    final written = await Navigator.of(context).push<int>(MaterialPageRoute(
+      builder: (_) => InviteFollowersScreen(
+        partyId: stats.partyId,
+        isPrivate: stats.isPrivate,
+        repository: _repository,
+        profiles: widget.profiles,
+      ),
+    ));
+    if (written == null || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(written == 0
+          ? 'Nobody new was invited.'
+          : 'Invited ${written == 1 ? '1 person' : '$written people'}.'),
+      behavior: SnackBarBehavior.floating,
+    ));
+  }
+
+  /// Takes someone off the guest list. Says what it does on THIS party: on a
+  /// private one they lose it entirely and a leaked link will not bring them
+  /// back; on a public one the party stays visible to them.
+  Future<void> _remove(HostPartyStats stats, _GuestRow row) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.sheet,
+        title: Text('Remove @${row.username}?'),
+        content: Text(
+          stats.isPrivate
+              ? 'They lose access to the party and its chat. Your invite link won’t let them back in — '
+                  'only inviting them again yourself will.'
+              : 'Their RSVP and invitation are removed. The party is public, so they can still see it '
+                  'and answer again. Block them to keep them out completely.',
+          style: TextStyle(fontSize: 13.5, height: 1.45, color: AppColors.textAlpha(0.75)),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Keep')),
+          TextButton(
+            key: const Key('confirm-remove-guest'),
+            onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.destructive),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await _repository.removeGuest(stats.partyId, row.userId);
+      messenger.showSnackBar(SnackBar(content: Text('Removed @${row.username}.'), behavior: SnackBarBehavior.floating));
+    } catch (_) {
+      messenger.showSnackBar(const SnackBar(content: Text('That did not save.'), behavior: SnackBarBehavior.floating));
+    }
   }
 
   Future<void> _edit(HostPartyStats stats) async {
@@ -347,9 +518,6 @@ class _HostDashboardScreenState extends State<HostDashboardScreen> with LiveRefr
                   const SizedBox(height: 16),
                   _tiles(stats),
                   const SizedBox(height: 22),
-                  _sectionTitle(stats.isPrivate ? 'COMING OVER TIME' : 'RSVPS OVER TIME'),
-                  _card(_chartBody(stats)),
-                  const SizedBox(height: 22),
                   _sectionTitle('FOLLOWERS AMONG GUESTS'),
                   _card(_followers(stats)),
                   const SizedBox(height: 22),
@@ -407,7 +575,7 @@ class _HostDashboardScreenState extends State<HostDashboardScreen> with LiveRefr
           ],
         ),
         const SizedBox(height: 22),
-        const SkeletonBox(height: 210, radius: 16),
+        const SkeletonBox(height: 120, radius: 16),
       ],
     );
   }
@@ -477,9 +645,7 @@ class _HostDashboardScreenState extends State<HostDashboardScreen> with LiveRefr
   }
 
   /// The headline numbers. Interested includes everyone going, so the tiles
-  /// are never added up. "Here now" is going_count once the party has
-  /// started — nobody checks in yet (docs/backlog.md 1.23), and the caption
-  /// says so rather than letting the number pass for a headcount.
+  /// are never added up.
   Widget _tiles(HostPartyStats stats) {
     final tiles = <Widget>[
       if (stats.isPrivate)
@@ -488,8 +654,6 @@ class _HostDashboardScreenState extends State<HostDashboardScreen> with LiveRefr
         _tile('Going', stats.goingCount, key: const Key('tile-going')),
         _tile('Interested', stats.interestedCount, key: const Key('tile-interested')),
       ],
-      if (stats.isLive)
-        _tile('Here now', stats.goingCount, caption: 'said they’d come', key: const Key('tile-here-now')),
     ];
     return Row(
       children: [
@@ -501,7 +665,7 @@ class _HostDashboardScreenState extends State<HostDashboardScreen> with LiveRefr
     );
   }
 
-  Widget _tile(String label, int value, {String? caption, Key? key}) {
+  Widget _tile(String label, int value, {Key? key}) {
     return Container(
       key: key,
       padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
@@ -516,8 +680,6 @@ class _HostDashboardScreenState extends State<HostDashboardScreen> with LiveRefr
           Text(label.toUpperCase(), style: AppTextStyles.mono(size: 9.5, color: AppColors.textAlpha(0.5))),
           const SizedBox(height: 4),
           Text('$value', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
-          if (caption != null)
-            Text(caption, style: TextStyle(fontSize: 10, color: AppColors.textAlpha(0.45))),
         ],
       ),
     );
@@ -538,23 +700,6 @@ class _HostDashboardScreenState extends State<HostDashboardScreen> with LiveRefr
         ),
         child: child,
       );
-
-  Widget _chartBody(HostPartyStats stats) {
-    final timeline = _timeline;
-    if (timeline == null) {
-      return _timelineFailed
-          ? _notice('The chart didn’t load.', action: ('Try again', _loadTimeline))
-          : const SkeletonBox(key: Key('chart-skeleton'), height: 180);
-    }
-    if (timeline.isEmpty) {
-      return _notice(
-        'No RSVPs yet — share your party',
-        action: stats.isPublished ? ('Share', () async => _share(stats)) : null,
-        key: const Key('chart-empty'),
-      );
-    }
-    return RsvpTimelineChart(timeline: timeline, isPrivate: stats.isPrivate);
-  }
 
   Widget _followers(HostPartyStats stats) {
     if (stats.isPrivate) {
@@ -579,41 +724,43 @@ class _HostDashboardScreenState extends State<HostDashboardScreen> with LiveRefr
   }
 
   Widget _guestList(HostPartyStats stats) {
-    final list = _guests[_goingTab]!;
+    final list = _guests[_tab]!;
+    final tabs = <(_GuestTab, String)>[
+      (_GuestTab.going, '${stats.isPrivate ? 'Coming' : 'Going'} · ${stats.goingCount}'),
+      if (!stats.isPrivate) (_GuestTab.interested, 'Interested · ${stats.interestedCount}'),
+      (_GuestTab.invited, 'Invited'),
+    ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
           children: [
-            if (stats.isPrivate)
-              _tabChip('Coming · ${stats.goingCount}', selected: true, onTap: () {})
-            else ...[
-              _tabChip('Going · ${stats.goingCount}', selected: _goingTab, onTap: () => _showTab(true)),
-              const SizedBox(width: 8),
-              _tabChip('Interested · ${stats.interestedCount}', selected: !_goingTab, onTap: () => _showTab(false)),
-            ],
+            for (final (tab, label) in tabs)
+              _tabChip(label, key: Key('tab-${tab.name}'), selected: _tab == tab, onTap: () => _showTab(tab)),
           ],
         ),
         const SizedBox(height: 10),
         if (!list.loaded && list.failed)
-          _notice('The guest list didn’t load.', action: ('Try again', () => _loadGuests(_goingTab, reset: true)))
+          _notice('The guest list didn’t load.', action: ('Try again', () => _loadGuests(_tab, reset: true)))
         else if (!list.loaded)
           Column(children: [
             for (var i = 0; i < 3; i++)
               const Padding(padding: EdgeInsets.only(bottom: 8), child: SkeletonBox(height: 48)),
           ])
         else if (list.items.isEmpty)
-          _notice(
-            _goingTab
-                ? (stats.isPrivate ? 'Nobody has said they’re coming yet.' : 'Nobody is going yet.')
-                : 'Nobody is interested yet.',
-          )
+          _notice(switch (_tab) {
+            _GuestTab.going => stats.isPrivate ? 'Nobody has said they’re coming yet.' : 'Nobody is going yet.',
+            _GuestTab.interested => 'Nobody is interested yet.',
+            _GuestTab.invited => 'Nobody is invited yet. Use Invite people below.',
+          })
         else ...[
-          for (final guest in list.items) _guestRow(guest, badgeGoing: !_goingTab),
+          for (final row in list.items) _guestRow(stats, row),
           if (list.cursor != null)
             Center(
               child: TextButton(
-                onPressed: list.loading ? null : () => _loadGuests(_goingTab),
+                onPressed: list.loading ? null : () => _loadGuests(_tab),
                 child: Text(list.loading ? 'Loading…' : 'Show more'),
               ),
             ),
@@ -622,8 +769,9 @@ class _HostDashboardScreenState extends State<HostDashboardScreen> with LiveRefr
     );
   }
 
-  Widget _tabChip(String label, {required bool selected, required VoidCallback onTap}) {
+  Widget _tabChip(String label, {Key? key, required bool selected, required VoidCallback onTap}) {
     return GestureDetector(
+      key: key,
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
@@ -642,44 +790,54 @@ class _HostDashboardScreenState extends State<HostDashboardScreen> with LiveRefr
     );
   }
 
-  Widget _guestRow(PartyGuest guest, {required bool badgeGoing}) {
-    final url = _avatarUrl(guest.avatarPath);
-    return UserLink(
-      userId: guest.userId,
-      username: guest.username,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Row(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              clipBehavior: Clip.antiAlias,
-              decoration: const BoxDecoration(shape: BoxShape.circle),
-              child: url == null
-                  ? const DiagonalStripePlaceholder(colors: [Color(0xFF2A2247), Color(0xFF1E1836)])
-                  : Image.network(
-                      url,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) =>
-                          const DiagonalStripePlaceholder(colors: [Color(0xFF2A2247), Color(0xFF1E1836)]),
-                    ),
+  Widget _guestRow(HostPartyStats stats, _GuestRow row) {
+    final url = _avatarUrl(row.avatarPath);
+    const placeholder = DiagonalStripePlaceholder(colors: [Color(0xFF2A2247), Color(0xFF1E1836)]);
+    return Row(
+      children: [
+        Expanded(
+          child: UserLink(
+            userId: row.userId,
+            username: row.username,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    clipBehavior: Clip.antiAlias,
+                    decoration: const BoxDecoration(shape: BoxShape.circle),
+                    child: url == null
+                        ? placeholder
+                        : Image.network(url, fit: BoxFit.cover, errorBuilder: (_, _, _) => placeholder),
+                  ),
+                  const SizedBox(width: 11),
+                  Expanded(
+                    child: Text('@${row.username}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+                  ),
+                  for (final (text, color) in row.badges) ...[
+                    const SizedBox(width: 6),
+                    _badge(text, color: color),
+                  ],
+                ],
+              ),
             ),
-            const SizedBox(width: 11),
-            Expanded(
-              child: Text('@${guest.username}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
-            ),
-            if (guest.followsHost) _badge('FOLLOWS YOU'),
-            if (badgeGoing && guest.going) ...[
-              const SizedBox(width: 6),
-              _badge('GOING', color: AppColors.purpleLight),
-            ],
-          ],
+          ),
         ),
-      ),
+        // Removing is a host action on a live guest list; a cancelled
+        // party's list is history.
+        if (!stats.isCancelled)
+          IconButton(
+            key: Key('remove-${row.userId}'),
+            onPressed: () => _remove(stats, row),
+            icon: Icon(Icons.person_remove_outlined, size: 19, color: AppColors.textAlpha(0.55)),
+            tooltip: 'Remove',
+          ),
+      ],
     );
   }
 
@@ -724,6 +882,21 @@ class _HostDashboardScreenState extends State<HostDashboardScreen> with LiveRefr
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (canChange && !stats.isOver) ...[
+          ElevatedButton.icon(
+            key: const Key('dashboard-invite'),
+            onPressed: () => _invite(stats),
+            icon: const Icon(Icons.person_add_alt_1, size: 18),
+            label: const Text('Invite people', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800)),
+            style: ElevatedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              backgroundColor: stats.isPrivate ? AppColors.private : AppColors.purple,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
         Row(
           children: [
             Expanded(
@@ -789,10 +962,25 @@ class _HostDashboardScreenState extends State<HostDashboardScreen> with LiveRefr
   }
 }
 
-/// One guest tab's loaded pages.
+enum _GuestTab { going, interested, invited }
+
+/// One row of any guest tab, already turned into what the row draws.
+class _GuestRow {
+  const _GuestRow({required this.userId, required this.username, required this.avatarPath, required this.badges});
+
+  final String userId;
+  final String username;
+  final String? avatarPath;
+
+  /// Text and colour (null for the muted default).
+  final List<(String, Color?)> badges;
+}
+
+/// One guest tab's loaded pages. [cursor] is the last row of the source
+/// model (a PartyGuest or a PartyInvitee), echoed back for the next page.
 class _GuestList {
-  final List<PartyGuest> items = [];
-  PartyGuest? cursor;
+  final List<_GuestRow> items = [];
+  Object? cursor;
   bool loaded = false;
   bool loading = false;
   bool failed = false;
