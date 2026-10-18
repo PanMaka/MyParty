@@ -138,7 +138,8 @@ void main() {
 
   for (final isPrivate in [false, true]) {
     final variant = isPrivate ? 'private' : 'public';
-    final byline = isPrivate ? 'Private · @dj_eleni · you are invited' : 'Public · @dj_eleni';
+    // The invitation is the "Invited by @host" badge now, not a byline clause.
+    final byline = isPrivate ? 'Private · @dj_eleni' : 'Public · @dj_eleni';
 
     testWidgets('tapping the host on a $variant party sheet opens their profile, and back returns to the sheet',
         (tester) async {

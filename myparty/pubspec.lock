@@ -169,14 +169,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.7.15"
-  equatable:
-    dependency: transitive
-    description:
-      name: equatable
-      sha256: "3bce007a596ff8b3119c45d68aaef631272537c03d30e5d4534dd24bf4c5eaa2"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.1.0"
   fake_async:
     dependency: transitive
     description:
@@ -297,14 +289,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.1.1"
-  fl_chart:
-    dependency: "direct main"
-    description:
-      name: fl_chart
-      sha256: b938f77d042cbcd822936a7a359a7235bad8bd72070de1f827efc2cc297ac888
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.2.0"
   flutter:
     dependency: "direct main"
     description: flutter
@@ -881,13 +865,13 @@ packages:
     source: hosted
     version: "7.2.0"
   shared_preferences:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: shared_preferences
-      sha256: c3025c5534b01739267eb7d76959bbc25a6d10f6988e1c2a3036940133dd10bf
+      sha256: "1e85e0dccf5b4a016077fea7dfbb4a7cb39c759ac1596fcf60c06deadb7da91f"
       url: "https://pub.dev"
     source: hosted
-    version: "2.5.5"
+    version: "2.5.6"
   shared_preferences_android:
     dependency: transitive
     description:

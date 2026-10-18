@@ -106,44 +106,6 @@ class HostPartyStats {
   bool get isPublished => status == 'published';
 }
 
-/// `get_party_rsvp_timeline`'s bucket width. Mirrors `public.stats_bucket`.
-enum StatsBucket { hour, day }
-
-/// Cumulative counters at the end of one bucket.
-class RsvpTimelinePoint {
-  const RsvpTimelinePoint({required this.at, required this.going, required this.interested});
-
-  final DateTime at;
-  final int going;
-  final int interested;
-}
-
-/// The over-time chart's data. Empty [points] means no rsvp was ever made —
-/// the server returns no rows rather than a flat line at zero.
-class RsvpTimeline {
-  const RsvpTimeline({required this.bucket, required this.points});
-
-  final StatsBucket bucket;
-  final List<RsvpTimelinePoint> points;
-
-  bool get isEmpty => points.isEmpty;
-
-  factory RsvpTimeline.fromRows(List<Map<String, dynamic>> rows) {
-    final bucket = rows.isNotEmpty && rows.first['bucket'] == 'day' ? StatsBucket.day : StatsBucket.hour;
-    return RsvpTimeline(
-      bucket: bucket,
-      points: [
-        for (final row in rows)
-          RsvpTimelinePoint(
-            at: DateTime.parse(row['bucket_start'] as String).toLocal(),
-            going: row['going'] as int,
-            interested: row['interested'] as int,
-          ),
-      ],
-    );
-  }
-}
-
 /// One row of the host's guest list (`get_party_guests`).
 class PartyGuest {
   const PartyGuest({
@@ -205,4 +167,105 @@ class PartyEdit {
   final DateTime? endsAt;
   final double lat;
   final double lng;
+}
+
+/// One of the host's followers, as the invite picker shows them
+/// (`get_invitable_followers`).
+///
+/// [alreadyInvited] or a non-null [rsvpStatus] locks the row: inviting again
+/// would change nothing.
+class InvitableFollower {
+  const InvitableFollower({
+    required this.userId,
+    required this.username,
+    required this.avatarPath,
+    required this.alreadyInvited,
+    required this.rsvpStatus,
+  });
+
+  final String userId;
+  final String username;
+  final String? avatarPath;
+  final bool alreadyInvited;
+
+  /// 'going', 'interested' or null.
+  final String? rsvpStatus;
+
+  bool get locked => alreadyInvited || rsvpStatus != null;
+
+  factory InvitableFollower.fromRow(Map<String, dynamic> row) => InvitableFollower(
+        userId: row['user_id'] as String,
+        username: row['username'] as String,
+        avatarPath: row['avatar_path'] as String?,
+        alreadyInvited: (row['already_invited'] as bool?) ?? false,
+        rsvpStatus: row['rsvp_status'] as String?,
+      );
+}
+
+/// A page of the picker, alphabetical; [cursor] is null at the end.
+class InvitableFollowerPage {
+  const InvitableFollowerPage({required this.followers, required this.cursor});
+
+  final List<InvitableFollower> followers;
+  final InvitableFollower? cursor;
+}
+
+/// One invitation on the party, for the host's Invited tab
+/// (`get_party_invitees`).
+class PartyInvitee {
+  const PartyInvitee({
+    required this.userId,
+    required this.username,
+    required this.avatarPath,
+    required this.rsvpStatus,
+    required this.viaLink,
+    required this.createdAt,
+  });
+
+  final String userId;
+  final String username;
+  final String? avatarPath;
+
+  /// 'going', 'interested' or null for "invited, has not answered".
+  final String? rsvpStatus;
+
+  /// Came in through the party's invite link rather than a direct invite.
+  final bool viaLink;
+
+  /// UTC; only ever echoed back as the keyset cursor.
+  final DateTime createdAt;
+
+  factory PartyInvitee.fromRow(Map<String, dynamic> row) => PartyInvitee(
+        userId: row['user_id'] as String,
+        username: row['username'] as String,
+        avatarPath: row['avatar_path'] as String?,
+        rsvpStatus: row['rsvp_status'] as String?,
+        viaLink: (row['via_link'] as bool?) ?? false,
+        createdAt: DateTime.parse(row['created_at'] as String),
+      );
+}
+
+class PartyInviteePage {
+  const PartyInviteePage({required this.invitees, required this.cursor});
+
+  final List<PartyInvitee> invitees;
+  final PartyInvitee? cursor;
+}
+
+/// The party's active invite link, as `get_party_invite_link` describes it —
+/// never the token, which the server does not keep.
+class InviteLinkStatus {
+  const InviteLinkStatus({required this.createdAt, required this.maxUses, required this.useCount});
+
+  final DateTime createdAt;
+  final int? maxUses;
+  final int useCount;
+
+  bool get usedUp => maxUses != null && useCount >= maxUses!;
+
+  factory InviteLinkStatus.fromRow(Map<String, dynamic> row) => InviteLinkStatus(
+        createdAt: DateTime.parse(row['created_at'] as String),
+        maxUses: row['max_uses'] as int?,
+        useCount: row['use_count'] as int,
+      );
 }

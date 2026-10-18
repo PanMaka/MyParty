@@ -12,6 +12,7 @@ import '../../utils/english_date.dart';
 import '../../utils/share_party.dart';
 import '../theme/app_theme.dart';
 import 'diagonal_placeholder.dart';
+import 'invited_badge.dart';
 import 'privacy_badge.dart';
 import 'report_sheet.dart';
 import 'user_link.dart';
@@ -230,6 +231,10 @@ class _MapPinSheetState extends State<MapPinSheet> {
               Row(
                 children: [
                   PrivacyBadge(isPrivate: pin.isPrivate),
+                  if (pin.isInvited) ...[
+                    const SizedBox(width: 6),
+                    Flexible(child: InvitedBadge(hostUsername: pin.hostUsername)),
+                  ],
                   if (live) ...[
                     const SizedBox(width: 6),
                     Text('LIVE', style: AppTextStyles.mono(size: 9, color: AppColors.pinkLight)),

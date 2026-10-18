@@ -12,6 +12,7 @@ import '../theme/app_theme.dart';
 import 'diagonal_placeholder.dart';
 import '../../utils/directions.dart';
 import '../../utils/share_party.dart';
+import 'invited_badge.dart';
 import 'privacy_badge.dart';
 import 'user_link.dart';
 
@@ -140,6 +141,7 @@ class PartyDetailSheet extends StatelessWidget {
                     // to forget to hide. Time and area stay: they are
                     // properties of the event, not of who is at it.
                     if (item.attendeeLabel != null) _chip(item.attendeeLabel!),
+                    if (item.isInvited) InvitedBadge(hostUsername: item.hostUsername),
                   ],
                 ),
               ),
@@ -395,7 +397,6 @@ class PartyDetailSheet extends StatelessWidget {
                       [
                         item.isPrivate ? 'Private' : 'Public',
                         '@${item.hostUsername}',
-                        if (item.isPrivate && item.isInvited) 'you are invited',
                       ].join(' · '),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,

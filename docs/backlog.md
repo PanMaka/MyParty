@@ -12,7 +12,8 @@ Delete an entry when it ships. If an entry turns out to be a decision rather
 than a gap, move it to §3 instead of deleting it.
 
 Last swept: 2026-08-22, after Phase 14B. Phase 39 updated 1.12 and 1.17 and
-added 1.21-1.24 (2026-10-14).
+added 1.21-1.24 (2026-10-14). Phase 40 shipped 1.24 (invite_to_party) and
+added 1.25-1.29.
 
 ---
 
@@ -347,23 +348,106 @@ helper it calls. The queue (`notification_jobs`) and worker already exist.
 
 ### 1.23 "Here now" is going_count, not a check-in
 
-The dashboard and the sheets say "N here now" once a party has started, and
+The attendee sheets and cards say "N here now" once a party has started, and
 the number is `going_count`, i.e. who said they would come. Nobody checks in,
-so it counts no-shows and misses walk-ins.
+so it counts no-shows and misses walk-ins. The host dashboard no longer shows
+it: its "Here now" tile was removed in Phase 40, so this gap is about the
+attendee surfaces only.
 
 *Why it is still open:* a check-in is a new table, a new consent question (it
 is a location fact about a person at a time) and a host-side flow. Until then
 the label is honest about tense, not about presence.
 
-### 1.24 A host cannot invite more people after creating a private party
+### 1.25 Nobody is told they were invited
 
-The dashboard's Edit is the details step only. The invite step is not offered.
+Phase 40's `invite_to_party` and invite links write an `invitations` row. The
+party shows up in the guest's MY PARTIES, with an "Invited by @host" badge on
+its card and sheet, but nothing tells the guest it is there.
 
-*Why it is still open:* a client batch insert into `invitations` fails whole
-when any one invitee's `invite_policy` refuses the host, because the INSERT
-policy calls `accepts_invite_from` per row. `create_party_with_invites`
-already drops those people server-side, so the fix is a sibling function
-(`invite_to_party`) with the same filtering, not a client insert.
+*Why it is still open:* there is no in-app notification inbox, and push is
+proximity-only. A "you were invited" push is a new notification kind for the
+existing queue and worker, with the same gotcha 11 caveat as 1.22.
+
+### 1.26 A link opened while signed out survives only while the app is running
+
+A party or invite link opened before sign-in waits in `PartyLinks.pending`,
+which lives in memory. It opens once the user has signed in, unless the app
+is killed first (an email-confirmation round trip, for example). Then it is
+gone and has to be tapped again.
+
+*Why it is still open:* persisting it means writing a party id or an invite
+token to device storage before the user has an account. Once the user has an
+account it is cheap, but nobody has decided it is worth doing.
+
+### 1.27 iOS has no universal links, for `/p` or `/i`
+
+On iPhone, a party link or an invite link always opens the browser, which
+shows the static fallback page. Android claims both paths through its verified
+intent filter.
+
+*Why it is still open:* there is no Apple Team ID yet, and universal links need
+one. Three pieces are needed:
+
+- `ios/Runner/Runner.entitlements` with
+  `com.apple.developer.associated-domains = ["applinks:mypartycorp.com"]`, wired
+  in as `CODE_SIGN_ENTITLEMENTS` for the Runner target.
+- `hosting/mypartycorp.com/.well-known/apple-app-site-association`: JSON with
+  `applinks.details[].appIDs = ["<TEAMID>.<bundle id>"]` and
+  `components` for `/p/*` and `/i`. Invite links carry their token in the
+  fragment, so the `/i` component matches on path only. Serve it with
+  `Content-Type: application/json`, no redirect, no `.json` extension.
+- The Team ID and a real bundle id (see 1.28) to put in both.
+
+`app_links` already handles universal links on iOS, so no Dart changes.
+
+### 1.28 The app id is still Flutter's placeholder: must fix before launch
+
+Android `applicationId` and `namespace` are `com.example.myparty`
+(`android/app/build.gradle.kts`), and so is the iOS
+`PRODUCT_BUNDLE_IDENTIFIER`. Google Play rejects `com.example.*` packages.
+
+*Why it is still open:* changing it is cheap in code and expensive everywhere
+else, so it should be done once, deliberately:
+
+- **`assetlinks.json`** names the package. Change both together, and redeploy
+  the file before shipping the build, or party and invite links stop opening
+  the app.
+- **Existing installs.** To Android a new applicationId is a different app.
+  Installed copies don't update; they sit beside the new one, keeping their
+  own sign-in and local storage. That includes invite-link tokens the host
+  saved on the device (`InviteLinkStore`), so a host would have to make a new
+  link. Before any public release this only affects test phones.
+- **Firebase.** If push is configured, `google-services.json` is tied to the
+  package name and needs a new Android app in the Firebase project.
+- **Kotlin package.** `namespace` and the `MainActivity` package directory
+  should move with it.
+- iOS: the bundle id goes into the Apple app record and 1.27's
+  `apple-app-site-association`.
+
+### 1.29 Invite links (`/i#token`) not yet tested on a device
+
+Phase 40's device test (2026-10-18) passed everything else, including removal
+cutting off a guest's already-open chat: the removed guest's open chat did not
+receive the next message, so no channel fix was needed. The invite-link steps
+were not run. Still to test on a device with two accounts (host A, guest B):
+
+- **Link join:** A creates a link on a private party B is not invited to; B taps
+  it, the party opens, and A's Invited tab shows B as VIA LINK.
+- **Signed-out join:** B signs out, taps the link, signs in, and the party opens.
+- **Re-join refused after removal:** A removes B; B's tap on the still-active
+  link shows "This invite link doesn't work any more".
+- **New-device regeneration:** on a reinstall or second phone the sheet says the
+  link was made on another device; a new link works and the old one is refused.
+- **Turning the link off:** the link is refused afterwards.
+- **Blocked refusal:** with a block between A and B, B gets the same sentence.
+- **The `/i` page without the app:** a browser shows the static page and no
+  token anywhere on it.
+
+*Why it is still open:* the `/i` fallback page (`hosting/mypartycorp.com/i/`,
+plus the `/i` rule in `_redirects`) is not deployed to Cloudflare yet, and the
+last step needs it. pgTAP (`34_party_invites`) and an HTTP smoke run against
+the local stack cover the server side; nothing has exercised the Android intent
+filter or the signed-out hand-off on a real phone.
 
 ---
 

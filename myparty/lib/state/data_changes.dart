@@ -75,6 +75,22 @@ final class PartyCancelled extends DataChange {
   final String partyId;
 }
 
+/// The viewer, as host, changed who is on [partyId]'s guest list: invited
+/// people, or removed someone. The dashboard's tabs and counters are stale.
+final class PartyGuestsChanged extends DataChange {
+  const PartyGuestsChanged({required this.partyId});
+
+  final String partyId;
+}
+
+/// The viewer joined [partyId] through an invite link. It is a new row in
+/// their MY PARTIES and, for a private party, a new pin on their map.
+final class InviteRedeemed extends DataChange {
+  const InviteRedeemed({required this.partyId});
+
+  final String partyId;
+}
+
 /// The viewer's read marker for a conversation moved to now, so its unread
 /// count is zero. [direct] tells a DM thread id from a party id.
 final class ConversationRead extends DataChange {

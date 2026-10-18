@@ -21,3 +21,9 @@ String partyShareText({required String partyId, required String title, required 
   final link = partyLink(partyId).toString();
   return isPrivate ? link : '$title on MyParty: $link';
 }
+
+/// What sharing a private party's INVITE link sends. No title, for the same
+/// reason as [partyShareText]: the people in the chat it is pasted into are
+/// not all invited yet, and the ones who open it will see the party anyway.
+String inviteShareText(String token) =>
+    'You’re invited to a private party on MyParty: ${inviteLink(token)}';
