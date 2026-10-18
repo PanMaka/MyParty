@@ -13,7 +13,7 @@ than a gap, move it to §3 instead of deleting it.
 
 Last swept: 2026-08-22, after Phase 14B. Phase 39 updated 1.12 and 1.17 and
 added 1.21-1.24 (2026-10-14). Phase 40 shipped 1.24 (invite_to_party) and
-added 1.25-1.26.
+added 1.25-1.29.
 
 ---
 
@@ -423,6 +423,31 @@ else, so it should be done once, deliberately:
   should move with it.
 - iOS: the bundle id goes into the Apple app record and 1.27's
   `apple-app-site-association`.
+
+### 1.29 Invite links (`/i#token`) not yet tested on a device
+
+Phase 40's device test (2026-10-18) passed everything else, including removal
+cutting off a guest's already-open chat: the removed guest's open chat did not
+receive the next message, so no channel fix was needed. The invite-link steps
+were not run. Still to test on a device with two accounts (host A, guest B):
+
+- **Link join:** A creates a link on a private party B is not invited to; B taps
+  it, the party opens, and A's Invited tab shows B as VIA LINK.
+- **Signed-out join:** B signs out, taps the link, signs in, and the party opens.
+- **Re-join refused after removal:** A removes B; B's tap on the still-active
+  link shows "This invite link doesn't work any more".
+- **New-device regeneration:** on a reinstall or second phone the sheet says the
+  link was made on another device; a new link works and the old one is refused.
+- **Turning the link off:** the link is refused afterwards.
+- **Blocked refusal:** with a block between A and B, B gets the same sentence.
+- **The `/i` page without the app:** a browser shows the static page and no
+  token anywhere on it.
+
+*Why it is still open:* the `/i` fallback page (`hosting/mypartycorp.com/i/`,
+plus the `/i` rule in `_redirects`) is not deployed to Cloudflare yet, and the
+last step needs it. pgTAP (`34_party_invites`) and an HTTP smoke run against
+the local stack cover the server side; nothing has exercised the Android intent
+filter or the signed-out hand-off on a real phone.
 
 ---
 
