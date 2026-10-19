@@ -6,7 +6,8 @@
 --      two new definers pin their search_path; nobody client-side can call
 --      the parser.
 --   B. Sign-up: handle_new_user copies exactly the three valid answers and
---      stores nothing for "prefer not to say" or garbage.
+--      stores nothing for "prefer not to say" or garbage; any later write to
+--      the auth row strips the metadata copy, and the table does not follow it.
 --   C. set_my_gender: sets, changes, clears (no row), own row only, anon out.
 --   D. The counts per group, against hand-countable fixtures: Going, the
 --      Interested superset, a private party's Coming, "no row" as unspecified.
@@ -22,7 +23,7 @@
 -- handle_new_user for real.
 begin;
 set search_path to public, extensions;
-select plan(39);
+select plan(44);
 
 
 -- ===========================================================================
@@ -139,9 +140,43 @@ select results_eq(
             ('e41e0000-0000-0000-0000-000000000004', 'non_binary') $$,
   'handle_new_user copies the three valid answers, and stores nothing for prefer_not_to_say, a wrong case, a number or no key');
 
--- No assertion on the metadata strip: handle_new_user does not strip (GoTrue
--- writes the metadata back after its insert, measured over HTTP), and the
--- backfill's strip ran at migration time, before any fixture here existed.
+-- The metadata copy. The INSERT keeps it (handle_new_user has to read it);
+-- the next write to the row -- GoTrue's sign-up write-back, a sign-in, an
+-- updateUser -- removes it. The HTTP side of this, which pgTAP cannot reach,
+-- was measured against GoTrue itself (see the migration).
+select ok(
+  (select raw_user_meta_data ? 'gender' from auth.users
+   where id = 'e41e0000-0000-0000-0000-000000000001'),
+  'CONTROL: the insert leaves the sign-up answer where handle_new_user reads it');
+
+update auth.users set last_sign_in_at = now()
+where id = 'e41e0000-0000-0000-0000-000000000001';
+
+select ok(
+  (select not (raw_user_meta_data ? 'gender')
+          and raw_user_meta_data ->> 'date_of_birth' = '2000-05-01'
+   from auth.users where id = 'e41e0000-0000-0000-0000-000000000001'),
+  'any later write to the auth row (here a sign-in''s last_sign_in_at) strips gender, and only gender');
+
+update auth.users
+set raw_user_meta_data = raw_user_meta_data || '{"gender":"female"}'
+where id = 'e41e0000-0000-0000-0000-000000000001';
+
+select ok(
+  (select not (raw_user_meta_data ? 'gender') from auth.users
+   where id = 'e41e0000-0000-0000-0000-000000000001'),
+  'an updateUser that writes gender into the metadata is stripped too');
+
+select is(
+  (select gender::text from public.user_genders
+   where user_id = 'e41e0000-0000-0000-0000-000000000001'),
+  'male',
+  'and the table does not follow the metadata -- set_my_gender stays the only write door');
+
+select is_empty(
+  $$ select 1 from auth.users
+     where raw_user_meta_data ? 'gender' and last_sign_in_at is not null $$,
+  'no account that has signed in still holds a metadata copy');
 
 
 -- ===========================================================================

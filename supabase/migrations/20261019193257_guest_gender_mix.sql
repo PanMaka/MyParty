@@ -9,8 +9,9 @@
 --      because profiles is readable by everyone.
 --   2. parse_gender / set_my_gender -- the one parser and the client's only
 --      write door.
---   3. handle_new_user copies the sign-up answer in; existing answers are
---      copied once and stripped from the metadata.
+--   3. handle_new_user copies the sign-up answer in, and a BEFORE UPDATE
+--      trigger on auth.users keeps it out of the metadata from then on;
+--      existing answers are copied once, then stripped.
 --   4. get_party_host_stats gains the per-group gender counts, NULL below
 --      three guests.
 --   5. Export carries it; erasure deletes it.
@@ -136,11 +137,9 @@ comment on function public.set_my_gender(public.gender) is
 -- assumed: GoTrue adds sub/email/email_verified to user_metadata after its
 -- insert and writes the whole object back, so an `update auth.users` in this
 -- trigger is silently undone on every real sign-up (it only "worked" for raw
--- inserts, which is all pgTAP can make). The sign-up answer therefore stays in
--- the user's own metadata and access token, owner-readable only, and goes
--- stale if they change it in settings. Nothing reads it there: user_genders
--- is the source of truth. A strip after sign-up does stick (the backfill
--- below survives sign-in, updateUser and refresh) -- docs/backlog.md 1.31.
+-- inserts, which is all pgTAP can make). The strip lives in a BEFORE UPDATE
+-- trigger instead (strip_gender_from_auth_metadata, below), which catches that
+-- very write-back.
 -- ===========================================================================
 create or replace function public.handle_new_user()
 returns trigger
@@ -189,6 +188,37 @@ join public.profiles p on p.id = u.id
 where public.parse_gender(u.raw_user_meta_data ->> 'gender') is not null
 on conflict on constraint user_genders_pkey do nothing;
 
+-- The strip, on every write to auth.users from now on. BEFORE UPDATE edits
+-- NEW in place, so there is no second statement for GoTrue to overwrite, and
+-- it fires on each of the writes the metadata can come back through:
+--   * GoTrue's own write-back during sign-up (the one that undid a strip in
+--     handle_new_user), so the copy does not outlive the sign-up request;
+--   * every sign-in (last_sign_in_at), which covers an account whose sign-up
+--     predates this trigger or never reached onboarding;
+--   * auth.updateUser, so a client cannot park an answer there either.
+-- The INSERT is untouched on purpose: handle_new_user has to read the value.
+-- It strips and does nothing else -- user_genders does not follow the
+-- metadata, or an updateUser({gender}) would be a second write door.
+create function public.strip_gender_from_auth_metadata()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  new.raw_user_meta_data := new.raw_user_meta_data - 'gender';
+  return new;
+end;
+$$;
+
+revoke execute on function public.strip_gender_from_auth_metadata() from public, anon, authenticated;
+
+create trigger strip_gender_from_auth_metadata
+  before update on auth.users
+  for each row
+  when (new.raw_user_meta_data ? 'gender')
+  execute function public.strip_gender_from_auth_metadata();
+
+-- Fires the trigger above for every account that still holds a copy.
 update auth.users
 set raw_user_meta_data = raw_user_meta_data - 'gender'
 where raw_user_meta_data ? 'gender';
