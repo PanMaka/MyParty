@@ -19,6 +19,7 @@ import '../../utils/share_party.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
 import '../widgets/follower_split_bar.dart';
+import '../widgets/gender_mix_bar.dart';
 import '../widgets/invite_link_sheet.dart';
 import '../widgets/map_pin_sheet.dart';
 import '../widgets/mp_bottom_nav.dart' show MpTab;
@@ -521,6 +522,9 @@ class _HostDashboardScreenState extends State<HostDashboardScreen> with LiveRefr
                   _sectionTitle('FOLLOWERS AMONG GUESTS'),
                   _card(_followers(stats)),
                   const SizedBox(height: 22),
+                  _sectionTitle('GENDER MIX'),
+                  _card(_genderMix(stats)),
+                  const SizedBox(height: 22),
                   _sectionTitle('GUEST LIST'),
                   _guestList(stats),
                   const SizedBox(height: 22),
@@ -719,6 +723,23 @@ class _HostDashboardScreenState extends State<HostDashboardScreen> with LiveRefr
           followers: stats.interestedFollowers,
           nonFollowers: stats.interestedNonFollowers,
         ),
+      ],
+    );
+  }
+
+  /// Same groups as [_followers]. Live for the same reason the follower split
+  /// is: both come from `get_party_host_stats`, which the host topic refetches.
+  /// A guest changing their answer sends no signal (20261019193257), so that
+  /// arrives with the next refetch.
+  Widget _genderMix(HostPartyStats stats) {
+    if (stats.isPrivate) {
+      return GenderMixBar(label: 'Coming', mix: stats.goingGender);
+    }
+    return Column(
+      children: [
+        GenderMixBar(label: 'Going', mix: stats.goingGender),
+        const SizedBox(height: 16),
+        GenderMixBar(label: 'Interested', mix: stats.interestedGender),
       ],
     );
   }

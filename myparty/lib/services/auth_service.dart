@@ -27,15 +27,18 @@ class AuthService {
         // Read by the before_user_created age gate (which refuses under-13s)
         // and stored by handle_new_user into user_birthdates.
         'date_of_birth': isoDate(dateOfBirth),
-        // Held only in the owner's auth user_metadata for now — no table
-        // reads it yet. Not `profiles`: that row is readable by everyone.
+        // Copied by handle_new_user into user_genders (owner-read-only; not
+        // `profiles`, which everyone can read) and stripped from the metadata
+        // by GoTrue's own write-back during sign-up (20261019193257). Nothing
+        // reads it from the metadata: Settings goes through ProfileRepository.
         'gender': gender,
       },
     );
   }
 
-  /// First and last name, picked on the username screen. Same home as
-  /// `gender`: the owner's user_metadata, which nothing else can read.
+  /// First and last name, picked on the username screen. Kept in the owner's
+  /// user_metadata, which nothing else can read — and which the account export
+  /// does not include yet (docs/backlog.md 1.32).
   Future<void> saveNames({required String firstName, required String lastName}) async {
     await _supabase.auth.updateUser(
       UserAttributes(data: {'first_name': firstName, 'last_name': lastName}),

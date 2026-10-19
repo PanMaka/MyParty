@@ -164,6 +164,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     _genderError = null;
                   }),
                 ),
+                const SizedBox(height: 8),
+                const Text(
+                  genderVisibilityNote,
+                  style: TextStyle(color: Colors.white60, fontSize: 12, height: 1.4),
+                ),
               ],
             ),
             const SizedBox(height: 24),

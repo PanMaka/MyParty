@@ -18,6 +18,7 @@ import 'package:myparty/state/data_changes.dart';
 import 'package:myparty/ui/screens/host_dashboard_screen.dart';
 import 'package:myparty/ui/screens/host_wizard_screen.dart';
 import 'package:myparty/ui/screens/invite_followers_screen.dart';
+import 'package:myparty/ui/widgets/gender_mix_bar.dart';
 import 'package:myparty/ui/widgets/invite_link_sheet.dart';
 import 'package:myparty/ui/widgets/map_pin_sheet.dart';
 import 'package:myparty/ui/widgets/party_detail_sheet.dart';
@@ -33,6 +34,8 @@ HostPartyStats _stats({
   bool isOver = false,
   int going = 3,
   int interested = 8,
+  GenderMix? goingGender,
+  GenderMix? interestedGender,
 }) {
   return HostPartyStats(
     partyId: _partyId,
@@ -54,6 +57,8 @@ HostPartyStats _stats({
     goingNonFollowers: going - 1,
     interestedFollowers: 2,
     interestedNonFollowers: interested - 2,
+    goingGender: goingGender,
+    interestedGender: interestedGender,
   );
 }
 
@@ -725,5 +730,85 @@ void main() {
     await tester.pumpAndSettle();
     expect(repo.statsFetches, before + 1, reason: 'one refetch for the burst');
     expect(find.descendant(of: find.byKey(const Key('tile-going')), matching: find.text('4')), findsOneWidget);
+  });
+  group('Gender mix', () {
+    Finder bar(String label) => find.ancestor(of: find.text(label), matching: find.byType(GenderMixBar));
+
+    testWidgets('a public party: a Going and an Interested bar, each with its own counts', (tester) async {
+      final repo = _FakeRepo(
+        stats: _stats(
+          going: 5,
+          interested: 8,
+          goingGender: const GenderMix(male: 1, female: 2, nonBinary: 1, unspecified: 1),
+          interestedGender: const GenderMix(male: 2, female: 2, nonBinary: 1, unspecified: 3),
+        ),
+      );
+      _tall(tester);
+      await tester.pumpWidget(_dashboard(repo));
+      await tester.pumpAndSettle();
+
+      expect(find.text('GENDER MIX'), findsOneWidget);
+      expect(find.byType(GenderMixBar), findsNWidgets(2));
+      final going = find.byWidgetPredicate((w) => w is GenderMixBar && w.label == 'Going');
+      final interested = find.byWidgetPredicate((w) => w is GenderMixBar && w.label == 'Interested');
+      expect(find.descendant(of: going, matching: find.text('Women 2 · 40%')), findsOneWidget);
+      expect(find.descendant(of: going, matching: find.text('5 guests')), findsOneWidget);
+      expect(find.descendant(of: interested, matching: find.text('Not specified 3 · 38%')), findsOneWidget);
+      expect(find.descendant(of: interested, matching: find.text('8 guests')), findsOneWidget);
+    });
+
+    testWidgets('a group the server withheld says "Not enough guests yet"; the other still shows', (tester) async {
+      final repo = _FakeRepo(
+        stats: _stats(
+          going: 2,
+          interested: 4,
+          interestedGender: const GenderMix(male: 1, female: 1, nonBinary: 0, unspecified: 2),
+        ),
+      );
+      _tall(tester);
+      await tester.pumpWidget(_dashboard(repo));
+      await tester.pumpAndSettle();
+
+      expect(find.descendant(of: bar('Going'), matching: find.text(GenderMixBar.notEnough)), findsOneWidget);
+      expect(find.descendant(of: bar('Going'), matching: find.textContaining('Men')), findsNothing);
+      expect(find.descendant(of: bar('Interested'), matching: find.text('Men 1 · 25%')), findsOneWidget);
+    });
+
+    testWidgets('a private party: one Coming bar, no Interested', (tester) async {
+      final repo = _FakeRepo(
+        stats: _stats(
+          isPrivate: true,
+          going: 3,
+          interested: 3,
+          goingGender: const GenderMix(male: 1, female: 1, nonBinary: 1, unspecified: 0),
+          interestedGender: const GenderMix(male: 1, female: 1, nonBinary: 1, unspecified: 0),
+        ),
+      );
+      _tall(tester);
+      await tester.pumpWidget(_dashboard(repo));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(GenderMixBar), findsOneWidget);
+      expect(find.descendant(of: bar('Coming'), matching: find.text('Non-binary 1 · 33%')), findsOneWidget);
+    });
+
+    testWidgets('it moves with an RSVP on the host topic, like the other stats', (tester) async {
+      final repo = _FakeRepo(stats: _stats(going: 2));
+      _tall(tester);
+      await tester.pumpWidget(_dashboard(repo));
+      await tester.pumpAndSettle();
+      expect(find.descendant(of: bar('Going'), matching: find.text(GenderMixBar.notEnough)), findsOneWidget);
+
+      repo.stats = _stats(
+        going: 3,
+        goingGender: const GenderMix(male: 0, female: 2, nonBinary: 0, unspecified: 1),
+      );
+      repo.activity.add(null);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+
+      expect(find.descendant(of: bar('Going'), matching: find.text('Women 2 · 67%')), findsOneWidget);
+      expect(find.text(GenderMixBar.notEnough), findsOneWidget, reason: 'only Interested (null here) still withholds');
+    });
   });
 }

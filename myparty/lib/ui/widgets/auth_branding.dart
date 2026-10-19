@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../../models/gender.dart';
 import '../theme/app_theme.dart';
+
+export '../../models/gender.dart' show Gender, genderVisibilityNote;
 
 /// The image-in-a-circle and caption at the top of the auth screens. Defaults
 /// to the logo and login/register caption; onboarding steps pass their own.
@@ -345,19 +348,6 @@ class _AuthDateOfBirthFieldState extends State<AuthDateOfBirthField> {
       ),
     );
   }
-}
-
-/// Gender choice on the register form. [Gender.value] is what is sent to the
-/// server; [Gender.label] is what the dropdown shows.
-enum Gender {
-  male('male', 'Male'),
-  female('female', 'Female'),
-  nonBinary('non_binary', 'Non-binary'),
-  preferNotToSay('prefer_not_to_say', 'Prefer not to say');
-
-  const Gender(this.value, this.label);
-  final String value;
-  final String label;
 }
 
 /// Dropdown for [Gender], styled like [AuthDateOfBirthField].

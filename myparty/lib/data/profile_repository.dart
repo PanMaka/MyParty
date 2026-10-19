@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
+import '../models/gender.dart';
 import '../models/profile.dart';
 import '../models/profile_privacy.dart';
 import '../models/profile_stats.dart';
@@ -374,6 +375,30 @@ class ProfileRepository {
 
     if (patch.isEmpty) return;
     await _client.from('profiles').update(patch).eq('id', userId);
+  }
+
+  /// The current user's own gender answer; [Gender.preferNotToSay] when there
+  /// is no row, which is also what choosing it stores. Null only when signed
+  /// out.
+  ///
+  /// Read from `user_genders` under its owner-only policy, never from the auth
+  /// metadata: the sign-up copy there is stripped (20261019193257) and was
+  /// never updated by Settings anyway.
+  Future<Gender?> fetchMyGender() async {
+    final userId = currentUserId;
+    if (userId == null) return null;
+
+    final row = await _client.from('user_genders').select('gender').eq('user_id', userId).maybeSingle();
+    return Gender.fromWire(row?['gender'] as String?);
+  }
+
+  /// Sets or clears (prefer not to say) the current user's answer.
+  ///
+  /// Through `set_my_gender`, never `.upsert()`: the table has no client write
+  /// grant at all. No `DataChange`: no other screen shows your own answer, and
+  /// the host's dashboard deliberately hears nothing about it.
+  Future<void> setGender(Gender gender) async {
+    await _client.rpc('set_my_gender', params: {'p_gender': gender.wire});
   }
 
   /// The three profile counters, for [userId] or the current user.
