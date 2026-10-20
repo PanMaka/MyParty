@@ -21,7 +21,9 @@ select tests.authenticate_as('44444444-4444-4444-4444-444444444444'); -- strange
 -- One fully-populated party. The literals are far-future so the lifecycle
 -- filter (`ends_at > now()`) keeps it on the map for as long as this test file
 -- exists, and cover_path satisfies parties_cover_path_own_folder, which
--- requires the party's own id as the first path segment.
+-- requires the party's own id as the first path segment. Written as postgres:
+-- cover_path and status are server-owned since 20261020103856.
+set local role postgres;
 insert into public.parties (id, host_id, title, location, starts_at, ends_at, area, cover_path, is_private, status)
 values (
   'dddddddd-1111-0000-0000-000000000001',
@@ -35,6 +37,7 @@ values (
   false,
   'published'
 );
+select tests.authenticate_as('44444444-4444-4444-4444-444444444444'); -- stranger
 
 -- A SECOND user's RSVP, not the caller's. interested_count is a property of
 -- the party; my_rsvp_status is a property of the viewer. A counter wired to
@@ -107,15 +110,14 @@ select results_eq(
 -- the point of returning the column is that the client can now at least SEE
 -- that it does not know.
 -- ============================================================
-insert into public.parties (id, host_id, title, location, starts_at, is_private, status)
+insert into public.parties (id, host_id, title, location, starts_at, is_private)
 values (
   'dddddddd-1111-0000-0000-000000000002',
   '44444444-4444-4444-4444-444444444444',
   'Χωρίς τέλος',
   st_point(23.7348, 37.9755)::geography,
   '2030-06-01 18:00:00+00',
-  false,
-  'published'
+  false
 );
 
 select results_eq(
@@ -137,15 +139,14 @@ select results_eq(
 -- hosts them, so `p.host_id = auth.uid()` satisfies both can_access_party and
 -- the map_visibility gate -- all 501 are on this caller's map.
 -- ============================================================
-insert into public.parties (host_id, title, location, starts_at, ends_at, is_private, status)
+insert into public.parties (host_id, title, location, starts_at, ends_at, is_private)
 select
   '44444444-4444-4444-4444-444444444444',
   'Πλήθος ' || i,
   st_point(23.7348, 37.9755)::geography,
   '2030-06-01 18:00:00+00',
   '2030-06-02 02:00:00+00',
-  true,
-  'published'
+  true
 from generate_series(1, 501) as i;
 
 select is(

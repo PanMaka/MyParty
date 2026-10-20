@@ -19,7 +19,7 @@
 --   aaaa...0002  public,  hosted by 1111 ("Syntagma Afterparty")
 begin;
 set search_path to public, extensions;
-select plan(49);
+select plan(52);
 
 
 -- ============================================================
@@ -124,12 +124,19 @@ select lives_ok(
   'control: the user can register a device with a location before deleting');
 
 -- A future party, which must be cancelled, and a past one, which must not.
-insert into public.parties (id, host_id, title, location, starts_at, status)
+-- Written as postgres: `status` is server-owned since 20261020103856, so the
+-- client's column-scoped INSERT cannot name it.
+set local role postgres;
+insert into public.parties (id, host_id, title, address, location, starts_at, status)
 values
   ('cccccccc-0000-0000-0000-000000000001', '33333333-3333-3333-3333-333333333333',
-   'Future Party', st_point(23.7348, 37.9755)::geography, now() + interval '3 days', 'published'),
+   'Future Party', 'Οδός Σπιτιού 5', st_point(23.7348, 37.9755)::geography, now() + interval '3 days', 'published'),
   ('cccccccc-0000-0000-0000-000000000002', '33333333-3333-3333-3333-333333333333',
-   'Past Party', st_point(23.7348, 37.9755)::geography, now() - interval '10 days', 'published');
+   'Past Party', 'Οδός Σπιτιού 5', st_point(23.7348, 37.9755)::geography, now() - interval '10 days', 'published');
+-- Someone else's party with an address: erasure must not reach it.
+update public.parties set address = 'Πλατεία Συντάγματος 1'
+where id = 'aaaaaaaa-0000-0000-0000-000000000002';
+select tests.authenticate_as('33333333-3333-3333-3333-333333333333');
 
 select isnt(
   (select public.request_account_deletion()), null,
@@ -305,6 +312,23 @@ select
 select lives_ok(
   $$ select public.complete_account_erasure('33333333-3333-3333-3333-333333333333') $$,
   'complete_account_erasure runs once the grace period has expired');
+
+select is(
+  (select count(*)::int from public.parties
+   where host_id = '33333333-3333-3333-3333-333333333333' and address is not null),
+  0,
+  'the address of every party the erased user hosted is cleared -- it is often their home');
+
+select is(
+  (select count(*)::int from public.parties
+   where host_id = '33333333-3333-3333-3333-333333333333' and title in ('Future Party', 'Past Party')),
+  2,
+  'and only the address: the parties themselves are kept');
+
+select is(
+  (select address from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
+  'Πλατεία Συντάγματος 1',
+  'another host''s party keeps its address');
 
 select is(
   (select count(*)::int from public.messages where id = 'dddddddd-0000-0000-0000-000000000001'),

@@ -97,6 +97,22 @@ Future<DeviceFix> locateDevice() async {
 /// fall back to [kDefaultMapCentre] either way.
 Future<LatLng?> deviceLocation() async => (await locateDevice()).point;
 
+/// The device's position ONLY if location is already granted, and never a
+/// prompt: for biasing address search while the host types, where an OS
+/// dialog would be an ambush. The last known fix is enough for a bias.
+Future<LatLng?> knownDeviceLocation() async {
+  try {
+    final permission = await Geolocator.checkPermission();
+    if (permission != LocationPermission.always && permission != LocationPermission.whileInUse) {
+      return null;
+    }
+    final last = await Geolocator.getLastKnownPosition();
+    return last == null ? null : LatLng(last.latitude, last.longitude);
+  } catch (_) {
+    return null;
+  }
+}
+
 /// Opens wherever the user can undo [failure]: the system location switch,
 /// or this app's page in Settings once the OS has stopped asking. Null when
 /// there is nowhere to send them — a plain denial is re-asked on the next tap.

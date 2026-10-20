@@ -40,6 +40,9 @@ class PartyListItem {
   final DateTime startsAt;
   final DateTime? endsAt;
   final String? area;
+
+  /// `parties.address`, the readable street address; null means none.
+  final String? address;
   final String? coverPath;
   final bool isPrivate;
   final bool isSponsored;
@@ -78,6 +81,7 @@ class PartyListItem {
     required this.startsAt,
     required this.endsAt,
     required this.area,
+    this.address,
     required this.coverPath,
     required this.isPrivate,
     required this.isSponsored,
@@ -102,6 +106,7 @@ class PartyListItem {
       startsAt: DateTime.parse(row['starts_at'] as String).toLocal(),
       endsAt: row['ends_at'] == null ? null : DateTime.parse(row['ends_at'] as String).toLocal(),
       area: row['area'] as String?,
+      address: row['address'] as String?,
       coverPath: row['cover_path'] as String?,
       isPrivate: row['is_private'] as bool,
       isSponsored: (row['is_sponsored'] as bool?) ?? false,
@@ -160,6 +165,7 @@ class PartyListItem {
       startsAt: startsAt,
       endsAt: endsAt,
       area: area,
+      address: address,
       coverPath: coverPath,
       isPrivate: isPrivate,
       isSponsored: isSponsored,

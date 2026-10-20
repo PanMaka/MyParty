@@ -42,8 +42,10 @@ class PartyRepository {
   String? get currentUserId => _client.auth.currentUser?.id;
 
   /// Creates a party and its initial invitations in one RPC call.
-  /// `party` keys: title, description, lat, lon, starts_at (ISO 8601),
-  /// is_private. Returns the new party's id.
+  /// `party` keys: title, description, area, address, lat, lon, starts_at
+  /// (ISO 8601), ends_at, is_private, max_capacity. Any other key is refused
+  /// by the server (42501): sponsorship, tier and status are its defaults.
+  /// lat/lon are required and are the pin. Returns the new party's id.
   ///
   /// Announces [PartyCreated] once the row exists, which is what brings the
   /// profile's HOSTED count and list, MY PARTIES, ALL PARTIES and the map
@@ -607,6 +609,7 @@ class PartyRepository {
       'p_title': edit.title,
       'p_description': edit.description,
       'p_area': edit.area,
+      'p_address': edit.address,
       'p_starts_at': edit.startsAt.toUtc().toIso8601String(),
       'p_ends_at': edit.endsAt?.toUtc().toIso8601String(),
       'p_lat': edit.lat,

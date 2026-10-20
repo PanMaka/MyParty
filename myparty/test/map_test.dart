@@ -201,6 +201,7 @@ void main() {
         'starts_at': startsAt,
         'ends_at': endsAt,
         'area': 'Κουκάκι',
+        'address': 'Αισχύλου 12, 105 54 Αθήνα',
         'cover_path': 'aaaaaaaa-0000-0000-0000-000000000002/cover.jpg',
         'is_private': false,
         'is_sponsored': false,
@@ -224,6 +225,7 @@ void main() {
       expect(pin.goingCount, 12);
       expect(pin.interestedCount, 34);
       expect(pin.area, 'Κουκάκι');
+      expect(pin.address, 'Αισχύλου 12, 105 54 Αθήνα');
       expect(pin.coverPath, 'aaaaaaaa-0000-0000-0000-000000000002/cover.jpg');
       expect(pin.hasCover, isTrue);
       expect(pin.startsAt, DateTime.parse('2026-08-21T20:00:00Z').toLocal());
@@ -1082,6 +1084,7 @@ void main() {
     MapPartyPin full({
       String? description = 'Ταράτσα με θέα, φέρτε ποτό.',
       String? area = 'Κουκάκι',
+      String? address,
       String? hostUsername = 'nikos',
       String? myRsvpStatus,
       String? coverPath,
@@ -1102,6 +1105,7 @@ void main() {
         startsAt: startsAt ?? start,
         endsAt: endsAt ?? start.add(const Duration(hours: 8)),
         area: area,
+        address: address,
         description: description,
         hostId: '11111111-1111-1111-1111-111111111111',
         hostUsername: hostUsername,
@@ -1353,6 +1357,33 @@ void main() {
         ], reason: 'isPrivate: $isPrivate');
         expect(repository.rsvpWrites, isEmpty);
       }
+    });
+
+    testWidgets('the street address is its own row, above the area, and absent when there is none', (tester) async {
+      final repository = _FakePartyRepository(const []);
+      await pumpSheet(tester, full(address: 'Αισχύλου 12, ταράτσα, 3ος όροφος'), repository);
+
+      expect(find.byKey(const Key('pin-sheet-address')), findsOneWidget);
+      expect(find.text('Αισχύλου 12, ταράτσα, 3ος όροφος'), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.text('Αισχύλου 12, ταράτσα, 3ος όροφος')).dy,
+        lessThan(tester.getTopLeft(find.text('Κουκάκι')).dy),
+      );
+
+      await pumpSheet(tester, full(), repository);
+      expect(find.byKey(const Key('pin-sheet-address')), findsNothing);
+    });
+
+    testWidgets('with an address, Directions still goes to the pin, not the text', (tester) async {
+      final launcher = FakeUrlLauncher();
+      final previous = UrlLauncherPlatform.instance;
+      UrlLauncherPlatform.instance = launcher;
+      addTearDown(() => UrlLauncherPlatform.instance = previous);
+
+      await pumpSheet(tester, full(address: 'Αισχύλου 12, rooftop'), _FakePartyRepository(const []));
+      await tapAnswer(tester, 'Directions');
+
+      expect(launcher.launched.single.$1, directionsUri(lat: _athens.lat, lng: _athens.lon).toString());
     });
 
     testWidgets('a Directions link that cannot be opened says so', (tester) async {

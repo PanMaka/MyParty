@@ -10,10 +10,11 @@ import 'package:url_launcher/url_launcher.dart';
 /// it.
 ///
 /// Coordinates win when present, because they are the host's actual pin.
-/// [address] is the fallback, and in this schema it is the party's `area`, a
-/// neighbourhood label — there is no street-address column, on purpose
-/// (20260820095801). Since `parties.location` is NOT NULL the fallback only
-/// fires on a row decoded without coordinates.
+/// [address] is the fallback: the party's `address` (Phase 42) when it has
+/// one, else its `area`. Never the other way round: the address is a label
+/// the host can edit ("rooftop, 3rd floor"), the pin is where the party is.
+/// Since `parties.location` is NOT NULL the fallback only fires on a row
+/// decoded without coordinates.
 ///
 /// Returns null when there is nothing to navigate to. Takes only what the
 /// caller already holds, so it cannot reveal a position the read RPC did not

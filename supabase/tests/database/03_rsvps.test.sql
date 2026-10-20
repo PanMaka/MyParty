@@ -136,17 +136,19 @@ select isnt_empty(
   'create_party_with_invites inserts the party and its invitations in one call'
 );
 
-select public.create_party_with_invites(
+-- Created, then cancelled through cancel_party. It used to be created with
+-- 'status' in the payload; since 20261020103856 status is server-owned and
+-- that key is refused (36_party_address.test.sql).
+select public.cancel_party(public.create_party_with_invites(
   jsonb_build_object(
     'title', 'Cancelled RPC Party',
     'description', 'should not appear on the map',
     'lat', 37.9755,
     'lon', 23.7348,
-    'starts_at', (now() + interval '1 day')::text,
-    'status', 'cancelled'
+    'starts_at', (now() + interval '1 day')::text
   ),
   '{}'::uuid[]
-);
+));
 
 select is_empty(
   $$ select 1 from public.get_parties_near_user(23.7348, 37.9755, 500)

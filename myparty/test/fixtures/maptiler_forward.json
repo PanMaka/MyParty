@@ -1,0 +1,49 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "id": "address.11388758",
+      "text": "Αισχύλου",
+      "address": "12",
+      "place_name": "Αισχύλου 12, 105 54 Αθήνα, Ελλάδα",
+      "place_type": ["address"],
+      "relevance": 1,
+      "center": [23.725169999999935, 37.978742],
+      "geometry": {"type": "Point", "coordinates": [23.725169999999935, 37.978742]},
+      "properties": {"country_code": "gr", "kind": "street"},
+      "context": [
+        {"id": "postal_code.389900", "text": "105 54"},
+        {"id": "place.4491961", "text": "Ψυρρή", "kind": "place"},
+        {"id": "locality.109290", "text": "1η Κοινότητα Αθηνών", "kind": "admin_area"},
+        {"id": "municipality.37534", "text": "Αθήνα", "kind": "admin_area"},
+        {"id": "country.23", "text": "Ελλάδα", "kind": "admin_area"},
+        {"id": "continental_marine.1", "text": "Ευρώπη"}
+      ]
+    },
+    {
+      "type": "Feature",
+      "id": "address.6021157",
+      "text": "Αισχύλου",
+      "address": "12",
+      "place_name": "Αισχύλου 12, 163 43 Ηλιούπολη, Ελλάδα",
+      "place_type": ["address"],
+      "relevance": 1,
+      "center": [23.764971999999943, 37.940929],
+      "context": [
+        {"id": "postal_code.604410", "text": "163 43"},
+        {"id": "municipality.48666", "text": "Ηλιούπολη", "kind": "admin_area"},
+        {"id": "country.23", "text": "Ελλάδα", "kind": "admin_area"}
+      ]
+    },
+    {
+      "type": "Feature",
+      "id": "broken.1",
+      "text": "No centre",
+      "place_name": "No centre, Ελλάδα",
+      "place_type": ["address"]
+    }
+  ],
+  "query": ["αισχυλου", "12"],
+  "attribution": "<a href=\"https://www.maptiler.com/copyright/\" target=\"_blank\">&copy; MapTiler</a> <a href=\"https://www.openstreetmap.org/copyright\" target=\"_blank\">&copy; OpenStreetMap contributors</a>"
+}

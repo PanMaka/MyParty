@@ -30,6 +30,9 @@ select tests.authenticate_as('44444444-4444-4444-4444-444444444444'); -- strange
 
 -- Four parties this caller hosts, with distinct start times so there is a
 -- total order to assert, plus the two lifecycle states that must not appear.
+-- Written as postgres: `status` is server-owned since 20261020103856, so the
+-- client's column-scoped INSERT cannot name it.
+set local role postgres;
 insert into public.parties (id, host_id, title, location, starts_at, is_private, status)
 values
   ('dddddddd-0000-0000-0000-000000000001', '44444444-4444-4444-4444-444444444444',
@@ -48,6 +51,7 @@ values
    'Προσχέδιο', st_point(23.7348, 37.9755)::geography, now() + interval '2 days', false, 'draft'),
   ('dddddddd-0000-0000-0000-000000000006', '44444444-4444-4444-4444-444444444444',
    'Ακυρώθηκε', st_point(23.7348, 37.9755)::geography, now() + interval '3 days', false, 'cancelled');
+select tests.authenticate_as('44444444-4444-4444-4444-444444444444'); -- stranger
 
 -- The caller is GOING to two parties they do not host: one past, one upcoming.
 -- These are the rows the deleted ΤΟ ΙΣΤΟΡΙΚΟ ΜΟΥ section used to render, and

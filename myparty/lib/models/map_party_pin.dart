@@ -44,6 +44,12 @@ class MapPartyPin {
   /// Neighbourhood label written by the host; null means they did not say.
   final String? area;
 
+  /// The readable street address (`parties.address`), one line, often from
+  /// geocoding and then edited by the host ("rooftop, 3rd floor"). A label:
+  /// [lat]/[lng] are the pin. Null means none; parties made before Phase 42
+  /// may still carry theirs inside [description].
+  final String? address;
+
   /// The host's blurb. Null means they wrote none — an empty body, not a
   /// missing one — so the sheet omits the section rather than showing a gap.
   final String? description;
@@ -84,6 +90,7 @@ class MapPartyPin {
     this.startsAt,
     this.endsAt,
     this.area,
+    this.address,
     this.description,
     this.hostId,
     this.hostUsername,
@@ -108,6 +115,7 @@ class MapPartyPin {
       startsAt: _parseTimestamp(row['starts_at']),
       endsAt: _parseTimestamp(row['ends_at']),
       area: row['area'] as String?,
+      address: row['address'] as String?,
       // All four were in the payload and unread until the sheet needed them.
       // `description` and `my_rsvp_status` were map-only until
       // 20260824094606 added them to search_parties, so that both screens can
@@ -233,6 +241,7 @@ class MapPartyPin {
       startsAt: startsAt,
       endsAt: endsAt,
       area: area,
+      address: address,
       description: description,
       hostId: hostId,
       hostUsername: hostUsername,

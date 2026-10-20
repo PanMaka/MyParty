@@ -51,6 +51,7 @@ class HostPartyStats {
     required this.title,
     required this.description,
     required this.area,
+    this.address,
     required this.startsAt,
     required this.endsAt,
     required this.coverPath,
@@ -74,6 +75,7 @@ class HostPartyStats {
   final String title;
   final String? description;
   final String? area;
+  final String? address;
   final DateTime startsAt;
   final DateTime? endsAt;
   final String? coverPath;
@@ -109,6 +111,7 @@ class HostPartyStats {
       title: row['title'] as String,
       description: row['description'] as String?,
       area: row['area'] as String?,
+      address: row['address'] as String?,
       startsAt: ts(row['starts_at'])!,
       endsAt: ts(row['ends_at']),
       coverPath: row['cover_path'] as String?,
@@ -189,6 +192,7 @@ class PartyEdit {
     required this.title,
     required this.description,
     required this.area,
+    required this.address,
     required this.startsAt,
     required this.endsAt,
     required this.lat,
@@ -199,6 +203,10 @@ class PartyEdit {
   final String title;
   final String? description;
   final String? area;
+
+  /// Required although nullable: a forgotten address would be sent as NULL,
+  /// and update_party is a full replacement, so it would be wiped.
+  final String? address;
   final DateTime startsAt;
   final DateTime? endsAt;
   final double lat;

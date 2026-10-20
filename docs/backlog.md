@@ -159,24 +159,6 @@ for under-15s (the DOB is now stored, so the last is implementable).
 *What it costs to leave:* location and push consent given by Greek users aged
 13–14 may not be valid consent.
 
-### 1.11 A typed address does not place the pin
-
-Phase 25's host wizard answers "where" with an address **or** a spot picked on
-the map. Only the spot sets `parties.location`; an address on its own is stored
-as text in the description and the pin falls back to the host's position at
-the moment of creating — the only behaviour before Phase 25. The wizard says so
-under the map box.
-
-*Why it is still open:* turning text into a point needs a geocoder, which means
-sending the address to a third party (Google, Mapbox, Nominatim/OSM). For a
-private party that is exactly the disclosure `parties.area`'s comment refuses
-for reverse geocoding — so it is a product and privacy decision with a provider
-contract behind it, not a missing line of code. The cheap alternative is to make
-the map spot required and the address a label only.
-
-*What it costs to leave:* a host who types an address across town and skips the
-map pins the party where they are standing.
-
 ### 1.12 A party's cover can be replaced but never removed
 
 Phase 39 (`20261014113214`) added replacement: a fresh `{party_id}/{uuid}` key
@@ -474,6 +456,14 @@ It has to cover, at least:
   they are retained (under a tombstone) after the author's account is erased.
 - **Account deletion and export:** the 30-day grace period, what is deleted and
   what is retained, and the in-app export.
+- **MapTiler (address search)** (Phase 42): while a host creates or edits a
+  party, what they type in the address field and where they put the pin are
+  sent from their device to MapTiler's Geocoding API, private parties included.
+  The chosen address is stored on the party (`parties.address`), visible to
+  whoever can see the party, and cleared when the host's account is erased.
+  MapTiler is a processor here; name it. (The map tiles are CARTO's, which
+  receive the tile coordinates of whatever map area is on screen: list CARTO
+  too.)
 
 *Why it is still open:* it is a legal document, not code; someone has to write
 and own it. The text above is a checklist of what the schema actually does, not
@@ -489,6 +479,38 @@ response. They are erased with the auth user, so erasure is not affected.
 *Fix:* either move the names into an owner-read-only table, as Phase 41 did for
 gender, or read `auth.users.raw_user_meta_data` inside the export (it is
 definer, so it can).
+
+### 1.33 Descriptions written before Phase 42 may contain an address
+
+Until Phase 42 the host wizard joined the typed address onto the front of
+`parties.description` with a blank line. Phase 42 gave the address its own
+column, and erasure now clears `parties.address` on every party the user
+hosted (`20261020105039`), because an address is often the host's home. The old
+descriptions were left as they are: there is no reliable way to tell an address
+paragraph from a description paragraph after the fact, so an erased host's
+pre-Phase-42 parties can still carry their address in the description.
+
+*Decide:* whether erasure should also clear (or redact) the description of
+parties created before Phase 42, e.g. every hosted party with `created_at`
+before the migration and a non-null description, accepting that it also removes
+descriptions that never held an address. Or do a one-off cleanup now. Until
+then the export and erasure behave as documented, minus this.
+
+### 1.34 Confirm with MapTiler: geocoding on a non-MapTiler map — before launch
+
+Address search uses MapTiler's Geocoding API while the map tiles are CARTO's
+`dark_all`. MapTiler's Terms of Service (read 2026-10-20) do not address this
+either way: §4 restricts reselling/redistribution and commercial derivative
+works, §6.1–6.4 cover attribution on *displayed MapTiler maps* (not shown here),
+and §6.5 asks for attribution "as part of the database" when search results are
+stored (done: the comment on `parties.address`). The wizard shows "Address
+search is provided by MapTiler. © OpenStreetMap contributors" under the field.
+
+*To do:* get MapTiler's written confirmation that their geocoding may be used
+with a third-party (CARTO) basemap on the plan we are on, and whether storing
+the chosen address permanently is within it. If not, the options are MapTiler
+tiles (a tile switch was considered and declined in Phase 42) or another
+geocoder.
 
 ---
 
@@ -544,6 +566,19 @@ showing dead pins before the wizard changes. Do not take B or C as written.
 ## 3. NOT backlog — decisions that look like gaps
 
 Here so they are not "fixed" by somebody reading §1 and pattern-matching.
+
+- **Party addresses ARE geocoded, through MapTiler, from the host's device.**
+  Reversed on purpose in Phase 42 (2026-10-20); it was §1.11. Until then the
+  schema refused both an address column and any geocoding, because a geocoder
+  is a third party and a private party's location is the most protected value
+  here, and the price was a pin that landed wherever the host's phone was. Now
+  the host searches an address or moves the pin, the pin is reverse-geocoded
+  into an editable address and an area, and `parties.location` is still the pin
+  and only the pin. What MapTiler receives is what the host types and where the
+  host puts the pin, about the host's own party; it never sees a guest. The
+  address has its own column (`parties.address`), the row's visibility, and is
+  cleared on erasure. Disclosure: 1.30. Terms: 1.34. Do not "restore" the old
+  rule by stripping the geocoder without a product decision.
 
 - **The sign-up response's token carries the gender answer for up to an
   hour.** The register form has to send it in the sign-up metadata, the only
