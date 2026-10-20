@@ -525,33 +525,33 @@ select throws_ok(
 
 select tests.authenticate_as('22222222-2222-2222-2222-222222222222'); -- invitee
 select throws_ok(
-  $$ select public.update_party('dddddddd-0000-0000-0000-000000000001', 'Mine now', null, null,
+  $$ select public.update_party('dddddddd-0000-0000-0000-000000000001', 'Mine now', null, null, null,
        now() + interval '2 days', null, 37.97, 23.73) $$,
   '42501', null, 'a guest cannot edit the party');
 
 select tests.authenticate_as('44444444-4444-4444-4444-444444444444'); -- stranger
 select throws_ok(
-  $$ select public.update_party('dddddddd-0000-0000-0000-000000000001', 'Mine now', null, null,
+  $$ select public.update_party('dddddddd-0000-0000-0000-000000000001', 'Mine now', null, null, null,
        now() + interval '2 days', null, 37.97, 23.73) $$,
   '42501', null, 'a stranger cannot edit the party');
 
 select tests.authenticate_as('11111111-1111-1111-1111-111111111111'); -- host
 select throws_ok(
-  $$ select public.update_party('dddddddd-0000-0000-0000-000000000001', '   ', null, null,
+  $$ select public.update_party('dddddddd-0000-0000-0000-000000000001', '   ', null, null, null,
        now() + interval '2 days', null, 37.97, 23.73) $$,
   '22023', null, 'a blank title is refused');
 select throws_ok(
-  $$ select public.update_party('dddddddd-0000-0000-0000-000000000001', 'Edited', null, null,
+  $$ select public.update_party('dddddddd-0000-0000-0000-000000000001', 'Edited', null, null, null,
        now() + interval '2 days', now() + interval '1 day', 37.97, 23.73) $$,
   '22023', null, 'an end before the start is refused');
 select throws_ok(
-  $$ select public.update_party('dddddddd-0000-0000-0000-000000000001', 'Edited', null, null,
+  $$ select public.update_party('dddddddd-0000-0000-0000-000000000001', 'Edited', null, null, null,
        now() + interval '2 days', null, 91, 23.73) $$,
   '22023', null, 'a latitude off the planet is refused');
 
 select lives_ok(
   $$ select public.update_party('dddddddd-0000-0000-0000-000000000001', '  Edited Title  ',
-       'New description', 'Ψυρρή', now() + interval '5 days', now() + interval '5 days 6 hours',
+       'New description', 'Ψυρρή', null, now() + interval '5 days', now() + interval '5 days 6 hours',
        37.98, 23.72) $$,
   'the host edits their party');
 
@@ -593,7 +593,7 @@ select throws_ok(
   $$ select public.cancel_party('dddddddd-0000-0000-0000-000000000001') $$,
   '42501', null, 'cancelling twice is refused -- there is no state to go to');
 select throws_ok(
-  $$ select public.update_party('dddddddd-0000-0000-0000-000000000001', 'Back from the dead', null, null,
+  $$ select public.update_party('dddddddd-0000-0000-0000-000000000001', 'Back from the dead', null, null, null,
        now() + interval '2 days', null, 37.97, 23.73) $$,
   '42501', null, 'and a cancelled party cannot be edited back to life');
 

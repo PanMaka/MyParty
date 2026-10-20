@@ -124,12 +124,16 @@ select lives_ok(
   'control: the user can register a device with a location before deleting');
 
 -- A future party, which must be cancelled, and a past one, which must not.
+-- Written as postgres: `status` is server-owned since 20261020103856, so the
+-- client's column-scoped INSERT cannot name it.
+set local role postgres;
 insert into public.parties (id, host_id, title, location, starts_at, status)
 values
   ('cccccccc-0000-0000-0000-000000000001', '33333333-3333-3333-3333-333333333333',
    'Future Party', st_point(23.7348, 37.9755)::geography, now() + interval '3 days', 'published'),
   ('cccccccc-0000-0000-0000-000000000002', '33333333-3333-3333-3333-333333333333',
    'Past Party', st_point(23.7348, 37.9755)::geography, now() - interval '10 days', 'published');
+select tests.authenticate_as('33333333-3333-3333-3333-333333333333');
 
 select isnt(
   (select public.request_account_deletion()), null,

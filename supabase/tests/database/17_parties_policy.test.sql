@@ -491,7 +491,7 @@ select throws_ok(
 select lives_ok(
   $$ select public.update_party(
        'aaaaaaaa-0000-0000-0000-000000000001', 'Rooftop Pregame (moved)',
-       'Invite-only pregame before we head out.', 'Σύνταγμα',
+       'Invite-only pregame before we head out.', 'Σύνταγμα', null,
        (select starts_at from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000001'),
        null, 37.9755, 23.7348) $$,
   'a host can still edit their own PRIVATE party, through update_party'

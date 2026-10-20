@@ -105,7 +105,7 @@ select throws_ok(
 select lives_ok(
   $$ select public.update_party(
        'aaaaaaaa-0000-0000-0000-000000000002', 'Syntagma Afterparty',
-       'Open afterparty, everyone welcome.', 'Κουκάκι',
+       'Open afterparty, everyone welcome.', 'Κουκάκι', null,
        (select starts_at from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
        null, 37.9758, 23.7351) $$,
   'a host can label their party with a neighbourhood');
@@ -113,7 +113,7 @@ select lives_ok(
 select throws_ok(
   $$ select public.update_party(
        'aaaaaaaa-0000-0000-0000-000000000002', 'Syntagma Afterparty', null,
-       repeat('a', 81),
+       repeat('a', 81), null,
        (select starts_at from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
        null, 37.9758, 23.7351) $$,
   '23514',
