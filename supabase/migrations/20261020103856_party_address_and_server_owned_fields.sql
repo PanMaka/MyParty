@@ -44,9 +44,8 @@
 -- address is not what anyone types to find a party, and indexing it would
 -- make "who is partying on my street" a query.
 --
--- Erasure: kept with the party, exactly like `description` and `area` -- the
--- erasure engine does not touch hosted parties (docs/phase-09-fk-audit.md).
--- Export: carried, below.
+-- Erasure: cleared on every party the user hosted, by 20261020105039 -- an
+-- address is often the host's home. Export: carried, below.
 -- ===========================================================================
 alter table public.parties
   add column address text
