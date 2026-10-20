@@ -341,6 +341,13 @@ class _MapPinSheetState extends State<MapPinSheet> {
                 ? formatPartyStartEn(startsAt)
                 : formatPartyPastEn(startsAt),
           ),
+        // The street address (Phase 42), above the neighbourhood: it is the
+        // one you navigate by. Two lines, because "rooftop, 3rd floor" is the
+        // part that matters and it comes last.
+        if (pin.address != null) ...[
+          const SizedBox(height: 7),
+          _factRow(Icons.signpost_outlined, pin.address!, maxLines: 2, key: const Key('pin-sheet-address')),
+        ],
         if (pin.area != null) ...[
           const SizedBox(height: 7),
           _factRow(Icons.place_outlined, pin.area!),
@@ -362,15 +369,17 @@ class _MapPinSheetState extends State<MapPinSheet> {
     );
   }
 
-  Widget _factRow(IconData icon, String text) {
+  Widget _factRow(IconData icon, String text, {int maxLines = 1, Key? key}) {
     return Row(
+      key: key,
+      crossAxisAlignment: maxLines > 1 ? CrossAxisAlignment.start : CrossAxisAlignment.center,
       children: [
         Icon(icon, size: 15, color: AppColors.textAlpha(0.45)),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
             text,
-            maxLines: 1,
+            maxLines: maxLines,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(fontSize: 13, color: AppColors.textAlpha(0.78)),
           ),
@@ -518,7 +527,7 @@ class _MapPinSheetState extends State<MapPinSheet> {
     return SizedBox(
       width: double.infinity,
       child: OutlinedButton.icon(
-        onPressed: () => openDirections(context, lat: _pin.lat, lng: _pin.lng, address: _pin.area),
+        onPressed: () => openDirections(context, lat: _pin.lat, lng: _pin.lng, address: _pin.address ?? _pin.area),
         icon: const Icon(Icons.directions_outlined, size: 18),
         label: const Text('Directions', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
         style: OutlinedButton.styleFrom(

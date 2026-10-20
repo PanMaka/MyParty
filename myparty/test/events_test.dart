@@ -123,6 +123,7 @@ PartyListItem _item({
   MpRsvp? myRsvp,
   String host = 'someone',
   String? area = 'Psyrri',
+  String? address,
   bool isInvited = false,
   int sortGroup = 1,
   int sortRank = 0,
@@ -136,6 +137,7 @@ PartyListItem _item({
     startsAt: startsAt ?? DateTime.now().add(const Duration(hours: 5)),
     endsAt: null,
     area: area,
+    address: address,
     coverPath: null,
     isPrivate: isPrivate,
     isSponsored: false,
@@ -757,6 +759,42 @@ void main() {
 
       expect(launcher.launched, hasLength(1));
       expect(Uri.parse(launcher.launched.single.$1).queryParameters['destination'], 'Νέα Σμύρνη');
+    });
+
+    testWidgets('without coordinates the street address is preferred over the area', (tester) async {
+      final launcher = FakeUrlLauncher();
+      final previous = UrlLauncherPlatform.instance;
+      UrlLauncherPlatform.instance = launcher;
+      addTearDown(() => UrlLauncherPlatform.instance = previous);
+
+      await tester.pumpWidget(_card(_item(
+          id: 'p', title: 'Rooftop', area: 'Νέα Σμύρνη', address: 'Αισχύλου 12, Αθήνα', lat: null, lng: null)));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Rooftop'));
+      await tester.pumpAndSettle();
+      final button = find.descendant(of: find.byType(PartyDetailSheet), matching: find.text('Directions'));
+      await tester.ensureVisible(button);
+      await tester.tap(button);
+      await tester.pump();
+
+      expect(Uri.parse(launcher.launched.single.$1).queryParameters['destination'], 'Αισχύλου 12, Αθήνα');
+    });
+
+    testWidgets('the detail sheet shows the street address, and nothing when there is none', (tester) async {
+      await tester.pumpWidget(_card(_item(id: 'p', title: 'Rooftop', address: 'Αισχύλου 12, ταράτσα')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Rooftop'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('party-detail-address')), findsOneWidget);
+      expect(find.text('Αισχύλου 12, ταράτσα'), findsOneWidget);
+    });
+
+    testWidgets('a party with no address has no address row on the detail sheet', (tester) async {
+      await tester.pumpWidget(_card(_item(id: 'p', title: 'Rooftop')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Rooftop'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('party-detail-address')), findsNothing);
     });
 
     testWidgets('the card carries a group chat pill on a private party only', (tester) async {

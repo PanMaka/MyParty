@@ -34,10 +34,10 @@ class PartySummary {
 
   /// The host's neighbourhood label ("Κουκάκι"), or null when they did not say.
   ///
-  /// **Null is not "unknown, so compute it".** There is no derivation available
-  /// and deliberately so: reverse geocoding `parties.location` would ship a
-  /// private party's coordinates to a geocoder, which is the one thing the
-  /// location work in Phase 7 exists to prevent. A card with no area shows no
+  /// **Null is not "unknown, so compute it" on the client.** Since Phase 42
+  /// the host wizard pre-fills it from MapTiler reverse geocoding of the pin
+  /// (docs/backlog.md §3), on the host's device and editable before saving;
+  /// what arrives here is what the host saved. A card with no area shows no
   /// area line — it does not fall back to a city, a district, or a coordinate.
   ///
   /// Guaranteed non-blank, single-line and ≤80 characters by

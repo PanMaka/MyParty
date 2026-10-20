@@ -145,6 +145,25 @@ class PartyDetailSheet extends StatelessWidget {
                   ],
                 ),
               ),
+              // The street address (Phase 42). Same visibility as the row
+              // that brought it, so a private party's reaches only the host
+              // and invitees.
+              if (item.address != null)
+                Padding(
+                  key: const Key('party-detail-address'),
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.signpost_outlined, size: 15, color: AppColors.textAlpha(0.5)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(item.address!,
+                            style: TextStyle(fontSize: 13, height: 1.35, color: AppColors.textAlpha(0.8))),
+                      ),
+                    ],
+                  ),
+                ),
               if (item.description != null)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
@@ -254,7 +273,7 @@ class PartyDetailSheet extends StatelessWidget {
                               context,
                               lat: item.lat,
                               lng: item.lng,
-                              address: item.area,
+                              address: item.address ?? item.area,
                             ),
                             style: _secondaryStyle,
                             child: const Text('Directions', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),

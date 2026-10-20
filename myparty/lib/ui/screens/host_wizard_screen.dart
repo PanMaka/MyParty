@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:geolocator/geolocator.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -9,9 +9,11 @@ import '../../data/profile_repository.dart';
 import '../../data/social_repository.dart';
 import '../../models/host_party_stats.dart';
 import '../../models/profile.dart';
+import '../../services/geocoding_service.dart';
 import '../../utils/english_date.dart';
 import '../../utils/share_party.dart';
 import '../theme/app_theme.dart';
+import '../widgets/address_suggestions.dart';
 import '../widgets/diagonal_placeholder.dart';
 import '../widgets/map_base.dart';
 import 'chat_screen.dart';
@@ -35,6 +37,7 @@ class HostWizardScreen extends StatefulWidget {
     this.share,
     this.edit,
     this.editCoverUrl,
+    this.geocoder,
   });
 
   /// The party being edited, as the dashboard last fetched it. Null creates.
@@ -59,6 +62,9 @@ class HostWizardScreen extends StatefulWidget {
 
   /// The done screen's share sheet; tests record instead of opening one.
   final ShareText? share;
+
+  /// Address search and reverse lookups (MapTiler). Shared with the picker.
+  final GeocodingService? geocoder;
 
   @override
   State<HostWizardScreen> createState() => _HostWizardScreenState();
@@ -86,18 +92,42 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
   /// nothing invented can be submitted as the title.
   final _nameController = TextEditingController();
   final _addressController = TextEditingController();
+  final _areaController = TextEditingController();
   final _descController = TextEditingController();
+  final _addressFocus = FocusNode();
 
-  /// Set when Continue is pressed on step 1 with neither an address nor a
-  /// picked spot; cleared as soon as the host supplies either. "Where" is the
-  /// only required question on the step — a party nobody can find is not a
-  /// party — and either answer satisfies it.
+  late final GeocodingService _geocoder = widget.geocoder ?? GeocodingService();
+  late final GeocodeSearchController _search = GeocodeSearchController(
+    service: _geocoder,
+    near: _searchBias,
+  );
+
+  /// Set when Continue is pressed on step 1 with no pin; cleared as soon as
+  /// there is one. "Where" is the only required question on the step — a
+  /// party nobody can find is not a party — and only the pin answers it. An
+  /// address alone used to, and the party then landed wherever the host's
+  /// phone was (Phase 42).
   bool _whereMissing = false;
 
-  /// The spot chosen on [LocationPickerScreen]. When null the pin falls back
-  /// to the host's own position at the moment of creating, which is what
-  /// every party got before the picker existed.
+  /// THE location: chosen from a suggestion, or on [LocationPickerScreen].
+  /// What `lat`/`lon` are sent as, always, with no fallback.
   LatLng? _pickedPoint;
+
+  /// Whether the address / area text came from geocoding and has not been
+  /// touched since. A pin move may overwrite automatic text, never the
+  /// host's own ("rooftop, 3rd floor").
+  bool _addressAuto = false;
+  bool _areaAuto = false;
+
+  /// A reverse-geocoded address the host's own text kept out of the field,
+  /// offered as a chip instead.
+  GeocodedPlace? _addressOffer;
+
+  /// Set when the lookup for the current pin failed, so the host knows the
+  /// empty field is not a bug and can type the address themselves.
+  GeocodeFailure? _reverseFailure;
+  bool _reverseLoading = false;
+  int _reverseGeneration = 0;
 
   /// The cover, held in memory and uploaded only after the party exists —
   /// its storage path is the party's own `{party_id}/` folder, and the id is
@@ -124,11 +154,12 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
     super.initState();
     final edit = widget.edit;
     if (edit != null) {
-      // Prefilled from the row. The venue field is `area` here: at creation
-      // the typed address was folded into the description and cannot be split
-      // back out, so the description comes back verbatim, address and all.
+      // Prefilled from the row. Address and area are their own columns since
+      // Phase 42; a party created before it had the address folded into the
+      // description, which therefore comes back verbatim, address and all.
       _nameController.text = edit.title;
-      _addressController.text = edit.area ?? '';
+      _addressController.text = edit.address ?? '';
+      _areaController.text = edit.area ?? '';
       _descController.text = edit.description ?? '';
       _pickedPoint = LatLng(edit.lat, edit.lng);
       _selectedDate = DateTime(edit.startsAt.year, edit.startsAt.month, edit.startsAt.day);
@@ -189,7 +220,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
 
   Future<void> _next() async {
     if (_editing) return _save();
-    if (_step == 1 && _addressController.text.trim().isEmpty && _pickedPoint == null) {
+    if (_step == 1 && _pickedPoint == null) {
       setState(() => _whereMissing = true);
       return;
     }
@@ -203,13 +234,17 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
       _submitError = null;
     });
     try {
-      final point = _pickedPoint ?? await _resolveLocation();
+      // Step 1 cannot be left without a pin, and there is no fallback: a
+      // party is where the host put it or it is not created.
+      final point = _pickedPoint!;
       final partyId = await _repository.createPartyWithInvites(
         party: {
           'title': _nameController.text.trim(),
-          'description': [_addressController.text.trim(), _descController.text.trim()]
-              .where((part) => part.isNotEmpty)
-              .join('\n\n'),
+          // Apart since Phase 42: address and area are columns, the
+          // description is only what the host wrote there.
+          'description': _descController.text.trim(),
+          'address': _addressController.text.trim(),
+          'area': _areaController.text.trim(),
           'lat': point.latitude,
           'lon': point.longitude,
           'starts_at': _startsAt.toUtc().toIso8601String(),
@@ -278,7 +313,8 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
     final start = _startsAt;
     final end = edit.endsAt?.add(start.difference(edit.startsAt));
     final point = _pickedPoint ?? LatLng(edit.lat, edit.lng);
-    final area = _addressController.text.trim();
+    final area = _areaController.text.trim();
+    final address = _addressController.text.trim();
     final description = _descController.text.trim();
 
     try {
@@ -287,6 +323,7 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
         title: title,
         description: description.isEmpty ? null : description,
         area: area.isEmpty ? null : area,
+        address: address.isEmpty ? null : address,
         startsAt: start,
         endsAt: end,
         lat: point.latitude,
@@ -322,19 +359,119 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
     Navigator.of(context).pop(true);
   }
 
-  Future<LatLng> _resolveLocation() async {
-    if (!await Geolocator.isLocationServiceEnabled()) {
-      throw Exception('Location services disabled');
+  /// Where address search ranks results from: the pin once there is one,
+  /// else the device if location is already granted (never prompting while
+  /// the host types), else central Athens — so Greece leads either way.
+  Future<LatLng> _searchBias() async {
+    final pin = _pickedPoint;
+    if (pin != null) return pin;
+    final fix = await (widget.locate ?? knownDeviceLocation)();
+    return fix ?? kDefaultMapCentre;
+  }
+
+  /// A suggestion was chosen: it becomes the pin and the address at once.
+  void _chooseSuggestion(GeocodedPlace place) {
+    _search.clear();
+    _addressFocus.unfocus();
+    _reverseGeneration++; // a lookup for an older pin must not land now
+    setState(() {
+      _pickedPoint = place.point;
+      _whereMissing = false;
+      _reverseFailure = null;
+      _reverseLoading = false;
+      _addressOffer = null;
+      _setAddress(place.label);
+      _fillArea(place.area);
+    });
+  }
+
+  /// The host typed in the address field: from now on it is their text.
+  void _onAddressTyped(String text) {
+    _addressAuto = false;
+    _search.onQueryChanged(text);
+    if (_addressOffer != null) setState(() => _addressOffer = null);
+  }
+
+  void _setAddress(String label) {
+    _addressController.text = label;
+    _addressAuto = true;
+  }
+
+  /// Pre-fills the area only where the host has not written their own.
+  void _fillArea(String? area) {
+    if (area == null) return;
+    if (_areaController.text.trim().isEmpty || _areaAuto) {
+      _areaController.text = area;
+      _areaAuto = true;
     }
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
+  }
+
+  Future<void> _pickPoint() async {
+    _search.clear();
+    final spot = await Navigator.of(context).push<PickedSpot>(MaterialPageRoute(
+      builder: (_) => LocationPickerScreen(
+        initial: _pickedPoint,
+        locate: widget.locate,
+        geocoder: _geocoder,
+      ),
+    ));
+    // Backing out of the picker keeps whatever was there before.
+    if (spot == null || !mounted) return;
+    final moved = spot.point != _pickedPoint;
+    setState(() {
+      _pickedPoint = spot.point;
+      _whereMissing = false;
+    });
+    if (!moved) return;
+    final place = spot.place;
+    if (place != null) {
+      // Chosen from the picker's search and not moved since: that is the
+      // address, no second request needed.
+      _reverseGeneration++;
+      setState(() {
+        _reverseFailure = null;
+        _reverseLoading = false;
+        _applyReverse(place);
+      });
+    } else {
+      await _reverseGeocode(spot.point);
     }
-    if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
-      throw Exception('Location permission denied');
+  }
+
+  /// The address at the pin, after the host placed or moved it by hand.
+  Future<void> _reverseGeocode(LatLng point) async {
+    final generation = ++_reverseGeneration;
+    setState(() {
+      _reverseLoading = true;
+      _reverseFailure = null;
+      _addressOffer = null;
+    });
+    final result = await _geocoder.reverse(point);
+    if (!mounted || generation != _reverseGeneration) return;
+    setState(() {
+      _reverseLoading = false;
+      switch (result) {
+        case GeocodeFound(:final places) when places.isNotEmpty:
+          _applyReverse(places.first);
+        case GeocodeFound():
+          break; // nowhere with a name: the field stays for the host to fill
+        case GeocodeFailed(:final failure):
+          _reverseFailure = failure;
+      }
+    });
+  }
+
+  /// Fills the address only if it is empty or was itself filled in
+  /// automatically. The host's own words are never overwritten; the lookup
+  /// is offered beside them instead.
+  void _applyReverse(GeocodedPlace place) {
+    if (_addressController.text.trim().isEmpty || _addressAuto) {
+      _setAddress(place.label);
+      _addressOffer = null;
+    } else if (place.label != _addressController.text.trim()) {
+      _addressOffer = place;
     }
-    final position = await Geolocator.getCurrentPosition();
-    return LatLng(position.latitude, position.longitude);
+    _fillArea(place.area);
   }
 
   Future<void> _pickCover() async {
@@ -364,18 +501,6 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
     setState(() => _cover = bytes);
   }
 
-  Future<void> _pickPoint() async {
-    final point = await Navigator.of(context).push<LatLng>(MaterialPageRoute(
-      builder: (_) => LocationPickerScreen(initial: _pickedPoint, locate: widget.locate),
-    ));
-    // Backing out of the picker keeps whatever was there before.
-    if (point == null || !mounted) return;
-    setState(() {
-      _pickedPoint = point;
-      _whereMissing = false;
-    });
-  }
-
   void _back() {
     if (_submitting) return;
     if (_step <= 1) {
@@ -389,7 +514,10 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
   void dispose() {
     _nameController.dispose();
     _addressController.dispose();
+    _areaController.dispose();
     _descController.dispose();
+    _addressFocus.dispose();
+    _search.dispose();
     super.dispose();
   }
 
@@ -509,6 +637,8 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
     ValueChanged<String>? onChanged,
     double bottomPadding = 13,
     List<TextInputFormatter>? inputFormatters,
+    FocusNode? focusNode,
+    Key? fieldKey,
   }) {
     return Padding(
       padding: EdgeInsets.only(bottom: bottomPadding),
@@ -518,7 +648,9 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
           Text(label, style: AppTextStyles.mono(size: 10, color: AppColors.textAlpha(0.45))),
           const SizedBox(height: 6),
           TextField(
+            key: fieldKey,
             controller: controller,
+            focusNode: focusNode,
             maxLines: maxLines,
             onChanged: onChanged,
             inputFormatters: inputFormatters,
@@ -601,34 +733,25 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
       children: [
         _coverTile(),
         _field('NAME', _nameController),
-        if (_editing)
-          // `parties.area`: one line, 80 characters, enforced by a CHECK.
-          _field(
-            'AREA OR VENUE (OPTIONAL)',
-            _addressController,
-            hint: 'e.g. Psiri',
-            bottomPadding: 0,
-            inputFormatters: [
-              LengthLimitingTextInputFormatter(80),
-              FilteringTextInputFormatter.deny(RegExp(r'[\n\r]')),
-            ],
-          )
-        else
-          _field(
-            'ADDRESS OR VENUE',
-            _addressController,
-            hint: 'e.g. 12 Example Street, Athens',
-            error: _whereMissing ? 'This field is necessary' : null,
-            bottomPadding: 0,
-            onChanged: (_) => setState(() => _whereMissing = false),
-          ),
-        _orDivider(),
-        _mapPickBox(),
+        _whereSection(),
         Row(
           children: [
             Expanded(child: _datePickerField()),
             const SizedBox(width: 9),
             Expanded(child: _timePickerField()),
+          ],
+        ),
+        // `parties.area`: one line, 80 characters, enforced by a CHECK.
+        // Pre-filled from the geocoded neighbourhood until the host types.
+        _field(
+          'AREA (OPTIONAL)',
+          _areaController,
+          hint: 'e.g. Psiri',
+          fieldKey: const Key('wizard-area'),
+          onChanged: (_) => _areaAuto = false,
+          inputFormatters: [
+            LengthLimitingTextInputFormatter(maxAreaLength),
+            FilteringTextInputFormatter.deny(RegExp(r'[\n\r]')),
           ],
         ),
         _field('DESCRIPTION (OPTIONAL)', _descController, maxLines: 4, hint: 'e.g. This is going to be fun!'),
@@ -725,25 +848,64 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
     return address.isNotEmpty ? address : 'See map for location';
   }
 
-  Widget _orDivider() {
-    Widget line() => Expanded(child: Container(height: 1, color: AppColors.hairline));
+  /// "Where": an address search whose suggestions place the pin, and the
+  /// pin itself, which is the party's location. The address is a label the
+  /// host can edit freely; only the pin is required.
+  Widget _whereSection() {
+    final offer = _addressOffer;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 9),
-      child: Row(
+      padding: const EdgeInsets.only(bottom: 13),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          line(),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            child: Text('or', style: AppTextStyles.mono(size: 10, color: AppColors.textAlpha(0.45))),
+          // `parties.address`: one line, 200 characters, enforced by a CHECK.
+          _field(
+            'ADDRESS',
+            _addressController,
+            hint: 'Search an address or place',
+            fieldKey: const Key('wizard-address'),
+            focusNode: _addressFocus,
+            bottomPadding: 0,
+            onChanged: _onAddressTyped,
+            inputFormatters: [
+              LengthLimitingTextInputFormatter(maxAddressLength),
+              FilteringTextInputFormatter.deny(RegExp(r'[\n\r]')),
+            ],
           ),
-          line(),
+          AddressSuggestions(controller: _search, onSelected: _chooseSuggestion),
+          const GeocodeAttribution(),
+          if (offer != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: GestureDetector(
+                key: const Key('wizard-address-offer'),
+                onTap: () => setState(() {
+                  _setAddress(offer.label);
+                  _addressOffer = null;
+                }),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: AppColors.purple.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(11),
+                    border: Border.all(color: AppColors.purple.withValues(alpha: 0.4)),
+                  ),
+                  child: Text(
+                    'Use “${offer.label}” for the pin’s spot',
+                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppColors.purpleLight),
+                  ),
+                ),
+              ),
+            ),
+          const SizedBox(height: 10),
+          _mapPickBox(),
         ],
       ),
     );
   }
 
-  /// The second answer to "where": a spot on the map. Red alongside the
-  /// address field when neither is given, because either one would do.
+  /// The pin: a button to place it, then a live preview of where it is with
+  /// "Adjust pin". Red when Continue was pressed without one.
   Widget _mapPickBox() {
     final point = _pickedPoint;
     final borderColor = _whereMissing
@@ -752,67 +914,142 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
             ? AppColors.purple
             : AppColors.hairline;
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 13),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          GestureDetector(
-            key: const Key('wizard-pick-on-map'),
-            onTap: _pickPoint,
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 14),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.05),
-                borderRadius: BorderRadius.circular(13),
-                border: Border.all(color: borderColor),
+    final Widget box;
+    if (point == null) {
+      box = Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 14),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(13),
+          border: Border.all(color: borderColor),
+        ),
+        child: const Text('📍 Place the pin on the map', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600)),
+      );
+    } else {
+      box = Container(
+        height: 150,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(13),
+          border: Border.all(color: borderColor),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              // A picture of the pin, not a second picker: nothing here takes
+              // a gesture, so the page still scrolls over it.
+              IgnorePointer(
+                child: FlutterMap(
+                  key: ValueKey(point),
+                  options: MapOptions(
+                    initialCenter: point,
+                    initialZoom: 16,
+                    interactionOptions: const InteractionOptions(flags: InteractiveFlag.none),
+                  ),
+                  children: [mpTileLayer()],
+                ),
               ),
-              child: point == null
-                  ? const Text('📍 Pick point on map', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600))
-                  : Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('📍 Pinned on the map', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600)),
-                              const SizedBox(height: 2),
-                              Text(formatPickedPoint(point), style: AppTextStyles.mono(size: 11, color: AppColors.textAlpha(0.5))),
-                            ],
-                          ),
-                        ),
-                        const Text('Change', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.purpleLight)),
-                        // An existing party always has a place; clearing it
-                        // would mean "wherever the phone is", which is a
-                        // create-time fallback, not an edit.
-                        if (!_editing) ...[
-                          const SizedBox(width: 6),
-                          GestureDetector(
-                            key: const Key('wizard-pick-clear'),
-                            onTap: () => setState(() => _pickedPoint = null),
-                            child: Icon(Icons.close, size: 18, color: AppColors.textAlpha(0.5)),
-                          ),
-                        ],
-                      ],
+              const IgnorePointer(child: Center(child: PartyPinMarker(size: 34))),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(11, 7, 11, 7),
+                  color: Colors.black.withValues(alpha: 0.6),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(formatPickedPoint(point), style: AppTextStyles.mono(size: 11, color: AppColors.textAlpha(0.7))),
+                      ),
+                      const Text('Adjust pin', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.purpleLight)),
+                    ],
+                  ),
+                ),
+              ),
+              // An existing party always has a place; clearing it would leave
+              // the edit with nothing to save.
+              if (!_editing)
+                Positioned(
+                  right: 6,
+                  top: 6,
+                  child: GestureDetector(
+                    key: const Key('wizard-pick-clear'),
+                    onTap: _clearPin,
+                    child: Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.6), shape: BoxShape.circle),
+                      child: const Icon(Icons.close, size: 16),
                     ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final String? note;
+    final bool noteIsError;
+    if (_whereMissing) {
+      note = 'Choose an address or place the pin on the map';
+      noteIsError = true;
+    } else if (point == null) {
+      note = 'The pin is the party’s location. Pick a suggestion above or place it yourself.';
+      noteIsError = false;
+    } else if (_reverseLoading) {
+      note = 'Looking up the address…';
+      noteIsError = false;
+    } else if (_reverseFailure != null) {
+      note = 'Couldn’t look up an address for this spot. You can type one above.';
+      noteIsError = false;
+    } else {
+      note = null;
+      noteIsError = false;
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        GestureDetector(key: const Key('wizard-pick-on-map'), onTap: _pickPoint, child: box),
+        if (note != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 7, 4, 0),
+            child: Text(
+              note,
+              key: const Key('wizard-where-note'),
+              style: TextStyle(
+                fontSize: 11.5,
+                height: 1.4,
+                color: noteIsError ? AppColors.destructive : AppColors.textAlpha(0.45),
+              ),
             ),
           ),
-          // Said out loud because nothing turns a typed address into a point
-          // (no geocoder — see LocationPickerScreen): without a picked spot
-          // the pin goes where the phone is, and a host writing an address
-          // across town would otherwise not find out until guests did.
-          if (point == null && !_whereMissing)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(4, 7, 4, 0),
-              child: Text(
-                'No spot picked? The pin goes where you are when you create the party.',
-                style: TextStyle(fontSize: 11.5, height: 1.4, color: AppColors.textAlpha(0.4)),
-              ),
-            ),
-        ],
-      ),
+      ],
     );
+  }
+
+  /// Removes the pin, and with it any address or area that came from it.
+  /// The host's own text stays.
+  void _clearPin() {
+    _reverseGeneration++;
+    setState(() {
+      _pickedPoint = null;
+      _reverseLoading = false;
+      _reverseFailure = null;
+      _addressOffer = null;
+      if (_addressAuto) {
+        _addressController.clear();
+        _addressAuto = false;
+      }
+      if (_areaAuto) {
+        _areaController.clear();
+        _areaAuto = false;
+      }
+    });
   }
 
   Widget _step2() {

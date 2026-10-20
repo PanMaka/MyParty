@@ -66,6 +66,7 @@
 # API Keys
 .env
 .env.*
+!.env.example
 *.secret
 *.key
 key.properties

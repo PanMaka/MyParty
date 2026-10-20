@@ -1,0 +1,37 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "id": "address.887661",
+      "text": "Χριστοκοπίδου",
+      "address": "14",
+      "place_name": "Χριστοκοπίδου 14, 105 55 Αθήνα, Ελλάδα",
+      "place_type": ["address"],
+      "relevance": 1,
+      "center": [23.723416216671467, 37.97806066101421],
+      "context": [
+        {"id": "postal_code.414899", "text": "105 55"},
+        {"id": "place.4491961", "text": "Ψυρρή", "kind": "place"},
+        {"id": "locality.109290", "text": "1η Κοινότητα Αθηνών", "kind": "admin_area"},
+        {"id": "municipality.37534", "text": "Αθήνα", "kind": "admin_area"},
+        {"id": "country.23", "text": "Ελλάδα", "kind": "admin_area"}
+      ]
+    },
+    {
+      "type": "Feature",
+      "id": "place.4491961",
+      "text": "Ψυρρή",
+      "place_name": "Ψυρρή, Αθήνα, Ελλάδα",
+      "place_type": ["place"],
+      "relevance": 1,
+      "center": [23.724942058324814, 37.97842087406157],
+      "context": [
+        {"id": "municipality.37534", "text": "Αθήνα", "kind": "admin_area"},
+        {"id": "country.23", "text": "Ελλάδα", "kind": "admin_area"}
+      ]
+    }
+  ],
+  "query": [23.7234, 37.9781],
+  "attribution": "&copy; MapTiler &copy; OpenStreetMap contributors"
+}

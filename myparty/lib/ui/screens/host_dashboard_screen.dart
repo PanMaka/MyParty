@@ -487,6 +487,7 @@ class _HostDashboardScreenState extends State<HostDashboardScreen> with LiveRefr
       startsAt: stats.startsAt,
       endsAt: stats.endsAt,
       area: stats.area,
+      address: stats.address,
       description: stats.description,
       hostId: _repository.currentUserId,
       hostUsername: username,

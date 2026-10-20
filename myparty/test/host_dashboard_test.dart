@@ -42,6 +42,7 @@ HostPartyStats _stats({
     title: 'Rooftop Night',
     description: 'Bring friends.',
     area: 'Psiri',
+    address: 'Αισχύλου 12, rooftop',
     startsAt: DateTime.now().add(const Duration(days: 2)),
     endsAt: null,
     coverPath: null,
@@ -465,6 +466,7 @@ void main() {
     expect(find.text('EDIT PARTY'), findsOneWidget);
     expect(find.text('Rooftop Night'), findsOneWidget);
     expect(find.text('Psiri'), findsOneWidget);
+    expect(find.text('Αισχύλου 12, rooftop'), findsOneWidget, reason: 'the address is its own field since Phase 42');
     expect(find.text('Bring friends.'), findsOneWidget);
     // Privacy and invites are not part of an edit.
     expect(find.text('Who sees it?'), findsNothing);
@@ -475,6 +477,9 @@ void main() {
 
     expect(repo.edits.single.title, 'Rooftop Night II');
     expect(repo.edits.single.area, 'Psiri');
+    expect(repo.edits.single.address, 'Αισχύλου 12, rooftop',
+        reason: 'update_party is a full replacement: an address not sent back would be wiped');
+    expect(repo.edits.single.description, 'Bring friends.');
     expect(repo.edits.single.lat, 37.97);
     expect(repo.coverReplacements, isEmpty, reason: 'no new cover was picked');
     // Back on the dashboard, which refetched.
