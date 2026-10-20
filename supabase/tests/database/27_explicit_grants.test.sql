@@ -141,6 +141,7 @@ insert into allowed_grants values
   ('function', 'rsvp_status_allowed(uuid,rsvp_status)', 'authenticated', 'EXECUTE', null),
   ('function', 'search_parties(text,integer)', 'authenticated', 'EXECUTE', null),
   ('function', 'search_profiles(text,integer)', 'authenticated', 'EXECUTE', null),
+  ('function', 'set_my_gender(gender)', 'authenticated', 'EXECUTE', null),
   ('function', 'update_party(uuid,text,text,text,timestamp with time zone,timestamp with time zone,double precision,double precision)', 'authenticated', 'EXECUTE', null),
   ('function', 'upsert_user_device(text,text,double precision,double precision)', 'authenticated', 'EXECUTE', null),
   ('table', 'blocks', 'authenticated', 'DELETE', null),
@@ -181,6 +182,7 @@ insert into allowed_grants values
   ('table', 'story_views', 'authenticated', 'INSERT', null),
   ('table', 'story_views', 'authenticated', 'SELECT', null),
   ('table', 'user_birthdates', 'authenticated', 'SELECT', null),
+  ('table', 'user_genders', 'authenticated', 'SELECT', null),
   ('table', 'user_devices', 'authenticated', 'DELETE', null),
   ('table', 'user_devices', 'authenticated', 'SELECT', null);
 

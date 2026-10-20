@@ -12,6 +12,32 @@ enum HostPartyPhase {
   final String label;
 }
 
+/// One group's gender mix on the host dashboard: counts only, never who.
+///
+/// [unspecified] is everyone with no saved answer, "prefer not to say"
+/// included. The four always sum to the group's size.
+class GenderMix {
+  const GenderMix({required this.male, required this.female, required this.nonBinary, required this.unspecified});
+
+  final int male;
+  final int female;
+  final int nonBinary;
+  final int unspecified;
+
+  int get total => male + female + nonBinary + unspecified;
+
+  /// The server sends all four or none: NULL for a group under its minimum
+  /// of three (20261019193257), which is decided there, not here.
+  static GenderMix? fromRow(Map<String, dynamic> row, String prefix) {
+    final male = row['${prefix}_male'] as int?;
+    final female = row['${prefix}_female'] as int?;
+    final nonBinary = row['${prefix}_non_binary'] as int?;
+    final unspecified = row['${prefix}_unspecified'] as int?;
+    if (male == null || female == null || nonBinary == null || unspecified == null) return null;
+    return GenderMix(male: male, female: female, nonBinary: nonBinary, unspecified: unspecified);
+  }
+}
+
 /// One row of `get_party_host_stats` (20261014113213): the dashboard's header
 /// and its aggregates. Host-only on the server.
 ///
@@ -40,6 +66,8 @@ class HostPartyStats {
     required this.goingNonFollowers,
     required this.interestedFollowers,
     required this.interestedNonFollowers,
+    this.goingGender,
+    this.interestedGender,
   });
 
   final String partyId;
@@ -68,6 +96,12 @@ class HostPartyStats {
   final int interestedFollowers;
   final int interestedNonFollowers;
 
+  /// Null means "not enough guests yet": the server withholds the mix of a
+  /// group under three. Counted like the follower split, block-paired guests
+  /// included. A private party's Coming is [goingGender].
+  final GenderMix? goingGender;
+  final GenderMix? interestedGender;
+
   factory HostPartyStats.fromRow(Map<String, dynamic> row) {
     DateTime? ts(Object? v) => v is String ? DateTime.parse(v).toLocal() : null;
     return HostPartyStats(
@@ -90,6 +124,8 @@ class HostPartyStats {
       goingNonFollowers: row['going_non_followers'] as int,
       interestedFollowers: row['interested_followers'] as int,
       interestedNonFollowers: row['interested_non_followers'] as int,
+      goingGender: GenderMix.fromRow(row, 'going'),
+      interestedGender: GenderMix.fromRow(row, 'interested'),
     );
   }
 

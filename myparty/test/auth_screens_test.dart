@@ -269,6 +269,16 @@ void main() {
       );
     });
 
+    testWidgets('the gender field says what hosts see, and how to stay out of it', (tester) async {
+      await tester.pumpWidget(_app(RegisterScreen(authService: _FakeAuthService())));
+
+      expect(
+        find.text("Hosts see how many guests of each gender are going to their party. "
+            "Choose 'Prefer not to say' if you don't want to be counted."),
+        findsOneWidget,
+      );
+    });
+
     testWidgets('names are not asked here any more: they moved to the username screen',
         (tester) async {
       await tester.pumpWidget(_app(RegisterScreen(authService: _FakeAuthService())));

@@ -510,3 +510,16 @@ select vault.create_secret(
   'account_eraser_service_key',
   'Local demo service_role key, used by public.post_to_account_eraser()'
 );
+
+-- ============================================================
+-- Gender answers (Phase 41), so the host dashboard's gender mix has something
+-- to show: 'aaaa...0031' has three going (6666, c1, 2222) and clears the
+-- minimum of three. Assigned to fixtures, not read off their names. invitee
+-- (2222) and c4 are deliberately left without a row -- "not specified" -- and
+-- 35_guest_gender_mix relies on both being unset.
+-- ============================================================
+insert into public.user_genders (user_id, gender) values
+  ('66666666-6666-6666-6666-666666666666', 'male'),
+  ('0c0c0c0c-0000-0000-0000-000000000001', 'female'),
+  ('0c0c0c0c-0000-0000-0000-000000000002', 'male'),
+  ('0c0c0c0c-0000-0000-0000-000000000003', 'non_binary');

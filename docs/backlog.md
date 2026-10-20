@@ -449,6 +449,47 @@ last step needs it. pgTAP (`34_party_invites`) and an HTTP smoke run against
 the local stack cover the server side; nothing has exercised the Android intent
 filter or the signed-out hand-off on a real phone.
 
+### 1.30 There is no privacy policy: must fix before launch
+
+There is no privacy policy or terms of service anywhere: not in the app, not
+under `hosting/mypartycorp.com/`, and none outside this repo. Google Play
+requires a privacy policy URL in the store listing (and a matching Data safety
+form) before an app that collects personal data can be published, and the app
+should link to the same page from Settings.
+
+It has to cover, at least:
+
+- **Gender:** self-reported at sign-up, changeable or clearable ("Prefer not to
+  say") in Settings, stored owner-read-only in `user_genders`.
+- **The gender mix hosts see** (Phase 41): a host sees exact counts of their
+  guests by gender, per Going / Interested / Coming group, for groups of three
+  or more. Say plainly what the app says on the register screen and in
+  Settings: a host who also sees the guest list may be able to work out an
+  individual's answer, and "Prefer not to say" keeps you out of the counts.
+- **Date of birth:** collected for the 13+ gate, owner-read-only, never shown
+  (see also 1.10 on Art. 8).
+- **Location:** a ~100m cell, held 24h, used only for nearby-party
+  notifications, erased when consent is turned off; no location history.
+- **Messages:** party chat and direct messages, who can read them, and that
+  they are retained (under a tombstone) after the author's account is erased.
+- **Account deletion and export:** the 30-day grace period, what is deleted and
+  what is retained, and the in-app export.
+
+*Why it is still open:* it is a legal document, not code; someone has to write
+and own it. The text above is a checklist of what the schema actually does, not
+the policy.
+
+### 1.32 First and last name are missing from the account export
+
+`AuthService.saveNames` writes `first_name`/`last_name` into the auth user
+metadata (the username screen). `export_account_data` reads only `public`
+tables, so the export has neither, which makes it an incomplete Art. 20
+response. They are erased with the auth user, so erasure is not affected.
+
+*Fix:* either move the names into an owner-read-only table, as Phase 41 did for
+gender, or read `auth.users.raw_user_meta_data` inside the export (it is
+definer, so it can).
+
 ---
 
 ## 2. Costed: should the map adopt `party_is_past()`?
@@ -503,6 +544,19 @@ showing dead pins before the wizard changes. Do not take B or C as written.
 ## 3. NOT backlog — decisions that look like gaps
 
 Here so they are not "fixed" by somebody reading §1 and pattern-matching.
+
+- **The sign-up response's token carries the gender answer for up to an
+  hour.** The register form has to send it in the sign-up metadata, the only
+  thing GoTrue hands `handle_new_user`. GoTrue's own write-back during sign-up
+  is an UPDATE, and `strip_gender_from_auth_metadata` (BEFORE UPDATE on
+  `auth.users`) removes the key there, so nothing server-side keeps it past the
+  sign-up request: measured over HTTP on 2026-10-19 through sign-up,
+  onboarding, sign-in and refresh, and for a sign-up that never onboards. But
+  the access token in that same response was built from GoTrue's in-memory
+  copy, so it, and the session the app persists, hold the answer until the
+  first refresh (`jwt_expiry` 3600). It is the owner's own answer in the
+  owner's own token. Getting rid of it would mean not sending it at sign-up,
+  i.e. a second call after sign-up that can fail on its own.
 
 - **Widgets never publish a `DataChange`; repositories do, after the server
   answered.** The screen the tap happened on is optimistic and rolls back on

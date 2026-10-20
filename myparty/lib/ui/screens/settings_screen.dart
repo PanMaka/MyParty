@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/profile_repository.dart';
 import '../../data/social_repository.dart';
+import '../../models/gender.dart';
 import '../../models/profile_privacy.dart';
 import '../../services/auth_service.dart';
 import '../theme/app_theme.dart';
@@ -45,6 +46,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   ProfilePrivacy? _privacy;
   bool _busy = false;
 
+  /// The user's own gender answer, from `user_genders`. Loaded and failed
+  /// separately from the tiers: it is a different table, and a gender read
+  /// that failed must not take the privacy rows down with it.
+  Gender? _gender;
+  bool _genderLoadFailed = false;
+
   /// Separate from `_privacy == null`, which is also the loading state. Both
   /// leave the rows untappable — opening a tier sheet with no current tier to
   /// check is what `_privacy!` would blow up on — but only one of them should
@@ -62,11 +69,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// caller's own row. This screen is reachable from the owner's profile alone,
   /// which is what keeps that true.
   Future<void> _load() async {
+    await Future.wait([_loadPrivacy(), _loadGender()]);
+  }
+
+  Future<void> _loadPrivacy() async {
     try {
       final privacy = await _profiles.fetchPrivacy();
       if (mounted) setState(() => _privacy = privacy);
     } catch (_) {
       if (mounted) setState(() => _loadFailed = true);
+    }
+  }
+
+  Future<void> _loadGender() async {
+    try {
+      final gender = await _profiles.fetchMyGender();
+      if (mounted) setState(() => _gender = gender);
+    } catch (_) {
+      if (mounted) setState(() => _genderLoadFailed = true);
     }
   }
 
@@ -172,6 +192,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
             'Private parties you go to are never visible to people who are not '
             'invited — not even on your profile.',
           ),
+
+          const SizedBox(height: 22),
+          // Its own section rather than a fifth PRIVACY row: the note under it
+          // is about this one answer, and has to sit directly beneath it.
+          _section('ABOUT YOU'),
+          _card([
+            _settingsRow(
+              'Gender',
+              _gender?.label ?? (_genderLoadFailed ? 'Did not load' : '…'),
+              chevron: true,
+              onTap: _gender == null ? null : _pickGender,
+            ),
+          ]),
+          _note(genderVisibilityNote),
 
           const SizedBox(height: 22),
           _section('NOTIFICATIONS'),
@@ -323,12 +357,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await _mutate(() => _profiles.updatePrivacy(dmPolicy: chosen));
   }
 
+  /// "Prefer not to say" is an answer here, not a missing one: it clears the
+  /// stored row, and takes the user out of every host's counts.
+  Future<void> _pickGender() async {
+    final chosen = await _pickTier<Gender>(
+      title: 'Gender',
+      options: Gender.values,
+      current: _gender!,
+      labelOf: (g) => g.label,
+      footnote: genderVisibilityNote,
+    );
+    if (chosen == null || chosen == _gender) return;
+    await _mutate(() => _profiles.setGender(chosen));
+  }
+
   Future<T?> _pickTier<T>({
     required String title,
     required List<T> options,
     required T current,
     required String Function(T) labelOf,
-    required String Function(T) explanationOf,
+    String Function(T)? explanationOf,
     String? footnote,
   }) {
     return showModalBottomSheet<T>(
@@ -368,15 +416,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 labelOf(option),
                                 style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
                               ),
-                              const SizedBox(height: 3),
-                              Text(
-                                explanationOf(option),
-                                style: TextStyle(
-                                  fontSize: 11.5,
-                                  height: 1.4,
-                                  color: AppColors.textAlpha(0.5),
+                              if (explanationOf != null) ...[
+                                const SizedBox(height: 3),
+                                Text(
+                                  explanationOf(option),
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    height: 1.4,
+                                    color: AppColors.textAlpha(0.5),
+                                  ),
                                 ),
-                              ),
+                              ],
                             ],
                           ),
                         ),

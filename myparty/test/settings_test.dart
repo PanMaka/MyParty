@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:myparty/data/profile_repository.dart';
+import 'package:myparty/models/gender.dart';
 import 'package:myparty/models/profile_privacy.dart';
 import 'package:myparty/ui/screens/settings_screen.dart';
 
@@ -40,8 +41,23 @@ class _FakeProfileRepository extends ProfileRepository {
   final List<String> invitePolicyWrites = [];
   final List<String> dmPolicyWrites = [];
 
+  /// The stored answer, as `user_genders` would return it; and every value
+  /// `set_my_gender` was sent, null being "prefer not to say".
+  Gender gender = Gender.female;
+  final List<String?> genderWrites = [];
+
   @override
   String? get currentUserId => 'me';
+
+  @override
+  Future<Gender?> fetchMyGender() async => gender;
+
+  @override
+  Future<void> setGender(Gender gender) async {
+    genderWrites.add(gender.wire);
+    if (failWrites) throw Exception('rejected');
+    this.gender = gender;
+  }
 
   @override
   Future<ProfilePrivacy?> fetchPrivacy() async {
@@ -108,7 +124,6 @@ void main() {
       // The three sections, in the order the screen argues for: preferences,
       // then consent, then the irreversible one.
       expect(find.text('PRIVACY'), findsOneWidget);
-      expect(find.text('NOTIFICATIONS'), findsOneWidget);
 
       // And every row that used to trail the profile tab. All six are asserted
       // here because this is now the ONLY screen they exist on — a row dropped
@@ -118,6 +133,12 @@ void main() {
       expect(find.text('Who can invite me'), findsOneWidget);
       expect(find.text('Who can message me'), findsOneWidget);
       expect(find.text('Blocked accounts'), findsOneWidget);
+
+      // Below the fold since ABOUT YOU (Phase 41) went in above it.
+      await _scrollTo(tester, find.text('Notifications & location'));
+      expect(find.text('ABOUT YOU'), findsOneWidget);
+      expect(find.text('Gender'), findsOneWidget);
+      expect(find.text('NOTIFICATIONS'), findsOneWidget);
       expect(find.text('Notifications & location'), findsOneWidget);
 
       // Below the fold since the PRIVACY card grew two rows.
@@ -136,8 +157,9 @@ void main() {
       await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
       await tester.pumpAndSettle();
 
-      // Three tier rows: map, invites, messages.
-      expect(find.text('Did not load'), findsNWidgets(3));
+      // Three tier rows (map, invites, messages) and the gender row, which
+      // reads a different table and fails on its own.
+      expect(find.text('Did not load'), findsNWidgets(4));
       expect(find.text('…'), findsNothing);
       expect(tester.takeException(), isNull);
     });
@@ -262,6 +284,65 @@ void main() {
       expect(repo.mapVisibilityWrites, isEmpty);
       expect(repo.invitePolicyWrites, isEmpty);
       expect(_tierValue('Who can message me', 'Nobody'), findsOneWidget);
+    });
+  });
+  group('gender', () {
+    testWidgets('the row shows the stored answer, with the note directly under it', (tester) async {
+      await _pumpSettings(tester, _FakeProfileRepository());
+      await _scrollTo(tester, find.text(genderVisibilityNote));
+
+      expect(_tierValue('Gender', 'Female'), findsOneWidget);
+      expect(find.text(genderVisibilityNote), findsOneWidget);
+    });
+
+    testWidgets('"Prefer not to say" clears the answer: null on the wire', (tester) async {
+      final repo = _FakeProfileRepository();
+      await _pumpSettings(tester, repo);
+      await _scrollTo(tester, find.text('Gender'));
+
+      await tester.tap(find.text('Gender'));
+      await tester.pumpAndSettle();
+      // The note is said where the choice is made, too.
+      expect(find.descendant(of: find.byType(BottomSheet), matching: find.text(genderVisibilityNote)), findsOneWidget);
+
+      await tester.tap(_sheetOption('Prefer not to say'));
+      await tester.pumpAndSettle();
+
+      expect(repo.genderWrites, [null]);
+      expect(_tierValue('Gender', 'Prefer not to say'), findsOneWidget);
+    });
+
+    testWidgets('an answer is written as its enum value; the same one again writes nothing', (tester) async {
+      final repo = _FakeProfileRepository();
+      await _pumpSettings(tester, repo);
+      await _scrollTo(tester, find.text('Gender'));
+
+      await tester.tap(find.text('Gender'));
+      await tester.pumpAndSettle();
+      await tester.tap(_sheetOption('Female'));
+      await tester.pumpAndSettle();
+      expect(repo.genderWrites, isEmpty);
+
+      await tester.tap(find.text('Gender'));
+      await tester.pumpAndSettle();
+      await tester.tap(_sheetOption('Non-binary'));
+      await tester.pumpAndSettle();
+      expect(repo.genderWrites, ['non_binary']);
+      expect(_tierValue('Gender', 'Non-binary'), findsOneWidget);
+    });
+
+    testWidgets('a rejected write leaves the row showing the stored answer', (tester) async {
+      final repo = _FakeProfileRepository(failWrites: true);
+      await _pumpSettings(tester, repo);
+      await _scrollTo(tester, find.text('Gender'));
+
+      await tester.tap(find.text('Gender'));
+      await tester.pumpAndSettle();
+      await tester.tap(_sheetOption('Male'));
+      await tester.pumpAndSettle();
+
+      expect(repo.genderWrites, ['male']);
+      expect(_tierValue('Gender', 'Female'), findsOneWidget);
     });
   });
 }
