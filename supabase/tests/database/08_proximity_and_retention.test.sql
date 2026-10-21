@@ -216,9 +216,8 @@ select throws_ok(
 -- is the only form of this test worth writing -- "round_location returns a
 -- rounded point" would pass on a schema where nothing ever calls it.
 -- ============================================================
-update public.profiles
-set location_consent = true
-where id = '11111111-1111-1111-1111-111111111111';
+-- Through the setter, as the client does since Phase 44 (no column grant).
+select public.set_location_consent(true);
 
 insert into public.user_devices (id, user_id, push_token, platform, last_location) values
   ('dddddddd-0000-0000-0000-000000000001',
@@ -489,9 +488,8 @@ update public.user_devices
 set last_location = st_point(23.7348, 37.9756)::geography
 where id = 'dddddddd-0000-0000-0000-000000000001';
 
-update public.profiles
-set location_consent = false
-where id = '11111111-1111-1111-1111-111111111111';
+-- Through the setter, as the client does since Phase 44 (no column grant).
+select public.set_location_consent(false);
 
 select is(
   (select count(*)::int from public.user_devices
