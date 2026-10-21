@@ -140,7 +140,6 @@ insert into allowed_grants values
   ('function', 'party_is_private(uuid)', 'authenticated', 'EXECUTE', null),
   ('function', 'party_time_window(text,text,timestamp with time zone)', 'authenticated', 'EXECUTE', null),
   ('function', 'post_upload_target(uuid)', 'authenticated', 'EXECUTE', null),
-  ('function', 'profile_is_discoverable(uuid)', 'authenticated', 'EXECUTE', null),
   ('function', 'redeem_party_invite(text)', 'authenticated', 'EXECUTE', null),
   ('function', 'remove_party_guest(uuid,uuid)', 'authenticated', 'EXECUTE', null),
   ('function', 'request_account_deletion()', 'authenticated', 'EXECUTE', null),
@@ -201,6 +200,7 @@ insert into allowed_grants values
   ('column', 'profiles', 'authenticated', 'SELECT', 'follower_count'),
   ('column', 'profiles', 'authenticated', 'SELECT', 'following_count'),
   ('column', 'profiles', 'authenticated', 'SELECT', 'id'),
+  ('column', 'profiles', 'authenticated', 'SELECT', 'is_discoverable'),
   ('column', 'profiles', 'authenticated', 'SELECT', 'username'),
   ('column', 'profiles', 'authenticated', 'SELECT', 'username_search'),
   -- Phase 44: UPDATE narrowed to the columns the client writes directly.

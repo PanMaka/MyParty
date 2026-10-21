@@ -177,6 +177,8 @@ select
 \echo 'Inlined rather than called: a language sql VOLATILE set-returning'
 \echo 'function is never inlined, so `explain select * from'
 \echo 'get_parties_near_user(...)` prints one line, Function Scan (gotcha 20).'
+\echo 'The tier term is host_on_my_map, as shipped since Phase 45: the viewer'
+\echo 'can no longer read profiles.map_visibility.'
 \echo '==================================================================='
 
 \echo ''
@@ -186,7 +188,7 @@ select p.id, p.going_count
 from public.parties p join public.profiles pr on p.host_id = pr.id
 where p.status = 'published' and (p.ends_at is null or p.ends_at > now())
   and st_dwithin(p.location, st_point(:lon, :lat)::geography, 5000)
-  and (pr.map_visibility = 'public' or p.host_id = (select auth.uid()));
+  and (p.host_id = (select auth.uid()) or public.host_on_my_map(p.host_id));
 
 \echo ''
 \echo '### 3B. SPATIAL only -- as shipped by Phase 13, window = all.'
@@ -199,7 +201,7 @@ where p.bbox_lat >= (select st_ymin(public.map_search_box(:lon, :lat, 5000)))
   and p.bbox_lon <= (select st_xmax(public.map_search_box(:lon, :lat, 5000)))
   and p.status = 'published' and (p.ends_at is null or p.ends_at > now())
   and st_dwithin(p.location, st_point(:lon, :lat)::geography, 5000)
-  and (pr.map_visibility = 'public' or p.host_id = (select auth.uid()));
+  and (p.host_id = (select auth.uid()) or public.host_on_my_map(p.host_id));
 
 \echo ''
 \echo '### 3C. TIME only -- the tonight window, no bbox.'
@@ -210,7 +212,7 @@ where p.starts_at >= (select lower(public.party_time_window('tonight', 'Europe/A
   and p.starts_at <  (select upper(public.party_time_window('tonight', 'Europe/Athens')))
   and p.status = 'published' and (p.ends_at is null or p.ends_at > now())
   and st_dwithin(p.location, st_point(:lon, :lat)::geography, 5000)
-  and (pr.map_visibility = 'public' or p.host_id = (select auth.uid()));
+  and (p.host_id = (select auth.uid()) or public.host_on_my_map(p.host_id));
 
 \echo ''
 \echo '### 3D. BOTH -- what Phase 15 actually ships when a chip is tapped.'
@@ -225,7 +227,7 @@ where p.bbox_lat >= (select st_ymin(public.map_search_box(:lon, :lat, 5000)))
   and p.starts_at <  (select upper(public.party_time_window('tonight', 'Europe/Athens')))
   and p.status = 'published' and (p.ends_at is null or p.ends_at > now())
   and st_dwithin(p.location, st_point(:lon, :lat)::geography, 5000)
-  and (pr.map_visibility = 'public' or p.host_id = (select auth.uid()));
+  and (p.host_id = (select auth.uid()) or public.host_on_my_map(p.host_id));
 
 \echo ''
 \echo '### 3E. THE CATALOG, for comparison. It says what the planner is'

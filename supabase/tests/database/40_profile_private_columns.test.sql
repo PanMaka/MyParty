@@ -28,7 +28,7 @@
 -- aaaa...0002 public (host 1111).
 begin;
 set search_path to public, extensions;
-select plan(113);
+select plan(114);
 
 create temp table private_cols (c text primary key) on commit drop;
 insert into private_cols values
@@ -42,7 +42,7 @@ grant select on private_cols to authenticated, anon;
 create temp table public_cols (c text primary key) on commit drop;
 insert into public_cols values
   ('id'), ('username'), ('bio'), ('avatar_path'), ('follower_count'),
-  ('following_count'), ('username_search');
+  ('following_count'), ('username_search'), ('is_discoverable');
 
 
 -- ============================================================
@@ -159,9 +159,9 @@ select throws_ok(
   'anon cannot execute host_on_my_map');
 
 select throws_ok(
-  $$ select public.profile_is_discoverable('11111111-1111-1111-1111-111111111111') $$,
+  $$ select is_discoverable from public.profiles $$,
   '42501', null,
-  'anon cannot execute profile_is_discoverable');
+  'nor is_discoverable');
 
 select throws_ok(
   $$ select * from public.get_post_comments('00000000-0000-0000-0000-000000000000') $$,
@@ -293,6 +293,12 @@ values ('33333333-3333-3333-3333-333333333333', '11111111-1111-1111-1111-1111111
 on conflict do nothing;
 
 select tests.authenticate_as('44444444-4444-4444-4444-444444444444'); -- stranger
+
+select is(
+  (select array_agg(is_discoverable order by username) from public.profiles
+   where id in ('33333333-3333-3333-3333-333333333333', '66666666-6666-6666-6666-666666666666')),
+  array[false, true],
+  'is_discoverable reads false for the pending account and true for a live one -- the bit, not the date');
 
 select is_empty(
   $$ select 1 from public.search_profiles('friend_not') $$,

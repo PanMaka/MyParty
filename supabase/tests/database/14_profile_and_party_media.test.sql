@@ -269,7 +269,7 @@ select is(
           and g.grantee = 'authenticated'::regrole
         order by a.attname),
   array['avatar_path', 'bio', 'follower_count', 'following_count',
-        'id', 'username', 'username_search'],
+        'id', 'is_discoverable', 'username', 'username_search'],
   'THE REGRESSION GUARD: authenticated reads exactly the public columns of profiles -- bio and avatar_path among them, so they keep the row''s block filter, and no private column');
 
 select is_empty(

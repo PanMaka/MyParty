@@ -30,9 +30,10 @@
 --     accepts_invite_from, has_location_consent, claim_notification_jobs, the
 --     export and the erasure) and runs as the table owner, so it is untouched.
 --   * Three INVOKER RPCs read another user's private column under the caller's
---     privileges and are rewritten here onto definer helpers:
---     get_parties_near_user (the host's map_visibility), search_profiles and
---     get_invitable_followers (deleted_at / erased_at).
+--     privileges and are rewritten here: get_parties_near_user (the host's
+--     map_visibility, now through the definer host_on_my_map), search_profiles
+--     and get_invitable_followers (deleted_at / erased_at, now the generated
+--     public column is_discoverable).
 --   * Signed out, nothing needs profiles at all: the /p and /i pages run no
 --     script, and every app read is authenticated. anon loses the table.
 --   * profiles is in no realtime publication, and the broadcast payloads carry
@@ -44,7 +45,8 @@
 --               line shows. username_search too: a normalised copy of the
 --               public username, read by search_profiles' leakproof prefix
 --               range under the caller's privileges (it is what reaches the
---               index ahead of the row policy).
+--               index ahead of the row policy). And is_discoverable, added
+--               here: one bit that search already reveals (section 2).
 --   owner-only  the consents, notify_*, quiet hours, notification_tz, the three
 --               privacy tiers, onboarding_completed_at, deleted_at -- through
 --               get_my_settings().
@@ -111,34 +113,32 @@ comment on function public.host_on_my_map(uuid) is
 -- The DATE in deleted_at is owner-only. Whether an account is discoverable is
 -- not: search has dropped pending and erased accounts by design since Phase 14,
 -- so a caller who knows a username already learns it by searching. This
--- answers that same question and nothing more.
+-- column answers that same question and nothing more.
+--
+-- A generated COLUMN, not a definer helper, and that was measured, not
+-- preferred. search_profiles orders by follower_count, so it evaluates every
+-- row its prefix matches; a helper there is one function call per row. At 20k
+-- users, `profile_is_discoverable(pr.id)` took a two-letter search from 93ms
+-- to 165ms p50 (+77%) and a four-letter one from 6.3ms to 10.8ms. A column
+-- read costs what `deleted_at is null` did. It reveals exactly the one bit the
+-- helper would have answered to any caller, so it is no wider.
 -- ===========================================================================
-create function public.profile_is_discoverable(p_user_id uuid)
-returns boolean
-language sql
-stable
-security definer
-set search_path = ''
-as $$
-  select exists (
-    select 1 from public.profiles pr
-    where pr.id = p_user_id
-      and pr.deleted_at is null
-      and pr.erased_at is null
-  );
-$$;
+alter table public.profiles
+  add column is_discoverable boolean
+  generated always as (deleted_at is null and erased_at is null) stored;
 
-revoke execute on function public.profile_is_discoverable(uuid) from public, anon;
-grant  execute on function public.profile_is_discoverable(uuid) to authenticated;
-
-comment on function public.profile_is_discoverable(uuid) is
-  'False for an account scheduled for deletion or erased. What search and the '
-  'invite picker filter on, without reading deleted_at under the caller''s '
-  'privileges (Phase 45).';
+comment on column public.profiles.is_discoverable is
+  'False for an account scheduled for deletion or erased. Public, unlike '
+  'deleted_at: what search and the invite picker filter on (Phase 45).';
 
 
 -- ===========================================================================
 -- 3. The three invoker RPCs, each with only those terms changed.
+--
+-- host_on_my_map is a function call per surviving map candidate, where the old
+-- term read a column of the row already joined. Measured at 10k parties,
+-- interleaved against the old body in one transaction: p50 +9% / +9% / +11%
+-- at 5 / 50 / 500 km, p95 within noise. Accepted; the tier stays private.
 -- ===========================================================================
 create or replace function public.get_parties_near_user(
   map_center_lon double precision,
@@ -286,9 +286,9 @@ as $function$
     -- get_messages and friends drop whole rows. So search filters it here, and
     -- it is not belt-and-braces: the erasure scrub makes username_search read
     -- `deleteduuid...`, so a search for `deleted` would otherwise return every
-    -- tombstone in the system. Through a definer helper since Phase 45: the
+    -- tombstone in the system. Through is_discoverable since Phase 45: the
     -- caller can no longer read deleted_at.
-    and public.profile_is_discoverable(pr.id)
+    and pr.is_discoverable
 
     -- What searchProfiles did with .neq('id', uid).
     and pr.id <> (select auth.uid())
@@ -330,7 +330,7 @@ begin
   from public.follows f
   join public.profiles pr on pr.id = f.follower_id
   where f.followee_id = (select auth.uid())
-    and public.profile_is_discoverable(pr.id)
+    and pr.is_discoverable
     and (v_query is null or strpos(lower(pr.username), v_query) > 0)
     and (
       p_cursor_username is null
@@ -414,7 +414,8 @@ grant select (
   avatar_path,
   follower_count,
   following_count,
-  username_search
+  username_search,
+  is_discoverable
 ) on public.profiles to authenticated;
 
 
