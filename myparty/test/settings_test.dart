@@ -7,6 +7,7 @@ import 'package:myparty/data/profile_repository.dart';
 import 'package:myparty/models/gender.dart';
 import 'package:myparty/models/profile_privacy.dart';
 import 'package:myparty/services/auth_service.dart';
+import 'package:myparty/ui/screens/change_password_screen.dart';
 import 'package:myparty/ui/screens/settings_screen.dart';
 import 'package:myparty/utils/app_info.dart';
 
@@ -101,6 +102,15 @@ class _FakeAuthService extends AuthService {
 
   @override
   Future<void> signOut() async => signOuts++;
+
+  final passwordWrites = <String>[];
+
+  @override
+  Future<bool> verifyPassword({required String email, required String password}) async => true;
+
+  @override
+  Future<void> writePassword({required String currentPassword, required String newPassword}) async =>
+      passwordWrites.add(newPassword);
 }
 
 Future<String> _version() async => '1.2.3 (45)';
@@ -166,7 +176,7 @@ void main() {
       // to the whole suite. Scrolled to one by one, since a ListView builds
       // only what is near the viewport.
       const expected = [
-        'ACCOUNT', 'Email', 'Data & deletion',
+        'ACCOUNT', 'Email', 'Password', 'Data & deletion',
         'PROFILE', 'Edit profile', 'Gender', genderVisibilityNote,
         'PRIVACY & SAFETY', 'Who sees my parties on the map', 'Who can invite me',
         'Who can message me', 'Blocked accounts',
@@ -433,6 +443,28 @@ void main() {
       expect(find.byType(Dialog), findsNothing);
       expect(find.byType(BottomSheet), findsNothing);
       expect(find.text('ACCOUNT'), findsOneWidget);
+    });
+
+    testWidgets('Password opens Change password, and a change lands back here with the snackbar', (tester) async {
+      final auth = _FakeAuthService();
+      await _pumpSettings(tester, _FakeProfileRepository(), auth: auth);
+
+      await tester.tap(find.text('Password'));
+      await tester.pumpAndSettle();
+      expect(find.byType(ChangePasswordScreen), findsOneWidget);
+
+      await tester.enterText(find.widgetWithText(TextField, 'Current password'), 'old-Password!');
+      await tester.enterText(find.widgetWithText(TextField, 'New password'), 'fresh-Password!');
+      await tester.enterText(find.widgetWithText(TextField, 'Confirm new password'), 'fresh-Password!');
+      await tester.pump();
+      await tester.tap(find.byKey(changePasswordSubmitKey));
+      await tester.pumpAndSettle();
+
+      expect(auth.passwordWrites, ['fresh-Password!']);
+      expect(find.byType(ChangePasswordScreen), findsNothing);
+      expect(find.text('ACCOUNT'), findsOneWidget);
+      // Shown by Settings, because the screen that knew has popped.
+      expect(find.text(passwordChangedMessage), findsOneWidget);
     });
 
     testWidgets('sign out asks first, and Cancel signs nobody out', (tester) async {

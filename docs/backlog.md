@@ -631,6 +631,38 @@ table and RPC for anon access. Nothing signed out should read user data unless
 something is found that genuinely needs it; the `/p` and `/i` pages fetch
 nothing, so neither does.
 
+### 1.42 Before launch: the hosted project must require the current password
+
+Change password (Phase 47) sends `current_password` with the update, but GoTrue
+only checks it when `update_password_require_current_password` is on, and the
+CLI's `config.toml` (2.114) has no key for it. Measured locally: with the
+setting off, a wrong current password was accepted and the password changed.
+The app checks the current password itself first (a throwaway sign-in), so the
+screen behaves correctly either way, but that check runs only on a client that
+wants it to. A stolen session alone could change the password through
+`PUT /auth/v1/user` until the setting is on.
+
+*To do:* turn it on for the hosted project. Read the auth config first
+(`GET https://api.supabase.com/v1/projects/{ref}/config/auth`) and confirm the
+field name, expected to be `security_update_password_require_current_password`,
+then `PATCH` it to `true`, or use the dashboard toggle if it exists there. Then
+check that `PUT /auth/v1/user` with a wrong `current_password` answers 400
+`current_password_invalid`.
+
+### 1.43 A device signed out remotely keeps its push row
+
+A password change ends every other session of the account (measured, Phase 47).
+Those devices are signed out on their next refresh, but nothing deletes their
+`user_devices` rows: `AuthService.signOut` does that only on the device that
+taps Sign out, before its session goes. So the delivery worker keeps pushing
+this user's notifications to a phone that is no longer signed in, until FCM
+rotates the token. The same is already true of any session that ends without
+Sign out (refresh-token revocation, an expired session).
+
+*Why it is still open:* the fix is server-side and has a choice in it: delete
+`user_devices` rows whose owner has no live session (a sweep over
+`auth.sessions`), or tie each row to the session that registered it.
+
 ---
 
 ## 2. Costed: should the map adopt `party_is_past()`?

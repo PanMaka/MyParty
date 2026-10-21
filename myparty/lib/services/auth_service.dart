@@ -1,7 +1,28 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../utils/age.dart';
 import 'notifications.dart';
+
+/// Why [AuthService.changePassword] was refused, so the screen can put the
+/// message under the field it is about.
+enum PasswordChangeFailure {
+  wrongCurrentPassword,
+  samePassword,
+  weakPassword,
+  rateLimited,
+  notSignedIn,
+}
+
+class PasswordChangeException implements Exception {
+  const PasswordChangeException(this.failure);
+
+  final PasswordChangeFailure failure;
+
+  @override
+  String toString() => 'PasswordChangeException(${failure.name})';
+}
 
 class AuthService {
   AuthService({SupabaseClient? client}) : _clientOverride = client;
@@ -57,6 +78,89 @@ class AuthService {
     return await _supabase.auth.signInWithPassword(
       email: email,
       password: password,
+    );
+  }
+
+  /// Settings → Account → Password. Needs the current password, checked
+  /// twice on purpose:
+  ///
+  ///  1. Here, by [verifyPassword]. GoTrue ignores `current_password` unless
+  ///     the project sets `update_password_require_current_password`, which
+  ///     the CLI's config.toml cannot express (measured on the local stack:
+  ///     a wrong one was accepted and the password changed). Without this
+  ///     check a wrong current password would "work" locally.
+  ///  2. By the server, from the `currentPassword` sent with the update, on
+  ///     the hosted project where that setting is on. That is the check that
+  ///     binds: this one only runs on a client that wants it to, and the point
+  ///     of asking is that a stolen session alone cannot change the password.
+  ///
+  /// On success GoTrue ends every OTHER session of the account and keeps this
+  /// one (measured), which the screen tells the user.
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final email = currentEmail;
+    if (email == null) throw const PasswordChangeException(PasswordChangeFailure.notSignedIn);
+
+    if (!await verifyPassword(email: email, password: currentPassword)) {
+      throw const PasswordChangeException(PasswordChangeFailure.wrongCurrentPassword);
+    }
+
+    try {
+      await writePassword(currentPassword: currentPassword, newPassword: newPassword);
+    } on AuthException catch (e) {
+      final failure = switch (e.code) {
+        'same_password' => PasswordChangeFailure.samePassword,
+        'weak_password' => PasswordChangeFailure.weakPassword,
+        // `required` cannot happen (it is always sent) but means the same thing.
+        'current_password_invalid' || 'current_password_required' => PasswordChangeFailure.wrongCurrentPassword,
+        'over_request_rate_limit' => PasswordChangeFailure.rateLimited,
+        _ => null,
+      };
+      if (failure == null) rethrow;
+      throw PasswordChangeException(failure);
+    }
+  }
+
+  /// True if [password] is the account's current password, false if it is
+  /// not. Signs in on a THROWAWAY client that persists nothing and does not
+  /// refresh, then ends that session at once: signing in on the app's own
+  /// client would swap this device's session and leave the old refresh token
+  /// valid on the server. The app's auth stream never hears about it.
+  @protected
+  Future<bool> verifyPassword({required String email, required String password}) async {
+    final scratch = GoTrueClient(
+      url: '${dotenv.env['SUPABASE_URL']!}/auth/v1',
+      // The app client's auth headers: the publishable key only, never a user
+      // token (supabase_client.dart builds them once).
+      headers: _supabase.auth.headers,
+      autoRefreshToken: false,
+    );
+    try {
+      await scratch.signInWithPassword(email: email, password: password);
+    } on AuthException catch (e) {
+      if (e.code == 'invalid_credentials') return false;
+      if (e.code == 'over_request_rate_limit') {
+        throw const PasswordChangeException(PasswordChangeFailure.rateLimited);
+      }
+      rethrow;
+    } finally {
+      // Best effort. The session is never stored anywhere, and the password
+      // change that follows ends it anyway.
+      try {
+        await scratch.signOut();
+      } catch (_) {}
+      scratch.dispose();
+    }
+    return true;
+  }
+
+  /// The write itself, on the app's own session.
+  @protected
+  Future<void> writePassword({required String currentPassword, required String newPassword}) async {
+    await _supabase.auth.updateUser(
+      UserAttributes(password: newPassword, currentPassword: currentPassword),
     );
   }
 

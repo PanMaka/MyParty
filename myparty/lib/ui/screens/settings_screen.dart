@@ -10,6 +10,7 @@ import '../../utils/app_info.dart';
 import '../theme/app_theme.dart';
 import 'account_deletion_screen.dart';
 import 'blocked_accounts_screen.dart';
+import 'change_password_screen.dart';
 import 'notification_settings_screen.dart';
 import 'profile_edit_screen.dart';
 
@@ -168,6 +169,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   void _push(Widget screen) => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => screen));
 
+  /// The snackbar is shown here rather than by the screen, which has already
+  /// popped by the time there is anything to say.
+  Future<void> _changePassword() async {
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => ChangePasswordScreen(auth: _auth)),
+    );
+    if (changed == true && mounted) _snack(passwordChangedMessage);
+  }
+
   /// A confirmation, because the row sits at the bottom of a scrolling list
   /// where a stray tap is easy, and signing back in means retyping a password.
   Future<void> _confirmSignOut() async {
@@ -229,6 +239,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _section('ACCOUNT'),
           _card([
             _settingsRow('Email', _email ?? '—'),
+            _divider(),
+            _settingsRow('Password', 'Change your password', chevron: true, onTap: _changePassword),
             _divider(),
             _settingsRow(
               'Data & deletion',
