@@ -69,6 +69,25 @@ The Android intent filter claims `/i` too (`android:path="/i"` in
 `AndroidManifest.xml`). Verification is per host, so the existing
 `assetlinks.json` already covers it; nothing in that file changes.
 
+## 4. `/auth/reset` and `/auth/email-change` — required for auth emails (Phase 47)
+
+GoTrue sends password-reset and email-change links through itself and then
+redirects the browser to `https://mypartycorp.com/auth/reset?code=…` or
+`https://mypartycorp.com/auth/email-change?…`. Both URLs must be in the Supabase
+project's redirect allow-list, exactly (backlog 1.44). The `_redirects` file
+serves `auth/reset/index.html` and `auth/email-change/index.html` for them.
+
+On Android with the app installed, the intent filter claims both paths
+(`android:path` in `AndroidManifest.xml`; same host, so `assetlinks.json` is
+unchanged) and the app handles them in `lib/utils/auth_link.dart`. Anywhere
+else, these static pages say what to do next: the 8-digit code in the same
+email works everywhere.
+
+Like `/i`, neither page may **ever run a script**. GoTrue's last email-change
+redirect can carry a session in the address, and the reset `code` is in the
+query. The reset code is harmless off the phone that asked (PKCE), but a page
+that reads the address is one edit away from leaking whatever is in it.
+
 ## Testing before the domain serves the file
 
 Without a verified `assetlinks.json`, Android 12+ opens these links in the browser.

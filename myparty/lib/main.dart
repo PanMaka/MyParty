@@ -6,6 +6,7 @@ import 'services/notifications.dart';
 import 'services/party_links.dart';
 import 'state/mp_store.dart';
 import 'ui/screens/auth_gate.dart';
+import 'ui/widgets/auth_link_handler.dart';
 import 'ui/theme/app_theme.dart';
 
 
@@ -30,8 +31,13 @@ Future<void> main() async {
     // everything they post, upload or export afterwards lands where the
     // attacker can read it. Nothing here signs in through a link (no email
     // confirmation, password reset or OAuth), so this costs nothing today.
-    // If one of those arrives, re-enable it with detectSessionInUriPredicate
-    // restricted to that one callback path, never globally.
+    //
+    // Phase 47 added password reset and email change and kept this OFF, on
+    // purpose: restricting it to those paths would not help, because a forged
+    // link would simply use the allowed path. Their links are parsed by
+    // utils/auth_link.dart instead, which never reads a token: a reset link is
+    // only a PKCE code, redeemable only with the secret this phone stored when
+    // it asked, and an email-change link only prompts a re-read.
     authOptions: const FlutterAuthClientOptions(detectSessionInUri: false),
   );
 
@@ -62,7 +68,9 @@ class MyPartyApp extends StatelessWidget {
         title: 'MyParty',
         debugShowCheckedModeBanner: false,
         theme: buildAppTheme(),
-        home: const AuthGate(), // <-- Changed from LoginScreen to AuthGate
+        // AuthLinkHandler acts on password-reset and email-change links, signed
+        // in or out, so it sits above the gate (Phase 47).
+        home: const AuthLinkHandler(child: AuthGate()),
       ),
     );
   }

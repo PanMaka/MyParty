@@ -1,0 +1,38 @@
+<!--
+  Password reset (GoTrue "recovery"). Phase 47. One email in both languages,
+  Greek first: GoTrue sends one template to everyone and does not know the
+  user's language.
+
+  The 8-digit code is the main path: it works on iOS (no universal links yet,
+  backlog 1.27), on a computer, and after a mail scanner has opened the link.
+  The link is the Android convenience and only works on the phone that asked
+  for the reset (PKCE), which the text says.
+
+  No images, no remote content, no tracking: the only URL is the GoTrue link.
+-->
+<!doctype html>
+<html lang="el">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="margin:0;padding:24px;background:#ffffff;color:#111111;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.5;">
+  <div style="max-width:520px;margin:0 auto;">
+    <p style="font-weight:700;font-size:18px;margin:0 0 16px;">MyParty</p>
+
+    <p>Ζητήθηκε επαναφορά του κωδικού πρόσβασης για τον λογαριασμό <strong>{{ .Email }}</strong>.</p>
+    <p>Ο κωδικός επαλήθευσης:</p>
+    <p style="font-size:28px;font-weight:700;letter-spacing:6px;margin:8px 0 16px;font-family:Menlo,Consolas,monospace;">{{ .Token }}</p>
+    <p>Πληκτρολόγησέ τον στην εφαρμογή, στην οθόνη «Ξέχασες τον κωδικό;». Λήγει σε 1 ώρα.</p>
+    <p>Στο Android μπορείς αντί γι' αυτό να πατήσεις τον σύνδεσμο, <strong>από το ίδιο κινητό</strong> όπου ζήτησες την επαναφορά:
+      <a href="{{ .ConfirmationURL }}">Επαναφορά κωδικού</a></p>
+    <p style="color:#555555;">Αν δεν το ζήτησες εσύ, αγνόησε αυτό το μήνυμα. Ο κωδικός σου δεν αλλάζει.</p>
+
+    <hr style="border:none;border-top:1px solid #dddddd;margin:24px 0;">
+
+    <p lang="en">Someone asked to reset the password for <strong>{{ .Email }}</strong>.</p>
+    <p lang="en">Your verification code is <strong style="font-family:Menlo,Consolas,monospace;letter-spacing:2px;">{{ .Token }}</strong>.
+      Enter it in the app, on the "Forgot password?" screen. It expires in 1 hour.</p>
+    <p lang="en">On Android you can tap the link instead, <strong>on the same phone</strong> you asked from:
+      <a href="{{ .ConfirmationURL }}">Reset password</a></p>
+    <p lang="en" style="color:#555555;">If this wasn't you, ignore this email. Your password stays the same.</p>
+  </div>
+</body>
+</html>

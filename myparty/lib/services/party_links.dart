@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:app_links/app_links.dart';
 import 'package:flutter/foundation.dart';
 
+import '../utils/auth_link.dart';
 import '../utils/party_link.dart';
 
 /// App-scoped: receives every link the OS opens the app with and keeps the
@@ -15,10 +16,10 @@ import '../utils/party_link.dart';
 /// which only exists once someone is signed in and onboarded — so a link
 /// opened while signed out waits, and opens after sign-in.
 ///
-/// Only party links are kept. Anything else — including a link dressed up as
-/// an auth callback — is dropped here; `main.dart` has also turned off
-/// supabase_flutter's own link listener, so nothing in the app reads tokens
-/// from a link.
+/// Party links, invite links and, since Phase 47, the two auth links
+/// ([authLinkFrom]) are kept. Anything else is dropped here, and so is any auth
+/// link carrying a token; `main.dart` has also turned off supabase_flutter's
+/// own link listener, so nothing in the app reads tokens from a link.
 class PartyLinks {
   PartyLinks._();
 
@@ -31,6 +32,10 @@ class PartyLinks {
   /// [pending] — a link tapped before sign-in survives until the user signs
   /// in, not an app kill (docs/backlog.md 1.26).
   static final ValueNotifier<String?> pendingInvite = ValueNotifier<String?>(null);
+
+  /// A password-reset or email-change link waiting for `AuthLinkHandler`,
+  /// which, unlike the two above, acts signed out too.
+  static final ValueNotifier<AuthLink?> pendingAuth = ValueNotifier<AuthLink?>(null);
 
   static StreamSubscription<Uri>? _subscription;
 
@@ -47,6 +52,11 @@ class PartyLinks {
   /// Exposed for tests; the stream above is the only production caller.
   @visibleForTesting
   static void receive(Uri uri) {
+    final auth = authLinkFrom(uri);
+    if (auth != null) {
+      pendingAuth.value = auth;
+      return;
+    }
     final id = partyIdFromLink(uri);
     if (id != null) {
       pending.value = id;

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="el">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!--
+    The page an EMAIL-CHANGE link lands on when it is not opened by the app.
+    Phase 47. See hosting/README.md §4.
+
+    By the time anyone sees this page, GoTrue has ALREADY applied the
+    confirmation: the link went to GoTrue first, and GoTrue redirected here.
+    So there is nothing to do on this page and it does nothing. GoTrue's last
+    redirect can carry a session in the address; this page must never read the
+    address: no scripts (the CSP forbids them), no requests, no-referrer.
+  -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow">
+  <title>MyParty: email confirmed</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: grid; place-items: center;
+      padding: 24px; background: #0B0A10; color: #F4F1F8;
+      font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    main { max-width: 380px; text-align: center; }
+    .mark {
+      width: 72px; height: 72px; margin: 0 auto 20px; border-radius: 50%;
+      background: linear-gradient(135deg, #534AB7, #F23557);
+    }
+    h1 { font-size: 21px; margin: 0 0 8px; letter-spacing: -0.3px; }
+    p { margin: 0 0 14px; color: rgba(244, 241, 248, 0.68); font-size: 14px; }
+    hr { border: none; border-top: 1px solid rgba(244, 241, 248, 0.12); margin: 22px 0; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="mark" aria-hidden="true"></div>
+    <h1>Η διεύθυνση επιβεβαιώθηκε</h1>
+    <p>Αν έχεις επιβεβαιώσει και τις δύο διευθύνσεις, το email σου άλλαξε. Αλλιώς, επιβεβαίωσε και από το άλλο email.</p>
+    <p>Μπορείς να επιστρέψεις στην εφαρμογή.</p>
+    <hr>
+    <h1 lang="en">Address confirmed</h1>
+    <p lang="en">If you've confirmed both addresses, your email has changed. Otherwise, confirm from the other one too.</p>
+    <p lang="en">You can go back to the app.</p>
+  </main>
+</body>
+</html>

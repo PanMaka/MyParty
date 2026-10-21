@@ -7,6 +7,9 @@ import 'package:myparty/data/profile_repository.dart';
 import 'package:myparty/models/gender.dart';
 import 'package:myparty/models/profile_privacy.dart';
 import 'package:myparty/services/auth_service.dart';
+import 'package:myparty/ui/screens/change_email_screen.dart';
+import 'package:myparty/ui/screens/change_password_screen.dart';
+import 'package:myparty/utils/auth_messages.dart';
 import 'package:myparty/ui/screens/settings_screen.dart';
 import 'package:myparty/utils/app_info.dart';
 
@@ -93,14 +96,28 @@ class _FakeProfileRepository extends ProfileRepository {
 class _FakeAuthService extends AuthService {
   _FakeAuthService({this.email = 'me@example.com'});
 
-  final String? email;
+  String? email;
   int signOuts = 0;
 
   @override
   String? get currentEmail => email;
 
+  String? pending;
+
+  @override
+  String? get pendingNewEmail => pending;
+
   @override
   Future<void> signOut() async => signOuts++;
+
+  final passwordWrites = <String>[];
+
+  @override
+  Future<bool> verifyPassword({required String email, required String password}) async => true;
+
+  @override
+  Future<void> writePassword({required String currentPassword, required String newPassword}) async =>
+      passwordWrites.add(newPassword);
 }
 
 Future<String> _version() async => '1.2.3 (45)';
@@ -166,7 +183,7 @@ void main() {
       // to the whole suite. Scrolled to one by one, since a ListView builds
       // only what is near the viewport.
       const expected = [
-        'ACCOUNT', 'Email', 'Data & deletion',
+        'ACCOUNT', 'Email', 'Password', 'Data & deletion',
         'PROFILE', 'Edit profile', 'Gender', genderVisibilityNote,
         'PRIVACY & SAFETY', 'Who sees my parties on the map', 'Who can invite me',
         'Who can message me', 'Blocked accounts',
@@ -423,16 +440,58 @@ void main() {
   });
 
   group('account', () {
-    testWidgets('shows the signed-in email, read-only', (tester) async {
+    testWidgets('shows the signed-in email, and opens Change email (Phase 47)', (tester) async {
       await _pumpSettings(tester, _FakeProfileRepository(), auth: _FakeAuthService(email: 'ada@example.com'));
 
       expect(find.text('ada@example.com'), findsOneWidget);
-      // A label, not a control: nothing opens when it is tapped.
       await tester.tap(find.text('ada@example.com'));
       await tester.pumpAndSettle();
-      expect(find.byType(Dialog), findsNothing);
-      expect(find.byType(BottomSheet), findsNothing);
+      expect(find.byType(ChangeEmailScreen), findsOneWidget);
+    });
+
+    testWidgets('a change waiting for confirmation is shown on the row', (tester) async {
+      final auth = _FakeAuthService(email: 'ada@example.com')..pending = 'ada@new.example';
+      await _pumpSettings(tester, _FakeProfileRepository(), auth: auth);
+
+      expect(find.text('ada@example.com → ada@new.example (waiting for confirmation)'), findsOneWidget);
+    });
+
+    testWidgets('a completed change comes back with the snackbar and the new address', (tester) async {
+      final auth = _FakeAuthService(email: 'ada@example.com');
+      await _pumpSettings(tester, _FakeProfileRepository(), auth: auth);
+
+      await tester.tap(find.text('ada@example.com'));
+      await tester.pumpAndSettle();
+      // What ChangeEmailScreen pops with once both codes are in; the session
+      // then reports the new address.
+      auth.email = 'ada@new.example';
+      Navigator.of(tester.element(find.byType(ChangeEmailScreen))).pop('ada@new.example');
+      await tester.pumpAndSettle();
+
+      expect(find.text(emailChangedMessage('ada@new.example')), findsOneWidget);
+      expect(find.text('ada@new.example'), findsOneWidget);
+    });
+
+    testWidgets('Password opens Change password, and a change lands back here with the snackbar', (tester) async {
+      final auth = _FakeAuthService();
+      await _pumpSettings(tester, _FakeProfileRepository(), auth: auth);
+
+      await tester.tap(find.text('Password'));
+      await tester.pumpAndSettle();
+      expect(find.byType(ChangePasswordScreen), findsOneWidget);
+
+      await tester.enterText(find.widgetWithText(TextField, 'Current password'), 'old-Password!');
+      await tester.enterText(find.widgetWithText(TextField, 'New password'), 'fresh-Password!');
+      await tester.enterText(find.widgetWithText(TextField, 'Confirm new password'), 'fresh-Password!');
+      await tester.pump();
+      await tester.tap(find.byKey(changePasswordSubmitKey));
+      await tester.pumpAndSettle();
+
+      expect(auth.passwordWrites, ['fresh-Password!']);
+      expect(find.byType(ChangePasswordScreen), findsNothing);
       expect(find.text('ACCOUNT'), findsOneWidget);
+      // Shown by Settings, because the screen that knew has popped.
+      expect(find.text(passwordChangedMessage), findsOneWidget);
     });
 
     testWidgets('sign out asks first, and Cancel signs nobody out', (tester) async {
