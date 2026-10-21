@@ -15,8 +15,8 @@ Last swept: 2026-08-22, after Phase 14B. Phase 39 updated 1.12 and 1.17 and
 added 1.21-1.24 (2026-10-14). Phase 40 shipped 1.24 (invite_to_party) and
 added 1.25-1.29. Phase 44 shipped 1.1 (Remove photo) and 1.32 (names in the
 export), raised 1.38 to high priority, and added 1.39 (2026-10-21). Phase 45
-landed 1.38's server half, moved its fix decision to §3, and added 1.40-1.41
-for Phase 46 (2026-10-21).
+shipped 1.38, moved its fix decision to §3, and added 1.40-1.41 for Phase 46
+(2026-10-21).
 
 ---
 
@@ -532,19 +532,6 @@ and its assertion in `test/account_test.dart` with it.
 
 *What it costs to leave:* a string like `deleted_3f2a…` in a chat reads as a
 bug, though it reveals nothing about who wrote it.
-
-### 1.38 IN PROGRESS (Phase 45): notification settings and consents are readable by everyone
-
-**Server half landed** (`20261021121734`): SELECT on `profiles` is a column
-list (the public columns), anon holds none of it, and the owner reads the rest
-through `get_my_settings()`. The decision to use a column grant rather than the
-separate table this entry used to recommend is in §3.
-
-*Why it is still open:* the client still reads its own settings off the table
-(`ProfileGate._loadGateRow`, `DeviceRepository.fetchPrefs`,
-`ProfileRepository.fetchPrivacy`, `AccountRepository.deletionScheduledAt`), and
-since the migration those four reads are refused. Delete this entry when they
-go through `get_my_settings()`.
 
 ### 1.39 Hosted deployment: phases 39-45 go out together, with an app update
 
