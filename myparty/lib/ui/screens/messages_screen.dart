@@ -276,16 +276,20 @@ class _MessagesScreenState extends State<MessagesScreen> with LiveRefresh<Messag
                     child: const DiagonalStripePlaceholder(
                         colors: [Color(0xFF1C1622), Color(0xFF151020)]),
                   ),
-                  Positioned(
-                    bottom: -3,
-                    right: -3,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                      decoration:
-                          BoxDecoration(color: tint, borderRadius: BorderRadius.circular(5)),
-                      child: Text('${chat.goingCount}', style: AppTextStyles.mono(size: 7.5)),
+                  // NULL on every private party (all of them: chat is
+                  // private-only), so in practice the badge is not drawn.
+                  if (chat.goingCount case final count?)
+                    Positioned(
+                      key: const Key('chat-member-count'),
+                      bottom: -3,
+                      right: -3,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                        decoration:
+                            BoxDecoration(color: tint, borderRadius: BorderRadius.circular(5)),
+                        child: Text('$count', style: AppTextStyles.mono(size: 7.5)),
+                      ),
                     ),
-                  ),
                 ],
               ),
             ),

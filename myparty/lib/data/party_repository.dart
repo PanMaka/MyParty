@@ -210,7 +210,11 @@ class PartyRepository {
 
     final base = _client
         .from('parties')
-        .select('id, title, starts_at, is_private, going_count, interested_count, max_capacity, cover_path, area')
+        // The raw counters are not granted to clients (Phase 46). The public
+        // columns are the same numbers on a public party and NULL on a private
+        // one, aliased back to the names PartySummary reads.
+        .select('id, title, starts_at, is_private, going_count:public_going_count, '
+            'interested_count:public_interested_count, max_capacity, cover_path, area')
         .eq('host_id', id)
         .eq('status', 'published');
 
