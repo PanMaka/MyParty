@@ -49,13 +49,13 @@ $$;
 select tests.authenticate_as('11111111-1111-1111-1111-111111111111'); -- host
 
 select is(
-  (select map_visibility::text from public.profiles where id = '11111111-1111-1111-1111-111111111111'),
+  (select map_visibility::text from public.get_my_settings()),
   'public',
   'map_visibility defaults to public -- existing rows keep todays behaviour'
 );
 
 select is(
-  (select invite_policy::text from public.profiles where id = '11111111-1111-1111-1111-111111111111'),
+  (select invite_policy::text from public.get_my_settings()),
   'anyone',
   'invite_policy defaults to anyone'
 );
@@ -66,7 +66,7 @@ update public.profiles set map_visibility = 'followers'
 where id = '11111111-1111-1111-1111-111111111111';
 
 select is(
-  (select map_visibility::text from public.profiles where id = '11111111-1111-1111-1111-111111111111'),
+  (select map_visibility::text from public.get_my_settings()),
   'followers',
   'a user can set their own map_visibility -- protect_credibility_score does not freeze it'
 );
@@ -76,8 +76,10 @@ select is(
 update public.profiles set map_visibility = 'private'
 where id = '22222222-2222-2222-2222-222222222222';
 
+-- Read back as the owner: since Phase 45 nobody else can read the tier.
+select tests.authenticate_as('22222222-2222-2222-2222-222222222222'); -- invitee
 select is(
-  (select map_visibility::text from public.profiles where id = '22222222-2222-2222-2222-222222222222'),
+  (select map_visibility::text from public.get_my_settings()),
   'public',
   'but not somebody elses -- the owner-only UPDATE policy still holds'
 );
