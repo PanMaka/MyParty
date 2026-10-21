@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:myparty/data/profile_repository.dart';
+import 'package:myparty/models/profile.dart';
 import 'package:myparty/services/auth_drafts.dart';
 import 'package:myparty/services/auth_service.dart';
 import 'package:myparty/ui/screens/login_screen.dart';
@@ -28,7 +29,6 @@ class _FakeAuthService extends AuthService {
   final List<Map<String, Object>> signUps = [];
   int signOuts = 0;
   int abandons = 0;
-  final List<(String, String)> savedNames = [];
 
   /// When true, abandonSignup fails the way the server refuses it.
   bool refuseAbandon = false;
@@ -40,10 +40,6 @@ class _FakeAuthService extends AuthService {
     }
     abandons++;
   }
-
-  @override
-  Future<void> saveNames({required String firstName, required String lastName}) async =>
-      savedNames.add((firstName, lastName));
 
   @override
   Future<void> signOut() async => signOuts++;
@@ -88,7 +84,15 @@ class _FakeAuthService extends AuthService {
 
 /// Answers the availability check from [taken] and records onboarding writes.
 class _FakeProfileRepository extends ProfileRepository {
-  _FakeProfileRepository({this.taken = const {}, this.parkOnboarding = true});
+  _FakeProfileRepository({
+    this.taken = const {},
+    this.parkOnboarding = true,
+    this.refuseAs,
+  });
+
+  /// When set, completeOnboarding is refused the way the server refuses it,
+  /// after the availability check said yes (someone else got there first).
+  final UsernameRefusal? refuseAs;
 
   /// When false, completeOnboarding completes and the screen goes on to
   /// navigate — which a test can only allow if it never pumps that far.
@@ -96,7 +100,9 @@ class _FakeProfileRepository extends ProfileRepository {
 
   final Set<String> taken;
   final List<String> checked = [];
-  final List<String> onboarded = [];
+  /// Every completeOnboarding call as (username, first, last): one call
+  /// carries all three since Phase 44.
+  final List<(String, String, String)> onboarded = [];
 
   /// Never completes, so a successful submit stops short of navigating to
   /// HomeScreen, which needs a real Supabase.
@@ -109,8 +115,13 @@ class _FakeProfileRepository extends ProfileRepository {
   }
 
   @override
-  Future<void> completeOnboarding(String username) {
-    onboarded.add(username);
+  Future<void> completeOnboarding({
+    required String username,
+    required String firstName,
+    required String lastName,
+  }) {
+    onboarded.add((username, firstName, lastName));
+    if (refuseAs != null) return Future.error(UsernameRefused(refuseAs!));
     return parkOnboarding ? _parked.future : Future.value();
   }
 }
@@ -457,7 +468,7 @@ void main() {
       expect(find.text('Please enter your first name.'), findsOneWidget);
       expect(find.text('Please enter your last name.'), findsOneWidget);
       expect(repo.checked, isEmpty);
-      expect(auth.savedNames, isEmpty);
+      expect(repo.onboarded, isEmpty);
     });
 
     testWidgets('a username under 3 characters never reaches the server', (tester) async {
@@ -483,20 +494,54 @@ void main() {
       expect(find.text('That username is already taken'), findsOneWidget);
       expect(repo.checked, ['nikos']);
       expect(repo.onboarded, isEmpty);
-      expect(auth.savedNames, isEmpty);
     });
 
-    testWidgets('a free username is trimmed and written, with the trimmed names', (tester) async {
+    testWidgets('a free username is trimmed and written, with the trimmed names, in one call',
+        (tester) async {
       final repo = _FakeProfileRepository();
-      final auth = _FakeAuthService();
-      await tester.pumpWidget(screen(repo, auth));
+      await tester.pumpWidget(screen(repo));
       await fillNames(tester);
 
       await submit(tester, ' maria ');
 
-      expect(auth.savedNames, [('Maria', 'Papadopoulou')]);
-      expect(repo.onboarded, ['maria']);
+      expect(repo.onboarded, [('maria', 'Maria', 'Papadopoulou')]);
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    });
+
+    testWidgets('the format rule is shown, and a name breaking it never reaches the server',
+        (tester) async {
+      final repo = _FakeProfileRepository();
+      await tester.pumpWidget(screen(repo));
+      await fillNames(tester);
+
+      expect(find.text(UsernameConstraint.rules), findsOneWidget);
+
+      for (final (name, message) in [
+        ('maria..k', "A username can't have two dots in a row."),
+        ('.maria', "A username can't start or end with a dot."),
+        ('maria k', 'Use only letters, numbers, _ and .'),
+        ('μαρία', 'Use only letters, numbers, _ and .'),
+        ('deleted_maria', 'That username is not available.'),
+        ('m' * 31, 'Up to 30 characters.'),
+      ]) {
+        await submit(tester, name);
+        expect(find.text(message), findsOneWidget, reason: name);
+      }
+      expect(repo.checked, isEmpty);
+      expect(repo.onboarded, isEmpty);
+    });
+
+    testWidgets('a name taken between the check and the write says taken', (tester) async {
+      final repo = _FakeProfileRepository(refuseAs: UsernameRefusal.taken);
+      await tester.pumpWidget(screen(repo));
+      await fillNames(tester);
+
+      await submit(tester, 'maria');
+      await tester.pump();
+
+      expect(repo.onboarded, hasLength(1));
+      expect(find.text('That username is already taken'), findsOneWidget);
+      expect(find.text('Continue'), findsOneWidget);
     });
 
     testWidgets('finishing hands back to its host instead of replacing the route it is in',

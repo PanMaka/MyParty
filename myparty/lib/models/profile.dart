@@ -184,3 +184,59 @@ class BioConstraint {
     return null;
   }
 }
+
+/// The client's mirror of `username_is_valid` (20261021094726), for the
+/// keyboard rather than the decision: `complete_onboarding` and
+/// `change_username` run the real one and refuse with 22023 whatever this says.
+///
+/// Applies to a name being CHOSEN. A name set before the rule existed stays
+/// valid for its owner, which is why [validate] is never run on the stored
+/// value except to tell its owner (the edit screen's notice).
+class UsernameConstraint {
+  UsernameConstraint._();
+
+  static const minCharacters = 3;
+  static const maxCharacters = 30;
+
+  /// One sentence, shown wherever a username is typed.
+  static const rules =
+      '3-30 letters, numbers, _ or . (no dot at the start or end, and no two dots in a row).';
+
+  static final _allowed = RegExp(r'^[A-Za-z0-9_.]+$');
+
+  /// Null when [value] would pass `username_is_valid`, otherwise the reason.
+  /// Takes the trimmed value, which is what is sent.
+  static String? validate(String value) {
+    if (value.length < minCharacters) return 'Username must be at least 3 characters';
+    if (value.length > maxCharacters) return 'Up to $maxCharacters characters.';
+    if (!_allowed.hasMatch(value)) return 'Use only letters, numbers, _ and .';
+    if (value.startsWith('.') || value.endsWith('.')) {
+      return "A username can't start or end with a dot.";
+    }
+    if (value.contains('..')) return "A username can't have two dots in a row.";
+    // The tombstone prefix. Phrased as unavailable rather than explained: the
+    // reason is a server detail, and "taken" is what it amounts to.
+    if (value.toLowerCase().startsWith('deleted_')) return 'That username is not available.';
+    return null;
+  }
+
+  static bool isValid(String value) => validate(value) == null;
+}
+
+/// The client's mirror of `person_name_is_valid` (20261021094725): trimmed,
+/// 1-50 characters, no control characters, and nothing about alphabets.
+class PersonNameConstraint {
+  PersonNameConstraint._();
+
+  static const maxCharacters = 50;
+
+  /// Null when the trimmed [value] would be accepted, otherwise the reason.
+  /// [label] names the field ("first name") in the empty case.
+  static String? validate(String value, {required String label}) {
+    if (value.isEmpty) return 'Please enter your $label.';
+    // `char_length`, so runes rather than UTF-16 units (see BioConstraint).
+    if (value.runes.length > maxCharacters) return 'Up to $maxCharacters characters.';
+    if (RegExp(r'[\x00-\x1F\x7F]').hasMatch(value)) return 'Use one line.';
+    return null;
+  }
+}
