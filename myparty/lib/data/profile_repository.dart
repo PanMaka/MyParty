@@ -467,19 +467,13 @@ class ProfileRepository {
 
   /// Reads the current user's own privacy tiers.
   ///
-  /// Only ever the current user's: the values are a preference, and there is no
-  /// screen that shows you someone else's. (The `profiles` SELECT policy would
-  /// happily return another user's row, which is exactly why the caller should
-  /// not be able to ask for one here by accident.)
+  /// Only ever the current user's, and since Phase 45 that is the server's
+  /// rule rather than this method's: the tiers are owner-only columns, read
+  /// through `get_my_settings`, which takes no user argument.
   Future<ProfilePrivacy?> fetchPrivacy() async {
-    final userId = currentUserId;
-    if (userId == null) return null;
+    if (currentUserId == null) return null;
 
-    final row = await _client
-        .from('profiles')
-        .select('map_visibility, invite_policy, dm_policy')
-        .eq('id', userId)
-        .maybeSingle();
+    final row = await _client.rpc('get_my_settings').maybeSingle();
 
     if (row == null) return null;
     return ProfilePrivacy.fromRow(row);
