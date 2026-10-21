@@ -956,13 +956,18 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
               // The basemap credit, as text: this map takes no taps, so it
               // cannot carry the interactive maps' popup.
               Positioned(
-                left: 8,
+                left: 6,
                 top: 6,
                 child: IgnorePointer(
-                  child: Text(kBasemapCreditShort,
-                      style: TextStyle(fontSize: 8.5, color: AppColors.textAlpha(0.55), shadows: const [
-                        Shadow(color: kBasemapBackground, blurRadius: 3),
-                      ])),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: AppColors.bg.withValues(alpha: 0.7),
+                      borderRadius: BorderRadius.circular(99),
+                    ),
+                    child: Text(kBasemapCreditShort,
+                        style: TextStyle(fontSize: 8.5, color: AppColors.textAlpha(0.6))),
+                  ),
                 ),
               ),
               const IgnorePointer(child: Center(child: PartyPinMarker(size: 34))),

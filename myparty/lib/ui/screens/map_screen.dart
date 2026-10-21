@@ -401,7 +401,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin, Li
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
               decoration: BoxDecoration(
-                color: AppColors.chipFill,
+                color: AppColors.mapOverlayFill,
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(color: AppColors.hairline),
               ),
@@ -461,7 +461,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin, Li
         padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
         decoration: BoxDecoration(
           gradient: active ? AppColors.purpleGradient : null,
-          color: active ? null : AppColors.chipFill,
+          color: active ? null : AppColors.mapOverlayFill,
           borderRadius: BorderRadius.circular(99),
           border: active ? null : Border.all(color: AppColors.hairline),
           boxShadow: active ? [BoxShadow(color: AppColors.purpleDeep.withValues(alpha: 0.5), blurRadius: 18)] : null,
@@ -506,7 +506,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin, Li
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: AppColors.chipFill,
+        color: AppColors.mapOverlayFill,
         borderRadius: BorderRadius.circular(13),
         border: Border.all(color: AppColors.hairline),
       ),
@@ -546,7 +546,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin, Li
         width: 44,
         height: 44,
         decoration: BoxDecoration(
-          color: AppColors.chipFill,
+          color: AppColors.mapOverlayFill,
           borderRadius: BorderRadius.circular(15),
           border: Border.all(color: AppColors.hairline),
         ),

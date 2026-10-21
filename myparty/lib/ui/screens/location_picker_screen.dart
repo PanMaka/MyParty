@@ -265,7 +265,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
           width: 44,
           height: 44,
           decoration: BoxDecoration(
-            color: AppColors.chipFill,
+            color: AppColors.mapOverlayFill,
             borderRadius: BorderRadius.circular(15),
             border: Border.all(color: AppColors.hairline),
           ),
