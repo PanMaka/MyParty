@@ -123,7 +123,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
         children: [
           _sectionLabel('CURRENT PASSWORD'),
-          _PasswordInput(
+          SettingsPasswordInput(
             controller: _current,
             hint: 'Current password',
             enabled: !_saving,
@@ -133,7 +133,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
           if (_currentError != null) _caption(_currentError!, color: AppColors.pinkLight),
           const SizedBox(height: 22),
           _sectionLabel('NEW PASSWORD'),
-          _PasswordInput(
+          SettingsPasswordInput(
             controller: _next,
             hint: 'New password',
             enabled: !_saving,
@@ -146,7 +146,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
             'no spaces, and no runs like "123".',
           ),
           const SizedBox(height: 12),
-          _PasswordInput(
+          SettingsPasswordInput(
             controller: _confirm,
             hint: 'Confirm new password',
             enabled: !_saving,
@@ -217,8 +217,9 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
 /// with its own show/hide toggle. [AuthPasswordField] is the auth screens'
 /// white-on-gradient version and labels itself "Password", so it cannot say
 /// which of the three this is.
-class _PasswordInput extends StatefulWidget {
-  const _PasswordInput({
+class SettingsPasswordInput extends StatefulWidget {
+  const SettingsPasswordInput({
+    super.key,
     required this.controller,
     required this.hint,
     required this.enabled,
@@ -233,10 +234,10 @@ class _PasswordInput extends StatefulWidget {
   final ValueChanged<String> onChanged;
 
   @override
-  State<_PasswordInput> createState() => _PasswordInputState();
+  State<SettingsPasswordInput> createState() => _SettingsPasswordInputState();
 }
 
-class _PasswordInputState extends State<_PasswordInput> {
+class _SettingsPasswordInputState extends State<SettingsPasswordInput> {
   bool _obscured = true;
 
   @override

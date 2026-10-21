@@ -5,6 +5,7 @@ import '../../services/auth_service.dart';
 import '../../utils/age.dart';
 import '../../utils/password.dart';
 import '../widgets/auth_branding.dart';
+import 'confirm_email_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key, this.authService});
@@ -78,18 +79,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
         dateOfBirth: _dateOfBirth!,
         gender: _gender!.value,
       );
-      // With email confirmation on, GoTrue does not refuse a taken address: it
-      // answers with a user that has no identities, so it cannot be told from
-      // a real signup by status alone.
+      // A taken address: GoTrue 2.195 refuses it with user_already_exists
+      // (measured, below). Older versions answered with an identity-less user
+      // instead, which is kept as a second check.
       if (response.user != null && (response.user!.identities ?? const []).isEmpty) {
         if (mounted) setState(() => _emailError = emailTakenMessage);
         return;
       }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Registration successful! Please log in.')),
-        );
-        Navigator.pop(context); // Go back to login screen
+      // Phase 47: confirmation is on, so a sign-up answers with no session and
+      // an 8-digit code is on its way. Replacing this route, so back from the
+      // code screen lands on Login, not on a form that has already been sent.
+      if (mounted && response.session == null) {
+        Navigator.of(context).pushReplacement(MaterialPageRoute(
+          builder: (_) => ConfirmEmailScreen(email: _emailController.text.trim(), authService: widget.authService),
+        ));
       }
     } on AuthException catch (e) {
       if (e.code == 'user_already_exists' || e.code == 'email_exists') {

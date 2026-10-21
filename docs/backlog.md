@@ -17,6 +17,7 @@ added 1.25-1.29. Phase 44 shipped 1.1 (Remove photo) and 1.32 (names in the
 export), raised 1.38 to high priority, and added 1.39 (2026-10-21). Phase 45
 shipped 1.38, moved its fix decision to §3, and added 1.40-1.41 for Phase 46
 (2026-10-21).
+Phase 47 added 1.42-1.45, with 1.44 the auth-email release checklist.
 
 ---
 
@@ -631,7 +632,7 @@ table and RPC for anon access. Nothing signed out should read user data unless
 something is found that genuinely needs it; the `/p` and `/i` pages fetch
 nothing, so neither does.
 
-### 1.42 Before launch: the hosted project must require the current password
+### 1.42 Before launch: the hosted project must require the current password (step C.6 of 1.44)
 
 Change password (Phase 47) sends `current_password` with the update, but GoTrue
 only checks it when `update_password_require_current_password` is on, and the
@@ -662,6 +663,104 @@ Sign out (refresh-token revocation, an expired session).
 *Why it is still open:* the fix is server-side and has a choice in it: delete
 `user_devices` rows whose owner has no live session (a sweep over
 `auth.sessions`), or tie each row to the session that registered it.
+
+### 1.44 RELEASE CHECKLIST — auth emails (Phase 47): everything on the hosted side
+
+Phase 47 built sign-up confirmation, Forgot password and Change email against
+the local mail catcher. None of it works on the hosted project until every step
+below is done, in this order. Ship it in the same window as 1.39: an older app
+build cannot confirm a sign-up (it has no code screen), so once confirmation is
+on, sign-ups on old builds are stuck at "Email not confirmed".
+
+**A. Resend (the email provider), EU region**
+
+1. Create the Resend account. Add the domain `mypartycorp.com` and choose the
+   **EU** region (users are in Greece; GDPR).
+2. Create an API key with **sending access only**, restricted to that domain.
+   It is the SMTP password in C.1; store it nowhere else.
+
+**B. Cloudflare DNS for `mypartycorp.com`**
+
+Copy the exact values from Resend's domain page; the typical set is:
+
+1. `MX` on `send` → Resend's feedback host, priority 10.
+2. `TXT` on `send` → Resend's SPF value (`v=spf1 include:… ~all`).
+3. `TXT` on `resend._domainkey` → the DKIM public key.
+4. `TXT` on `_dmarc` → `v=DMARC1; p=none; rua=mailto:<an address someone reads>`.
+   Tighten to `p=quarantine` after a few weeks of clean reports.
+
+These are DNS-only records (Cloudflare cannot proxy them). If `support@` is set
+up with Cloudflare Email Routing (1.36), it lives on the apex while sending uses
+`send.`, so the SPF records do not collide. Wait until Resend shows the domain
+as verified.
+
+**C. Supabase dashboard (hosted project)**
+
+1. *Authentication → Emails → SMTP settings:* enable custom SMTP. Host
+   `smtp.resend.com`, port `465`, user `resend`, password = the API key from A.2,
+   sender `no-reply@mypartycorp.com`, sender name `MyParty`.
+2. *Authentication → Rate limits:* raise "emails sent per hour" from the
+   built-in limit (about 30 is enough to start).
+3. *Authentication → URL configuration:* Site URL `https://mypartycorp.com`.
+   Redirect allow-list: exactly `https://mypartycorp.com/auth/reset` and
+   `https://mypartycorp.com/auth/email-change`. No wildcards.
+4. *Authentication → Providers → Email:*
+   - **Confirm email: ON.** This is not optional. GoTrue enforces the double
+     confirmation of an email change only when sign-up confirmation is on
+     (measured locally: with it off, either inbox alone completed the change).
+     Existing users are already confirmed and are unaffected.
+   - **Secure email change: ON** (both addresses confirm).
+   - **Secure password change: OFF** (it emails a nonce before every change;
+     the current password is asked instead, see C.6).
+   - **Email OTP length: 8.** **Email OTP expiry: 3600** seconds.
+5. *Authentication → Email templates:* paste the five files from
+   `supabase/templates/`, with the subjects from `supabase/config.toml`:
+   - Confirm signup ← `confirmation.html`
+   - Reset password ← `recovery.html`
+   - Change email address ← `email_change.html`
+   - Security notification "password changed" ← `password_changed_notification.html` (turn it on)
+   - Security notification "email changed" ← `email_changed_notification.html` (turn it on)
+6. **Backlog 1.42:** turn on "require current password when updating". Read
+   the auth config first (`GET /v1/projects/{ref}/config/auth`) and confirm the
+   field name, expected to be `security_update_password_require_current_password`.
+
+**D. Hosting**
+
+1. Deploy `hosting/` to Cloudflare Pages: the new `auth/reset/index.html`,
+   `auth/email-change/index.html` and the two `_redirects` lines.
+2. Check `https://mypartycorp.com/auth/reset` and `/auth/email-change` answer
+   200 with the static pages, and that `/.well-known/assetlinks.json` still
+   verifies (README §1).
+
+**E. After deploying, on a real phone with the release build**
+
+1. **Does "require current password" block a reset?** It could not be measured
+   locally (the CLI cannot turn it on). Request a reset, enter the code, set a
+   new password. If the last step fails with `current_password_required`, the
+   reset has to set the password through a different call; do not turn C.6 off
+   to make it pass.
+2. **Is the double confirmation enforced?** Request an email change and enter
+   only the NEW address's code. The email must NOT change, and the app must say
+   to confirm the other one. If it changes, C.4 "Confirm email" is not on.
+3. With a wrong current password, Change password must answer under the
+   current-password field, from the server (1.42).
+4. Sign-up: the 8-digit code arrives, from `no-reply@mypartycorp.com`, and
+   SPF/DKIM/DMARC pass (the received headers, or a mail-tester style check).
+5. A reset link tapped on the phone that asked opens the app at "Choose a new
+   password"; the same link tapped elsewhere shows the static page.
+
+### 1.45 A second sign-up for an unconfirmed email keeps the first password
+
+Measured (Phase 47): signing up again for an address that never confirmed sends
+a new code but does not change the password. Someone who registered with the
+wrong password, or with somebody else's address that the real owner later
+signs up with, confirms the code and is signed in, but the password that works
+afterwards is the FIRST one. Forgot password recovers it, since the inbox is
+proven by then.
+
+*Why it is still open:* the fix is GoTrue's, or a server-side cleanup of
+never-confirmed accounts older than a day (they also hold a `profiles` row,
+created at sign-up).
 
 ---
 
@@ -717,6 +816,19 @@ showing dead pins before the wizard changes. Do not take B or C as written.
 ## 3. NOT backlog — decisions that look like gaps
 
 Here so they are not "fixed" by somebody reading §1 and pattern-matching.
+
+- **Sign-up email confirmation is ON, and turning it off breaks Change email.**
+  Decided in Phase 47 (2026-10-21). GoTrue skips the second confirmation of an
+  email change whenever sign-up autoconfirms (measured: with confirmation off,
+  either inbox alone completed the change, in both orders and by link or code).
+  With it off, a stolen session plus an inbox the attacker owns takes the
+  account. The cost is one 8-digit code at sign-up.
+- **`detectSessionInUri` stays off, even for the auth links.** Restricting it to
+  `/auth/*` would not help: a forged sign-in link would simply use that path.
+  `lib/utils/auth_link.dart` parses the two links itself and never reads a
+  token: a reset link is a PKCE code that only the phone that asked can redeem
+  (measured: `bad_code_verifier` elsewhere), and an email-change link only
+  prompts a re-read. The 8-digit code is the main path for every flow.
 
 - **The private columns of `profiles` are hidden by a column-scoped SELECT, not
   moved to their own table.** Decided in Phase 45 (2026-10-21), reversing what

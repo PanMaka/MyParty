@@ -6,10 +6,12 @@ import '../../data/social_repository.dart';
 import '../../models/gender.dart';
 import '../../models/profile_privacy.dart';
 import '../../services/auth_service.dart';
+import '../../utils/auth_messages.dart';
 import '../../utils/app_info.dart';
 import '../theme/app_theme.dart';
 import 'account_deletion_screen.dart';
 import 'blocked_accounts_screen.dart';
+import 'change_email_screen.dart';
 import 'change_password_screen.dart';
 import 'notification_settings_screen.dart';
 import 'profile_edit_screen.dart';
@@ -64,16 +66,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final ProfileRepository _profiles = widget.repository ?? ProfileRepository();
   late final AuthService _auth = widget.auth ?? AuthService();
 
-  /// Read once, synchronously, from the session. Null (no session, or no
-  /// Supabase under `flutter test`) shows a dash rather than an error: the row
-  /// is a label, not a control.
-  late final String? _email = () {
+  /// Read synchronously from the session on every build, because Change
+  /// email changes it. Null (no session, or no Supabase under `flutter test`)
+  /// shows a dash rather than an error.
+  String? _sessionValue(String? Function() read) {
     try {
-      return _auth.currentEmail;
+      return read();
     } catch (_) {
       return null;
     }
-  }();
+  }
+
+  String? get _email => _sessionValue(() => _auth.currentEmail);
+  String? get _pendingEmail => _sessionValue(() => _auth.pendingNewEmail);
 
   /// "1.0.0 (1)". Null until the platform answers, or if it never does.
   String? _version;
@@ -169,6 +174,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   void _push(Widget screen) => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => screen));
 
+  Future<void> _changeEmail() async {
+    final changedTo = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => ChangeEmailScreen(auth: _auth)),
+    );
+    if (!mounted) return;
+    // Rebuilt either way: a change left pending is shown on the row too.
+    setState(() {});
+    if (changedTo != null) _snack(emailChangedMessage(changedTo));
+  }
+
   /// The snackbar is shown here rather than by the screen, which has already
   /// popped by the time there is anything to say.
   Future<void> _changePassword() async {
@@ -238,7 +253,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // actually start the deletion rather than link to support.
           _section('ACCOUNT'),
           _card([
-            _settingsRow('Email', _email ?? '—'),
+            _settingsRow(
+              'Email',
+              _pendingEmail == null ? (_email ?? '—') : '${_email ?? '—'} → $_pendingEmail (waiting for confirmation)',
+              chevron: true,
+              onTap: _email == null ? null : _changeEmail,
+            ),
             _divider(),
             _settingsRow('Password', 'Change your password', chevron: true, onTap: _changePassword),
             _divider(),

@@ -9,7 +9,9 @@ import 'package:myparty/models/profile.dart';
 import 'package:myparty/services/auth_drafts.dart';
 import 'package:myparty/services/auth_service.dart';
 import 'package:myparty/ui/screens/login_screen.dart';
+import 'package:myparty/ui/screens/confirm_email_screen.dart';
 import 'package:myparty/ui/screens/register_screen.dart';
+import 'package:myparty/utils/auth_messages.dart';
 import 'package:myparty/ui/screens/username_setup_screen.dart';
 import 'package:myparty/ui/theme/app_theme.dart';
 import 'package:myparty/ui/widgets/auth_branding.dart';
@@ -322,6 +324,13 @@ void main() {
       expect(auth.signUps.single['gender'], 'prefer_not_to_say');
       expect(auth.signUps.single['password'], 'Party!Time9');
       expect(auth.signUps.single['dateOfBirth'], DateTime(DateTime.now().year - 20, 3, 9));
+
+      // Phase 47: confirmation is on, so a sign-up has no session yet and the
+      // code screen takes Register's place (back lands on whatever was under
+      // Register, never on a form that was already sent).
+      expect(find.byType(ConfirmEmailScreen), findsOneWidget);
+      expect(find.text(codeSentTo('m@p.gr')), findsOneWidget);
+      expect(find.byType(RegisterScreen), findsNothing);
     });
 
     for (final c in [
@@ -626,6 +635,10 @@ void main() {
       await _submitRegister(tester);
       expect(auth.signUps, hasLength(1));
 
+      // Confirming the code signs in, and the code screen pops down to the gate
+      // (Phase 47): what AuthGate shows next starts from a clean stack.
+      await tester.pumpWidget(const SizedBox());
+
       // What AuthGate shows next, and the way back from it.
       await tester.pumpWidget(
         _app(UsernameSetupScreen(
@@ -650,15 +663,14 @@ void main() {
       expect(find.text('${DateTime.now().year - 20}'), findsOneWidget);
       expect(find.text('Prefer not to say'), findsOneWidget);
 
-      // ...and Create Account goes again with no retyping. (The first submit's
-      // snackbar is let go first: it sits over the button.)
-      await tester.pump(const Duration(seconds: 5));
-      await tester.pumpAndSettle();
+      // ...and Create Account goes again with no retyping.
       await _submitRegister(tester);
       expect(auth.signUps, hasLength(2));
       expect(auth.signUps.last['email'], 'm@p.gr');
 
-      // Forward again: the names and username were kept too.
+      // Forward again (past the code screen, as above): the names and
+      // username were kept too.
+      await tester.pumpWidget(const SizedBox());
       await tester.pumpWidget(
         _app(UsernameSetupScreen(
           onOnboarded: () {},

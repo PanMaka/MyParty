@@ -3,6 +3,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../services/auth_drafts.dart';
 import '../../services/auth_service.dart';
 import '../widgets/auth_branding.dart';
+import 'confirm_email_screen.dart';
+import 'forgot_password_screen.dart';
 import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -40,9 +42,20 @@ class _LoginScreenState extends State<LoginScreen> {
         // Later, we will navigate to the Map/Home screen here
       }
     } on AuthException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      if (!mounted) return;
+      // Only reachable with the right password (measured: a wrong one is
+      // invalid_credentials either way), so this reveals nothing to a guesser.
+      if (e.code == 'email_not_confirmed') {
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => ConfirmEmailScreen(
+            email: _emailController.text.trim(),
+            authService: widget.authService,
+            sendOnOpen: true,
+          ),
+        ));
+        return;
       }
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -80,6 +93,18 @@ class _LoginScreenState extends State<LoginScreen> {
                   onChanged: (v) => AuthDrafts.instance.loginPassword = v,
                 ),
               ],
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => ForgotPasswordScreen(
+                    authService: widget.authService,
+                    initialEmail: _emailController.text.trim(),
+                  ),
+                )),
+                child: const Text('Forgot password?'),
+              ),
             ),
             const SizedBox(height: 24),
             _isLoading

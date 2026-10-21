@@ -160,7 +160,13 @@ site_url = "http://127.0.0.1:3000"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
-additional_redirect_urls = ["https://127.0.0.1:3000"]
+# Phase 47: the password-reset and email-change links. Exact URLs, no wildcards;
+# the hosted project's allow-list must carry the same two (backlog 1.44).
+additional_redirect_urls = [
+  "https://127.0.0.1:3000",
+  "https://mypartycorp.com/auth/reset",
+  "https://mypartycorp.com/auth/email-change",
+]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to auth.external_url.
@@ -223,13 +229,18 @@ enable_signup = true
 # addresses. If disabled, only the new email is required to confirm.
 double_confirm_changes = true
 # If enabled, users need to confirm their email address before signing in.
-enable_confirmations = false
+# ON since Phase 47, and not only to prove the address: GoTrue skips the second
+# confirmation of an email change whenever sign-up autoconfirms (measured: with
+# this off, either inbox alone completed the change). Hosted must match
+# (backlog 1.44).
+enable_confirmations = true
 # If enabled, users will need to reauthenticate or have logged in recently to change their password.
 secure_password_change = false
 # Controls the minimum amount of time that must pass before sending another signup confirmation or password reset email.
 max_frequency = "1s"
-# Number of characters used in the email OTP.
-otp_length = 6
+# Number of characters used in the email OTP. 8, not 6 (Phase 47): the code is
+# the main path for a password reset, so it is what a guesser would attack.
+otp_length = 8
 # Number of seconds before the email OTP expires (defaults to 1 hour).
 otp_expiry = 3600
 
@@ -243,16 +254,33 @@ otp_expiry = 3600
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 
-# Uncomment to customize email template
-# [auth.email.template.invite]
-# subject = "You have been invited"
-# content_path = "./supabase/templates/invite.html"
+# Phase 47. Bilingual (Greek, then English): GoTrue sends one template to
+# everyone. The hosted project gets the same four through the dashboard
+# (backlog 1.44).
+#
+# The CLI (2.114) resolves the two kinds of path differently, measured:
+# template.* from the project root, notification.* from supabase/.
+[auth.email.template.confirmation]
+subject = "Επιβεβαίωσε το email σου / Confirm your MyParty email"
+content_path = "./supabase/templates/confirmation.html"
 
-# Uncomment to customize notification email template
-# [auth.email.notification.password_changed]
-# enabled = true
-# subject = "Your password has been changed"
-# content_path = "./templates/password_changed_notification.html"
+[auth.email.template.recovery]
+subject = "Επαναφορά κωδικού MyParty / Reset your MyParty password"
+content_path = "./supabase/templates/recovery.html"
+
+[auth.email.template.email_change]
+subject = "Επιβεβαίωση αλλαγής email / Confirm your new MyParty email"
+content_path = "./supabase/templates/email_change.html"
+
+[auth.email.notification.password_changed]
+enabled = true
+subject = "Ο κωδικός σου άλλαξε / Your MyParty password was changed"
+content_path = "./templates/password_changed_notification.html"
+
+[auth.email.notification.email_changed]
+enabled = true
+subject = "Το email σου άλλαξε / Your MyParty email was changed"
+content_path = "./templates/email_changed_notification.html"
 
 [auth.sms]
 # Allow/disallow new user signups via SMS to your project.

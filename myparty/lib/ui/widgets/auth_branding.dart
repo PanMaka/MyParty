@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../models/gender.dart';
 import '../theme/app_theme.dart';
@@ -132,7 +133,17 @@ class AuthPasswordField extends StatefulWidget {
   final String? errorText;
   final ValueChanged<String>? onChanged;
 
-  const AuthPasswordField({super.key, required this.controller, this.errorText, this.onChanged});
+  /// "Password" unless the screen asks for more than one (Phase 47's new
+  /// password and its confirmation).
+  final String label;
+
+  const AuthPasswordField({
+    super.key,
+    required this.controller,
+    this.errorText,
+    this.onChanged,
+    this.label = 'Password',
+  });
 
   @override
   State<AuthPasswordField> createState() => _AuthPasswordFieldState();
@@ -150,7 +161,7 @@ class _AuthPasswordFieldState extends State<AuthPasswordField> {
       obscureText: _obscured,
       onChanged: widget.onChanged,
       decoration: InputDecoration(
-        labelText: 'Password',
+        labelText: widget.label,
         labelStyle: const TextStyle(color: Colors.white70),
         focusedBorder: const UnderlineInputBorder(
           borderSide: BorderSide(color: Colors.white),
@@ -168,6 +179,40 @@ class _AuthPasswordFieldState extends State<AuthPasswordField> {
           tooltip: _obscured ? 'Show password' : 'Hide password',
           onPressed: () => setState(() => _obscured = !_obscured),
         ),
+      ),
+    );
+  }
+}
+
+/// The 8-digit code from an auth email (Phase 47): digits only, at most 8,
+/// spaced out so it can be checked against the email at a glance. Pasting a
+/// code with spaces works, because the spaces are filtered rather than refused.
+class AuthCodeField extends StatelessWidget {
+  final TextEditingController controller;
+  final String? errorText;
+  final ValueChanged<String>? onChanged;
+
+  const AuthCodeField({super.key, required this.controller, this.errorText, this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      style: const TextStyle(color: Colors.white, fontSize: 22, letterSpacing: 6, fontWeight: FontWeight.w700),
+      cursorColor: Colors.white,
+      keyboardType: TextInputType.number,
+      autofillHints: const [AutofillHints.oneTimeCode],
+      inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(8)],
+      onChanged: onChanged,
+      decoration: InputDecoration(
+        labelText: 'Code',
+        labelStyle: const TextStyle(color: Colors.white70, fontSize: 16, letterSpacing: 0),
+        focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.white)),
+        errorText: errorText,
+        errorMaxLines: 3,
+        errorStyle: authErrorStyle,
+        errorBorder: authErrorUnderline,
+        focusedErrorBorder: authErrorUnderline,
       ),
     );
   }
