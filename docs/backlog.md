@@ -13,27 +13,12 @@ than a gap, move it to §3 instead of deleting it.
 
 Last swept: 2026-08-22, after Phase 14B. Phase 39 updated 1.12 and 1.17 and
 added 1.21-1.24 (2026-10-14). Phase 40 shipped 1.24 (invite_to_party) and
-added 1.25-1.29.
+added 1.25-1.29. Phase 44 shipped 1.1 (Remove photo) and 1.32 (names in the
+export), raised 1.38 to high priority, and added 1.39 (2026-10-21).
 
 ---
 
 ## 1. Open gaps
-
-### 1.1 An avatar can be replaced but never removed
-
-`ProfileEditScreen` holds `_pendingAvatar`, and its own comment is explicit:
-`null` means *"not changing the avatar"*, which is a different thing from
-*"no avatar"* — **"this screen offers no way to express the second,
-deliberately."**
-
-*Why it is still open:* the deliberate part was scope, not design. Removal needs
-a third state in the picker and a `ProfileRepository` path that deletes the
-storage object rather than replacing it — and deleting a storage object is
-gotcha 7 territory (`delete from storage.objects` does not delete the bytes),
-so it is a real piece of work rather than a null assignment.
-
-*What it costs to leave:* a user who uploads the wrong photo cannot undo it,
-only overwrite it. That is a support request, not a crash.
 
 ### 1.2 The map's time-filter chips are decorative
 
@@ -163,8 +148,9 @@ for under-15s (the DOB is now stored, so the last is implementable).
 
 Phase 39 (`20261014113214`) added replacement: a fresh `{party_id}/{uuid}` key
 per upload, `confirm_party_cover_replacement`, and `party-cover/cleanup`
-deleting what nothing points at. Same shape as 1.1, and now the same gap:
-there is no "no cover" choice in the edit form.
+deleting what nothing points at. The avatar had the same gap until Phase 44
+gave it "Remove photo" (null the column, delete the object, `avatar-sweep` as
+the net); covers still have no "no cover" choice in the edit form.
 
 *Why it is still open:* removal is one more branch of the edit form's cover
 choice, and it lands naturally with the preset covers (1.21), which need the
@@ -469,17 +455,6 @@ It has to cover, at least:
 and own it. The text above is a checklist of what the schema actually does, not
 the policy.
 
-### 1.32 First and last name are missing from the account export
-
-`AuthService.saveNames` writes `first_name`/`last_name` into the auth user
-metadata (the username screen). `export_account_data` reads only `public`
-tables, so the export has neither, which makes it an incomplete Art. 20
-response. They are erased with the auth user, so erasure is not affected.
-
-*Fix:* either move the names into an owner-read-only table, as Phase 41 did for
-gender, or read `auth.users.raw_user_meta_data` inside the export (it is
-definer, so it can).
-
 ### 1.33 Descriptions written before Phase 42 may contain an address
 
 Until Phase 42 the host wizard joined the typed address onto the front of
@@ -556,7 +531,9 @@ and its assertion in `test/account_test.dart` with it.
 *What it costs to leave:* a string like `deleted_3f2a…` in a chat reads as a
 bug, though it reveals nothing about who wrote it.
 
-### 1.38 Notification settings and consents are readable by everyone
+### 1.38 HIGH PRIORITY — next phase (45): notification settings and consents are readable by everyone
+
+**Decided 2026-10-21: this is the phase after Phase 44.**
 
 `profiles` has a table-wide SELECT for `anon` and `authenticated`, filtered only
 by blocks, and 14_profile_and_party_media's regression guard keeps it that way
@@ -580,7 +557,66 @@ exists to stop.
 
 *What it costs to leave:* no content leaks, but quiet hours plus a time zone is
 a daily routine, and "has location on" marks who the proximity engine can
-reach.
+reach. Readable signed out, so it needs no account to collect.
+
+### 1.39 Hosted deployment: phases 39-44 go out together, with an app update
+
+The hosted project is behind local. Phases 39-44 have to be deployed together
+**and with an app update**: since Phase 44 (`20261021094726`) the client can no
+longer PATCH `username`, `onboarding_completed_at` or the consents, so an
+older build cannot complete onboarding or change a consent against this
+schema, and its `saveNames` writes names nobody reads. Ship the migrations and
+the store build in the same window, and expect sign-ups on old builds to fail
+until users update.
+
+**Before applying, run both checks against the hosted database.**
+
+1. *Names the copy cannot take.* `20261021094725` copies first/last name out of
+   the auth metadata and then strips it, and **fails the apply** if any account
+   holds a name the copy would lose. Anything this returns has to be decided
+   (fixed by hand, or accepted as lost) before deploying:
+
+   ```sql
+   select u.id,
+          u.raw_user_meta_data ->> 'first_name' as first_name,
+          u.raw_user_meta_data ->> 'last_name'  as last_name
+   from auth.users u
+   where (u.raw_user_meta_data ? 'first_name' or u.raw_user_meta_data ? 'last_name')
+     and nullif(btrim(coalesce(u.raw_user_meta_data ->> 'first_name', '')
+                      || coalesce(u.raw_user_meta_data ->> 'last_name', '')), '') is not null
+     and not (
+       coalesce(btrim(u.raw_user_meta_data ->> 'first_name'), '') <> ''
+       and char_length(btrim(u.raw_user_meta_data ->> 'first_name')) <= 50
+       and btrim(u.raw_user_meta_data ->> 'first_name') !~ '[[:cntrl:]]'
+       and coalesce(btrim(u.raw_user_meta_data ->> 'last_name'), '') <> ''
+       and char_length(btrim(u.raw_user_meta_data ->> 'last_name')) <= 50
+       and btrim(u.raw_user_meta_data ->> 'last_name') !~ '[[:cntrl:]]'
+     );
+   ```
+
+   Zero rows means the migration applies. The rule it mirrors is
+   `person_name_is_valid`: both halves present, trimmed, 1-50 characters, no
+   control characters.
+
+2. *Usernames below the new rule.* Not a blocker: these accounts keep their
+   name, the edit screen tells them it does not meet the rule, and the rule
+   binds only the next name they choose. The count says how many will see that
+   notice (placeholders and tombstones excluded):
+
+   ```sql
+   select count(*) from public.profiles
+   where onboarding_completed_at is not null and erased_at is null
+     and not (username ~ '^[A-Za-z0-9_.]{3,30}$'
+              and username !~ '^\.|\.$|\.\.'
+              and lower(username) not like 'deleted\_%');
+   ```
+
+After applying, the vault secrets that `story-cleanup` and `party-cover-sweep`
+use must exist on hosted too, or `avatar-sweep` fails every hour (P0002 from
+`story_cleanup_config`).
+
+*Why it is still open:* deploying is a release decision, and the hosted project
+has not been brought forward since well before Phase 39.
 
 ---
 
