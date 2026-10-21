@@ -71,6 +71,16 @@ class Basemap {
 
   Future<bool>? _inFlight;
 
+  /// True once a tile has failed for want of a network, until [recover]
+  /// reaches the tile server again. flutter_map does not retry a failed tile
+  /// that stays on screen, so without this an offline cold start would keep
+  /// its blank tiles after the connection came back.
+  ValueListenable<bool> get tilesFailing => _tilesFailing;
+  final _tilesFailing = ValueNotifier(false);
+
+  /// What [recover] asks: the TileJSON, or the style when it is remote.
+  String? _probeUrl;
+
   /// Loads the style unless it already is. True once it is loaded.
   ///
   /// Concurrent callers share one load. Never throws: a failure is logged and
@@ -86,9 +96,37 @@ class Basemap {
     }).whenComplete(() => _inFlight = null);
   }
 
+  /// Whether the tile server answers again. Clears [tilesFailing] when it
+  /// does; never throws.
+  Future<bool> recover() async {
+    final url = _probeUrl ?? styleUri;
+    try {
+      final response = await _client.get(Uri.parse(url), headers: _headers).timeout(timeout);
+      if (response.statusCode != 200) return false;
+      _tilesFailing.value = false;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// [provider], raising [tilesFailing] on a failure a network would fix.
+  @visibleForTesting
+  VectorTileProvider watched(VectorTileProvider provider) =>
+      _WatchedTileProvider(provider, () => _tilesFailing.value = true);
+
   Future<Style> _load() async {
     if (styleUri.startsWith('https://')) {
-      return StyleReader(uri: styleUri, httpHeaders: _headers).read();
+      final style = await StyleReader(uri: styleUri, httpHeaders: _headers).read();
+      _probeUrl = styleUri;
+      return Style(
+        name: style.name,
+        theme: style.theme,
+        sprites: style.sprites,
+        providers: TileProviders({
+          for (final MapEntry(:key, :value) in style.providers.tileProviderBySource.entries) key: watched(value),
+        }),
+      );
     }
     final text = await _bundle.loadString(styleUri);
     final json = jsonDecode(text) as Map<String, dynamic>;
@@ -117,17 +155,18 @@ class Basemap {
   /// into the style; the TileJSON is what names the current release.
   Future<VectorTileProvider> _vectorSource(Map<String, dynamic> source) async {
     final url = source['url'];
+    if (url is String) _probeUrl ??= url;
     final tileJson = url is String ? await _tileJson(url) : source;
     final tiles = tileJson['tiles'];
     if (tiles is! List || tiles.isEmpty || tiles.first is! String) {
       throw FormatException('vector source has no tiles', url);
     }
-    return NetworkVectorTileProvider(
+    return watched(NetworkVectorTileProvider(
       urlTemplate: tiles.first as String,
       minimumZoom: (tileJson['minzoom'] as num?)?.toInt() ?? 0,
       maximumZoom: (tileJson['maxzoom'] as num?)?.toInt() ?? 14,
       httpHeaders: _headers,
-    );
+    ));
   }
 
   /// The TileJSON at [url], remembered across launches. Offline, the last one
@@ -179,6 +218,37 @@ class Basemap {
   }
 }
 
+/// [delegate], reporting the failures a returning network would fix — the
+/// ones vector_map_tiles itself marks retryable — and nothing else.
+class _WatchedTileProvider extends VectorTileProvider {
+  _WatchedTileProvider(this.delegate, this.onNetworkFailure);
+
+  final VectorTileProvider delegate;
+  final VoidCallback onNetworkFailure;
+
+  @override
+  Future<Uint8List> provide(TileIdentity tile) async {
+    try {
+      return await delegate.provide(tile);
+    } on ProviderException catch (e) {
+      if (e.retryable == Retryable.retry) onNetworkFailure();
+      rethrow;
+    }
+  }
+
+  @override
+  int get maximumZoom => delegate.maximumZoom;
+
+  @override
+  int get minimumZoom => delegate.minimumZoom;
+
+  @override
+  TileOffset get tileOffset => delegate.tileOffset;
+
+  @override
+  TileProviderType get type => delegate.type;
+}
+
 /// The basemap layer, for the first slot of a `FlutterMap`'s children so the
 /// markers and overlays after it draw on top.
 ///
@@ -187,6 +257,9 @@ class Basemap {
 /// (5s, 10s, 20s, then every 60s), straight away when the app comes back to
 /// the foreground, and again whenever a map opens — which together are what
 /// "retry when connectivity returns" amounts to without a connectivity plugin.
+/// Tiles that failed for want of a network get the same loop: once the tile
+/// server answers again the layer is rebuilt, which re-requests them (what was
+/// already drawn comes back from the disk cache).
 class MpBasemap extends StatefulWidget {
   const MpBasemap({super.key, this.basemap});
 
@@ -202,25 +275,53 @@ class _MpBasemapState extends State<MpBasemap> with WidgetsBindingObserver {
   Timer? _retry;
   int _failures = 0;
 
+  /// Bumped to rebuild the layer once failed tiles can load again.
+  int _generation = 0;
+  bool _running = false;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _basemap.tilesFailing.addListener(_onTilesFailing);
     _load();
   }
 
+  bool get _healthy => _basemap.style.value != null && !_basemap.tilesFailing.value;
+
+  /// One pass of the retry loop: load the style if it is missing, or probe the
+  /// tile server if tiles are failing; schedule the next pass if still unwell.
   Future<void> _load() async {
+    if (_running) return;
+    _running = true;
     _retry?.cancel();
-    final loaded = await _basemap.ensureLoaded();
-    if (!mounted || loaded) return;
+    _retry = null;
+    var ok = await _basemap.ensureLoaded();
+    if (ok && _basemap.tilesFailing.value) {
+      ok = await _basemap.recover();
+      if (ok && mounted) setState(() => _generation++);
+    }
+    _running = false;
+    if (!mounted) return;
+    if (ok) {
+      _failures = 0;
+      return;
+    }
     _failures++;
     final seconds = math.min(60, 5 * math.pow(2, _failures - 1).toInt());
     _retry = Timer(Duration(seconds: seconds), _load);
   }
 
+  /// A pass already running or scheduled will see the failure itself.
+  void _onTilesFailing() {
+    if (_basemap.tilesFailing.value && _retry == null && !_running) {
+      _retry = Timer(const Duration(seconds: 5), _load);
+    }
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && _basemap.style.value == null) {
+    if (state == AppLifecycleState.resumed && !_healthy) {
       _failures = 0;
       _load();
     }
@@ -229,6 +330,7 @@ class _MpBasemapState extends State<MpBasemap> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _basemap.tilesFailing.removeListener(_onTilesFailing);
     _retry?.cancel();
     super.dispose();
   }
@@ -240,6 +342,7 @@ class _MpBasemapState extends State<MpBasemap> with WidgetsBindingObserver {
       builder: (context, style, _) {
         if (style == null) return const SizedBox.shrink();
         return VectorTileLayer(
+          key: ValueKey(_generation),
           theme: style.theme,
           sprites: style.sprites,
           tileProviders: style.providers,

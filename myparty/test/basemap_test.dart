@@ -125,7 +125,7 @@ void main() {
       final style = basemap.style.value!;
       expect(style.theme.id, 'myparty-dark');
       expect(style.theme.version, Basemap.fingerprint(await rootBundle.loadString(kBasemapStyle)));
-      final provider = style.providers.get('openmaptiles') as NetworkVectorTileProvider;
+      final provider = style.providers.get('openmaptiles');
       expect(provider.maximumZoom, 14);
       expect(provider.minimumZoom, 0);
     });
@@ -175,6 +175,31 @@ void main() {
       expect(await notFound.ensureLoaded(), isFalse);
     });
 
+    test('a tile lost to the network is flagged until the tile server answers again', () async {
+      var online = true;
+      final basemap = Basemap(client: MockClient((_) async {
+        if (!online) throw http.ClientException('offline');
+        return http.Response(_tileJson, 200);
+      }));
+      expect(await basemap.ensureLoaded(), isTrue);
+
+      // A 404 for a tile that does not exist is not something a network fixes.
+      final missing = basemap.watched(_FailingProvider(Retryable.none));
+      await expectLater(missing.provide(TileIdentity(14, 1, 1)), throwsA(isA<ProviderException>()));
+      expect(basemap.tilesFailing.value, isFalse);
+
+      final offline = basemap.watched(_FailingProvider(Retryable.retry));
+      await expectLater(offline.provide(TileIdentity(14, 1, 1)), throwsA(isA<ProviderException>()));
+      expect(basemap.tilesFailing.value, isTrue);
+
+      online = false;
+      expect(await basemap.recover(), isFalse);
+      expect(basemap.tilesFailing.value, isTrue);
+      online = true;
+      expect(await basemap.recover(), isTrue);
+      expect(basemap.tilesFailing.value, isFalse);
+    });
+
     test('the fingerprint moves with any edit to the style', () {
       expect(Basemap.fingerprint('{"a":1}'), Basemap.fingerprint('{"a":1}'));
       expect(Basemap.fingerprint('{"a":1}'), isNot(Basemap.fingerprint('{"a":2}')));
@@ -213,6 +238,24 @@ void main() {
     await tester.pump(const Duration(minutes: 5));
     expect(requests, 3);
   });
+}
+
+class _FailingProvider extends VectorTileProvider {
+  _FailingProvider(this.retryable);
+  final Retryable retryable;
+
+  @override
+  Future<Uint8List> provide(TileIdentity tile) =>
+      Future.error(ProviderException(message: 'no tile', retryable: retryable));
+
+  @override
+  int get maximumZoom => 14;
+
+  @override
+  int get minimumZoom => 0;
+
+  @override
+  TileOffset get tileOffset => TileOffset.DEFAULT;
 }
 
 /// The style's text without the asset machinery, whose loads never finish
