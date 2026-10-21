@@ -28,7 +28,7 @@
 -- aaaa...0002 public (host 1111).
 begin;
 set search_path to public, extensions;
-select plan(114);
+select plan(123);
 
 create temp table private_cols (c text primary key) on commit drop;
 insert into private_cols values
@@ -323,6 +323,82 @@ select isnt_empty(
 select tests.authenticate_as('33333333-3333-3333-3333-333333333333');
 select isnt((select deleted_at from public.get_my_settings()), null,
   'the account scheduled for deletion reads its own deleted_at (PendingDeletionScreen)');
+
+
+-- ============================================================
+-- 4b. The boolean helpers (20261021163330).
+--
+-- A definer function a client can call, reading a private column for an id it
+-- is GIVEN, is an oracle even though it returns no column: this file's first
+-- version missed exactly that for has_location_consent, accepts_dm_from and
+-- accepts_invite_from. So, over the catalog: every such function is on this
+-- reviewed list, and each one either reads the caller's own row, answers only
+-- about the caller, or reads only deleted_at as the discoverability bit that
+-- search has always revealed. A new one fails here until somebody has looked.
+-- Trigger functions are excluded: they cannot be called directly.
+-- ============================================================
+reset role;
+
+select is(
+  array(select p.proname::text
+        from pg_proc p
+        where p.pronamespace = 'public'::regnamespace
+          and p.prosecdef
+          and p.prorettype <> 'trigger'::regtype
+          and (has_function_privilege('anon', p.oid, 'execute')
+               or has_function_privilege('authenticated', p.oid, 'execute'))
+          and exists (select 1 from private_cols c
+                      where c.c <> 'created_at' and p.prosrc ~ ('\m' || c.c || '\M'))
+        order by 1),
+  array['abandon_signup', 'accepts_dm_from', 'accepts_invite_from',
+        'can_send_direct_message', 'cancel_account_deletion', 'change_username',
+        'complete_onboarding', 'export_account_data', 'get_my_settings',
+        'has_location_consent', 'host_on_my_map', 'redeem_party_invite',
+        'request_account_deletion', 'set_location_consent', 'set_push_consent'],
+  'every client-callable definer function that reads a private column is on the reviewed list');
+
+-- host 1111 is at location_consent = true, dm_policy and invite_policy
+-- 'following' (section 3). Give them someone they follow, so that the
+-- 'following' arm can answer true for the right sender.
+insert into public.follows (follower_id, followee_id)
+values ('11111111-1111-1111-1111-111111111111', '66666666-6666-6666-6666-666666666666')
+on conflict do nothing;
+
+select tests.authenticate_as('44444444-4444-4444-4444-444444444444'); -- stranger
+
+select is(public.has_location_consent('11111111-1111-1111-1111-111111111111'), false,
+  'has_location_consent will not answer about anyone but the caller -- the host''s consent is ON');
+
+select is(public.accepts_dm_from('11111111-1111-1111-1111-111111111111', '66666666-6666-6666-6666-666666666666'), false,
+  'accepts_dm_from will not answer for a sender who is not the caller -- this pair is true, and would tell ''following'' from ''nobody''');
+
+select is(public.accepts_invite_from('11111111-1111-1111-1111-111111111111', '66666666-6666-6666-6666-666666666666'), false,
+  'accepts_invite_from likewise, for invite_policy');
+
+select tests.authenticate_as('66666666-6666-6666-6666-666666666666'); -- second_host, followed by the host
+
+select is(public.accepts_dm_from('11111111-1111-1111-1111-111111111111', '66666666-6666-6666-6666-666666666666'), true,
+  'CONTROL: the same pair is true when the sender asks for themself');
+
+select is(public.accepts_invite_from('11111111-1111-1111-1111-111111111111', '66666666-6666-6666-6666-666666666666'), true,
+  'CONTROL: and for an invitation');
+
+select tests.authenticate_as('11111111-1111-1111-1111-111111111111'); -- host
+
+select is(public.has_location_consent('11111111-1111-1111-1111-111111111111'), true,
+  'CONTROL: has_location_consent still answers the owner -- the user_devices WITH CHECK depends on it');
+
+select tests.clear_authentication(); -- anon
+
+select throws_ok(
+  $$ select public.accepts_dm_from('11111111-1111-1111-1111-111111111111', '66666666-6666-6666-6666-666666666666') $$,
+  '42501', null,
+  'anon cannot execute accepts_dm_from (it held PUBLIC''s default)');
+
+select throws_ok(
+  $$ select public.accepts_invite_from('11111111-1111-1111-1111-111111111111', '66666666-6666-6666-6666-666666666666') $$,
+  '42501', null,
+  'nor accepts_invite_from');
 
 
 -- ============================================================

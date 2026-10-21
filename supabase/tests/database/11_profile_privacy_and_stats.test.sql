@@ -242,12 +242,18 @@ select isnt_empty(
 -- above). The reverse edge does not exist, so 1111 -- who requires nothing --
 -- is irrelevant here; what matters is that 3333 may NOT invite someone whose
 -- policy they do not satisfy. 4444 requires 'following' and follows nobody.
+--
+-- Each call is made AS its inviter: since 20261021163330 the helper answers
+-- false for any inviter other than the caller, so asked by somebody else these
+-- would pass for the wrong reason (the false case) or fail (the true case).
+select tests.authenticate_as('33333333-3333-3333-3333-333333333333');
 select is(
   public.accepts_invite_from('44444444-4444-4444-4444-444444444444', '33333333-3333-3333-3333-333333333333'),
   false,
   'the rule reads the GUESTS follow list, not the inviters -- swapping the arguments changes the answer'
 );
 
+select tests.authenticate_as('44444444-4444-4444-4444-444444444444');
 select is(
   public.accepts_invite_from('22222222-2222-2222-2222-222222222222', '44444444-4444-4444-4444-444444444444'),
   true,
@@ -257,6 +263,7 @@ select is(
 -- A guest id with no profiles row refuses. For an invitation that is the safe
 -- failure direction, and it is the opposite of the choice in_quiet_hours makes
 -- for a missing row -- see the header of 20260818175435.
+select tests.authenticate_as('11111111-1111-1111-1111-111111111111'); -- host
 select is(
   public.accepts_invite_from('99999999-9999-9999-9999-999999999999', '11111111-1111-1111-1111-111111111111'),
   false,

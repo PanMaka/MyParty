@@ -93,6 +93,9 @@ insert into allowed_grants values
   ('column', 'user_devices', 'authenticated', 'UPDATE', 'platform'),
   ('column', 'user_devices', 'authenticated', 'UPDATE', 'push_token'),
   ('function', 'abandon_signup()', 'authenticated', 'EXECUTE', null),
+  -- Phase 45: off PUBLIC's default; the policies that call them run as authenticated.
+  ('function', 'accepts_dm_from(uuid,uuid)', 'authenticated', 'EXECUTE', null),
+  ('function', 'accepts_invite_from(uuid,uuid)', 'authenticated', 'EXECUTE', null),
   ('function', 'cancel_account_deletion()', 'authenticated', 'EXECUTE', null),
   ('function', 'cancel_party(uuid)', 'authenticated', 'EXECUTE', null),
   ('function', 'clear_party_guest_removals(uuid,uuid[])', 'authenticated', 'EXECUTE', null),
