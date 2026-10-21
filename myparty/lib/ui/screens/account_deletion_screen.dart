@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../data/account_repository.dart';
 import '../../services/auth_service.dart';
+import '../../utils/english_date.dart';
+import '../../utils/share_party.dart';
 import '../theme/app_theme.dart';
 
 /// The in-app account deletion entry point.
@@ -25,11 +26,22 @@ import '../theme/app_theme.dart';
 /// interface, not decoration — a deletion screen that promises something the
 /// server does not do is worse than no screen.
 class AccountDeletionScreen extends StatefulWidget {
-  const AccountDeletionScreen({super.key, this.repository});
+  const AccountDeletionScreen({super.key, this.repository, this.auth, this.shareFile = systemShareFile, this.now});
 
   /// Injectable so widget tests can subclass [AccountRepository] without a
   /// Supabase client ever existing, exactly as [ProfileScreen] does.
   final AccountRepository? repository;
+
+  /// Injectable for the same reason: the sign-out after a deletion request
+  /// would otherwise reach for a Supabase client under `flutter test`.
+  final AuthService? auth;
+
+  /// Where the export goes. The system share sheet, which is also where
+  /// "Save to Files" lives.
+  final ShareFile shareFile;
+
+  /// The clock the export's file name is stamped with.
+  final DateTime Function()? now;
 
   @override
   State<AccountDeletionScreen> createState() => _AccountDeletionScreenState();
@@ -37,6 +49,7 @@ class AccountDeletionScreen extends StatefulWidget {
 
 class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
   late final AccountRepository _accounts = widget.repository ?? AccountRepository();
+  late final AuthService _auth = widget.auth ?? AuthService();
 
   bool _busy = false;
   DateTime? _scheduledAt;
@@ -68,13 +81,21 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
   /// it. Bundling them would make the export feel like part of the deletion
   /// flow, and it is the opposite — the one action here that a user should be
   /// able to take without consequence, as often as they like.
+  ///
+  /// A file, not the clipboard (Phase 43). The clipboard was readable by every
+  /// app that asked, held the whole account as one paste, and on a large
+  /// account was not something anyone could usefully paste anywhere.
   Future<void> _export() async {
     if (_busy) return;
     setState(() => _busy = true);
     try {
       final json = await _accounts.exportData();
-      await Clipboard.setData(ClipboardData(text: json));
-      _toast('Your data was copied (${json.length} characters)');
+      final day = (widget.now?.call() ?? DateTime.now()).toIso8601String().substring(0, 10);
+      await widget.shareFile(
+        fileName: 'myparty-data-$day.json',
+        contents: json,
+        mimeType: 'application/json',
+      );
     } catch (error) {
       _toast('Export failed: $error');
     } finally {
@@ -88,9 +109,10 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
       builder: (dialogContext) => AlertDialog(
         backgroundColor: AppColors.sheet,
         title: const Text('Delete account?'),
-        content: const Text(
-          'Your account will be permanently deleted in 30 days. '
-          'Until then, you can restore it by signing in again.',
+        content: Text(
+          'You will be signed out, and your account will be permanently deleted on '
+          '${formatCalendarDateEn(AccountRepository.erasureDueAt(DateTime.now()))}. '
+          'Until then, sign in and choose Restore to keep it.',
         ),
         actions: [
           TextButton(
@@ -116,7 +138,7 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
       // session would show them an app that has quietly stopped working. The
       // way back in is a sign-in, which is also the way the account is
       // recovered — one action, not two.
-      await AuthService().signOut();
+      await _auth.signOut();
     } catch (error) {
       _toast('Deletion failed: $error');
       if (mounted) setState(() => _busy = false);
@@ -173,7 +195,8 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
                 Text('Export data', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
                 SizedBox(height: 2),
                 Text(
-                  'Your profile, parties, RSVPs, posts and messages, as JSON.',
+                  'Your profile, parties, RSVPs, posts and messages, as a JSON file '
+                  'you can save or share.',
                   style: TextStyle(fontSize: 11, height: 1.4),
                 ),
               ],
@@ -195,11 +218,12 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: const [
-              _Fact('Your account is permanently deleted after 30 days.'),
-              _Fact('Until then, you can restore it by signing in again.'),
-              _Fact('Messages you have sent stay in their chats, shown as “Deleted user”.'),
-              _Fact('Your location and notifications are deleted immediately, not in 30 days.'),
-              _Fact('Parties that have not started yet are cancelled.', last: true),
+              _Fact('You are signed out, and your account is permanently deleted after 30 days.'),
+              _Fact('Until then, you can sign in and choose Restore to keep it.'),
+              _Fact('Messages and comments you have written stay where they are, under an anonymous name instead of your username.'),
+              _Fact('Your location and notifications are deleted and turned off immediately, not in 30 days.'),
+              _Fact('Parties you are hosting that have not started yet are cancelled.'),
+              _Fact('Restoring does not bring cancelled parties back or turn notifications on again.', last: true),
             ],
           ),
         ),
@@ -217,7 +241,7 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
   // The grace period.
   // ----------------------------------------------------------------
   List<Widget> _pendingSections() {
-    final erasesAt = _scheduledAt!.add(const Duration(days: 30));
+    final erasesAt = AccountRepository.erasureDueAt(_scheduledAt!);
     final daysLeft = erasesAt.difference(DateTime.now()).inDays;
 
     return [
@@ -234,7 +258,8 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
               const SizedBox(height: 6),
               Text(
                 daysLeft > 0
-                    ? '$daysLeft ${daysLeft == 1 ? 'day' : 'days'} left. Until then, you can restore it.'
+                    ? 'Scheduled for ${formatCalendarDateEn(erasesAt)}: $daysLeft ${daysLeft == 1 ? 'day' : 'days'} left. '
+                        'Until then, you can restore it.'
                     : 'Deletion will be completed soon.',
                 style: TextStyle(fontSize: 12, height: 1.5, color: AppColors.textAlpha(0.6)),
               ),

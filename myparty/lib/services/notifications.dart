@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/widgets.dart';
 
 import 'location_reporter.dart';
 import 'push_service.dart';
+import 'timezone_sync.dart';
 
 /// App-scoped wiring for the two 7c services, so that `main`, `AuthGate` and
 /// `AuthService` all talk to the same [PushService] instance.
@@ -26,6 +29,11 @@ class Notifications {
     pushToken: () => push.token,
     platform: PushService.platformName,
   );
+
+  /// Phase 43. Lives here because `notification_tz` is what quiet hours are
+  /// read in, and because this is the one place that runs on every sign-in and
+  /// every sign-out.
+  static final TimezoneSync timezone = TimezoneSync();
 
   static bool _observerAdded = false;
 
@@ -51,7 +59,15 @@ class Notifications {
   /// prompt fired at app start, with no context for what it is for, is the
   /// single most reliable way to be permanently denied — and on iOS it can only
   /// be asked once. The settings screen asks when the user goes looking for it.
-  static Future<void> onSignedIn({required bool pushConsent, required bool locationConsent}) async {
+  static Future<void> onSignedIn({
+    required bool pushConsent,
+    required bool locationConsent,
+    required String? notificationTz,
+  }) async {
+    // Not awaited: the zone write is independent of push and location, and a
+    // slow platform call must not hold up registering the device.
+    unawaited(timezone.onSignedIn(storedZone: notificationTz));
+
     if (!_observerAdded) {
       // Re-checks the OS permission on every resume, which is the only way to
       // notice a revocation — the OS never tells the app.
@@ -70,6 +86,7 @@ class Notifications {
   /// register, and until FCM rotates the token the worker keeps sending the
   /// previous user's notifications to a phone somebody else is now holding.
   static Future<void> onSignOut() async {
+    timezone.onSignOut();
     await location.stop();
     await push.unregister();
   }

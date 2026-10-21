@@ -19,6 +19,16 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 class AccountRepository {
   AccountRepository({SupabaseClient? client}) : _clientOverride = client;
 
+  /// `public.account_erasure_grace()`. Mirrored here only to print a
+  /// date: the erasure sweep reads the server's copy, and nothing on the
+  /// client decides when an account is erased.
+  static const gracePeriod = Duration(days: 30);
+
+  /// When an account whose deletion was requested at [requestedAt] is due to
+  /// be erased. The sweep runs once a day (03:30 UTC), so the erasure itself
+  /// lands on the first run after this moment.
+  static DateTime erasureDueAt(DateTime requestedAt) => requestedAt.add(gracePeriod);
+
   final SupabaseClient? _clientOverride;
 
   /// Resolved lazily for the same reason [ProfileRepository] does it: a test

@@ -965,9 +965,14 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
       button: true,
       label: 'Settings',
       child: GestureDetector(
-        onTap: () => Navigator.of(
-          context,
-        ).push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen())),
+        // Re-reads on return, like [_openEditor]: Settings has its own door to
+        // the editor since Phase 43.
+        onTap: () async {
+          await Navigator.of(
+            context,
+          ).push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen()));
+          if (mounted) await _load();
+        },
         child: Container(
           width: 32,
           height: 32,

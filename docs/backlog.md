@@ -512,6 +512,31 @@ the chosen address permanently is within it. If not, the options are MapTiler
 tiles (a tile switch was considered and declined in Phase 42) or another
 geocoder.
 
+### 1.35 "Who sees which parties I go to" has no setting
+
+Settings carried this row as "Coming soon" from the design prototype until
+Phase 43 removed it. There is no column behind it: today the `rsvps` SELECT
+policy alone decides who sees where someone is going, and `get_profile_stats`
+answers from that same policy rather than inventing a second rule.
+
+*Why it is still open:* it is an RLS phase, not a settings row. It needs a
+`profiles` column, a tier in the `rsvps` SELECT policy (with gotcha 14's
+direction question answered on purpose), `get_profile_stats` and every
+attendee list re-checked against it, and pgTAP both ways.
+
+*What it costs to leave:* nothing is promised any more. A user who wants to
+hide their RSVPs can't, and the private-party note in Settings is the only
+statement of who sees what.
+
+### 1.36 `support@mypartycorp.com` has to exist before launch
+
+Settings → Contact support (Phase 43) opens a mailto to `supportEmail`
+(`lib/utils/app_info.dart`). Nothing in this repo can check that the mailbox
+exists or that anyone reads it.
+
+*To do:* create it (or change the constant), and route it to whoever answers
+users. App Store and Play both expect a working support contact.
+
 ---
 
 ## 2. Costed: should the map adopt `party_is_past()`?

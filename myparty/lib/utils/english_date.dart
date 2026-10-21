@@ -53,3 +53,10 @@ String formatPostAgeEn(DateTime createdAt) {
   final local = createdAt.toLocal();
   return '${local.day} ${_monthAbbr[local.month - 1]}';
 }
+
+/// "20 Nov 2026": a calendar day with its year, for a date someone plans
+/// around rather than a party they attend.
+String formatCalendarDateEn(DateTime date) {
+  final local = date.toLocal();
+  return '${local.day} ${_monthAbbr[local.month - 1]} ${local.year}';
+}

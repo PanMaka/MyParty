@@ -1,33 +1,43 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../data/profile_repository.dart';
 import '../../data/social_repository.dart';
 import '../../models/gender.dart';
 import '../../models/profile_privacy.dart';
 import '../../services/auth_service.dart';
+import '../../utils/app_info.dart';
 import '../theme/app_theme.dart';
 import 'account_deletion_screen.dart';
 import 'blocked_accounts_screen.dart';
 import 'notification_settings_screen.dart';
+import 'profile_edit_screen.dart';
 
-/// Everything that used to hang off the bottom of the profile tab.
+Future<bool> _launchExternally(Uri uri) => launchUrl(uri, mode: LaunchMode.externalApplication);
+
+/// The owner's controls, behind the gear in the profile header.
 ///
-/// The profile screen was three screens stacked: an identity header, the
-/// owner's party list, and — below the fold, reachable only by scrolling past
-/// content that belongs to a visitor's reading of the page — privacy,
-/// notifications, account deletion and sign out. Those four are the owner's
-/// controls, they are never part of what a visitor sees, and burying them under
-/// the party list meant the two most consequential rows in the app (location
-/// consent and account deletion) were the two hardest to reach. They live
-/// behind the gear in the profile header now.
+/// Five sections since Phase 43, in the order someone looks for them: ACCOUNT
+/// (who you are signed in as, your data, deletion), PROFILE (what other people
+/// see of you), PRIVACY & SAFETY (who may reach you), NOTIFICATIONS and
+/// SUPPORT & LEGAL. Sign out sits below all of them.
 ///
-/// The sections keep the grouping they had, and the grouping is still not
-/// cosmetic: NOTIFICATIONS is separate from PRIVACY because two of its rows
-/// are consent — a legal state with a deletion consequence — rather than
-/// preferences, and ACCOUNT is separate from both because everything above
-/// it is reversible and it is not.
+/// The grouping is still not cosmetic. Location consent stays on the
+/// notifications screen, under NOTIFICATIONS here, rather than moving to
+/// PRIVACY & SAFETY: that screen puts the two consents first and the
+/// preferences they gate below them, dimmed while either is off. Moving the
+/// location switch here would leave dimmed sliders there with the switch that
+/// enables them one screen away, which breaks the consent-before-preferences
+/// order the engine reads them in.
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key, this.repository, this.social});
+  const SettingsScreen({
+    super.key,
+    this.repository,
+    this.social,
+    this.auth,
+    this.appVersion = platformAppVersion,
+    this.openUrl = _launchExternally,
+  });
 
   /// Injectable so widget tests can subclass [ProfileRepository] without a
   /// Supabase client ever existing, the same way `ProfileScreen` does.
@@ -36,12 +46,36 @@ class SettingsScreen extends StatefulWidget {
   /// Handed to [BlockedAccountsScreen]; injectable for the same reason.
   final SocialRepository? social;
 
+  /// The email row and sign-out. Injectable for the same reason.
+  final AuthService? auth;
+
+  final AppVersion appVersion;
+
+  /// Opens the support mailto. Returns false when nothing on the phone can
+  /// handle it, which is common on a handset with no mail app set up.
+  final Future<bool> Function(Uri uri) openUrl;
+
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
   late final ProfileRepository _profiles = widget.repository ?? ProfileRepository();
+  late final AuthService _auth = widget.auth ?? AuthService();
+
+  /// Read once, synchronously, from the session. Null (no session, or no
+  /// Supabase under `flutter test`) shows a dash rather than an error: the row
+  /// is a label, not a control.
+  late final String? _email = () {
+    try {
+      return _auth.currentEmail;
+    } catch (_) {
+      return null;
+    }
+  }();
+
+  /// "1.0.0 (1)". Null until the platform answers, or if it never does.
+  String? _version;
 
   ProfilePrivacy? _privacy;
   bool _busy = false;
@@ -63,6 +97,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     _load();
+    _loadVersion();
   }
 
   /// Self-only by construction: `fetchPrivacy` takes no user id and reads the
@@ -90,6 +125,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _loadVersion() async {
+    try {
+      final version = await widget.appVersion();
+      if (mounted) setState(() => _version = version);
+    } catch (_) {
+      // Left as a dash. A version that will not load is not worth an error.
+    }
+  }
+
   /// Wraps every privacy write, exactly as [NotificationSettingsScreen] does:
   /// two taps cannot race each other into the database, and a rejected write
   /// reloads rather than leaving a row showing a state the server never
@@ -104,11 +148,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await action();
       await _load();
     } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Something went wrong: $error'), behavior: SnackBarBehavior.floating),
-        );
-      }
+      if (mounted) _snack('Something went wrong: $error');
       await _load();
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -120,10 +160,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// worst possible guess to render under a heading someone opened to check.
   String get _pending => _loadFailed ? 'Did not load' : '…';
 
-  void _comingSoon() {
+  void _snack(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Coming soon'), behavior: SnackBarBehavior.floating),
+      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
     );
+  }
+
+  void _push(Widget screen) => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => screen));
+
+  /// A confirmation, because the row sits at the bottom of a scrolling list
+  /// where a stray tap is easy, and signing back in means retyping a password.
+  Future<void> _confirmSignOut() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.sheet,
+        title: const Text('Sign out?'),
+        content: const Text('You can sign back in with your email and password.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Sign out'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await _auth.signOut();
+    } catch (error) {
+      if (mounted) _snack('Could not sign out: $error');
+    }
+  }
+
+  Future<void> _contactSupport() async {
+    bool opened;
+    try {
+      opened = await widget.openUrl(supportMailUri(appVersion: _version));
+    } catch (_) {
+      opened = false;
+    }
+    // No mail app is an ordinary state, not an error: say where to write.
+    if (!opened && mounted) _snack('No email app found. Write to us at $supportEmail');
   }
 
   @override
@@ -141,20 +223,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
         children: [
-          _section('PRIVACY'),
+          // App Store Review Guideline 5.1.1(v) requires an in-app deletion
+          // path wherever an account can be created, and requires it to
+          // actually start the deletion rather than link to support.
+          _section('ACCOUNT'),
           _card([
-            // Still unwired, and deliberately so: there is no column behind it
-            // yet. It is also the reason the profile header has no "parties
-            // this year" tile — until this setting exists, the rsvps policy IS the
-            // answer to "who sees where I go", and get_profile_stats does not
-            // invent a different one.
+            _settingsRow('Email', _email ?? '—'),
+            _divider(),
             _settingsRow(
-              'Who sees which parties I go to',
-              'Coming soon',
+              'Data & deletion',
+              'Export your data, delete your account',
               chevron: true,
-              onTap: _comingSoon,
+              onTap: () => _push(const AccountDeletionScreen()),
+            ),
+          ]),
+
+          const SizedBox(height: 22),
+          _section('PROFILE'),
+          _card([
+            _settingsRow(
+              'Edit profile',
+              'Photo and bio',
+              chevron: true,
+              onTap: () => _push(ProfileEditScreen(repository: widget.repository)),
             ),
             _divider(),
+            _settingsRow(
+              'Gender',
+              _gender?.label ?? (_genderLoadFailed ? 'Did not load' : '…'),
+              chevron: true,
+              onTap: _gender == null ? null : _pickGender,
+            ),
+          ]),
+          // Directly under the card, whose last row is the one it is about.
+          _note(genderVisibilityNote),
+
+          const SizedBox(height: 22),
+          _section('PRIVACY & SAFETY'),
+          _card([
             // Was a two-state switch on MpStore.mapVisible, which no server
             // ever read. Now three tiers on profiles.map_visibility, enforced
             // inside get_parties_near_user.
@@ -183,9 +289,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               'Blocked accounts',
               'People you have blocked',
               chevron: true,
-              onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                builder: (_) => BlockedAccountsScreen(social: widget.social),
-              )),
+              onTap: () => _push(BlockedAccountsScreen(social: widget.social)),
             ),
           ]),
           _note(
@@ -194,52 +298,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
 
           const SizedBox(height: 22),
-          // Its own section rather than a fifth PRIVACY row: the note under it
-          // is about this one answer, and has to sit directly beneath it.
-          _section('ABOUT YOU'),
-          _card([
-            _settingsRow(
-              'Gender',
-              _gender?.label ?? (_genderLoadFailed ? 'Did not load' : '…'),
-              chevron: true,
-              onTap: _gender == null ? null : _pickGender,
-            ),
-          ]),
-          _note(genderVisibilityNote),
-
-          const SizedBox(height: 22),
           _section('NOTIFICATIONS'),
           _card([
             _settingsRow(
               'Notifications & location',
               'Parties near you, quiet hours, distance',
               chevron: true,
-              onTap: () => Navigator.of(
-                context,
-              ).push(MaterialPageRoute<void>(builder: (_) => const NotificationSettingsScreen())),
+              onTap: () => _push(const NotificationSettingsScreen()),
             ),
           ]),
 
           const SizedBox(height: 22),
-          // App Store Review Guideline 5.1.1(v) requires an in-app deletion
-          // path wherever an account can be created, and requires it to
-          // actually start the deletion rather than link to support. Kept
-          // directly above sign-out, which is where a user looks for it.
-          _section('ACCOUNT'),
+          // No privacy policy or terms rows yet: there is no document to link
+          // to (docs/backlog.md 1.30), and a row that leads nowhere is the
+          // "Coming soon" this phase removed.
+          _section('SUPPORT & LEGAL'),
           _card([
+            _settingsRow('Contact support', supportEmail, chevron: true, onTap: _contactSupport),
+            _divider(),
             _settingsRow(
-              'Data & deletion',
-              'Export your data, delete your account',
+              'Open-source licences',
+              'The software MyParty is built with',
               chevron: true,
-              onTap: () => Navigator.of(
-                context,
-              ).push(MaterialPageRoute<void>(builder: (_) => const AccountDeletionScreen())),
+              onTap: () => showLicensePage(context: context, applicationName: 'MyParty', applicationVersion: _version),
             ),
+            _divider(),
+            _settingsRow('App version', _version ?? '—'),
           ]),
 
           const SizedBox(height: 22),
-          GestureDetector(
-            onTap: () => AuthService().signOut(),
+          InkWell(
+            onTap: _confirmSignOut,
+            borderRadius: BorderRadius.circular(15),
             child: Container(
               padding: const EdgeInsets.all(13),
               decoration: BoxDecoration(
