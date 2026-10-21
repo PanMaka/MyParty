@@ -537,6 +537,25 @@ exists or that anyone reads it.
 *To do:* create it (or change the constant), and route it to whoever answers
 users. App Store and Play both expect a working support contact.
 
+### 1.37 An erased account shows as `deleted_…`, not "Deleted user"
+
+`complete_account_erasure` scrubs the username to an opaque
+`deleted_<uuid hex>` handle, and the client prints it as it would any other
+username: on chat and DM lines, comments, post headers, the Direct list and
+anywhere else a name appears. `isErasedHandle` (`lib/ui/widgets/user_link.dart`)
+already recognises the handle, but only to stop the name opening a profile.
+
+*Fix:* render "Deleted user" wherever `isErasedHandle` is true, ideally in one
+place (a shared display-name helper used by `UserLink` and every surface that
+prints `@username`), with no avatar link. The handle itself stays as it is on
+the server: it is what keeps the tombstone row unique and visible to the
+`profiles` policy. When this ships, change the deletion screen's fact
+("under an anonymous name instead of your username") to say "Deleted user",
+and its assertion in `test/account_test.dart` with it.
+
+*What it costs to leave:* a string like `deleted_3f2a…` in a chat reads as a
+bug, though it reveals nothing about who wrote it.
+
 ---
 
 ## 2. Costed: should the map adopt `party_is_past()`?
