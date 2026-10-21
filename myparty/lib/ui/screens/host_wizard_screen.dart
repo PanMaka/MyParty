@@ -14,6 +14,7 @@ import '../../utils/english_date.dart';
 import '../../utils/share_party.dart';
 import '../theme/app_theme.dart';
 import '../widgets/address_suggestions.dart';
+import '../widgets/basemap.dart';
 import '../widgets/diagonal_placeholder.dart';
 import '../widgets/map_base.dart';
 import 'chat_screen.dart';
@@ -946,9 +947,22 @@ class _HostWizardScreenState extends State<HostWizardScreen> {
                   options: MapOptions(
                     initialCenter: point,
                     initialZoom: 16,
+                    backgroundColor: kBasemapBackground,
                     interactionOptions: const InteractionOptions(flags: InteractiveFlag.none),
                   ),
-                  children: [mpTileLayer()],
+                  children: const [MpBasemap()],
+                ),
+              ),
+              // The basemap credit, as text: this map takes no taps, so it
+              // cannot carry the interactive maps' popup.
+              Positioned(
+                left: 8,
+                top: 6,
+                child: IgnorePointer(
+                  child: Text(kBasemapCreditShort,
+                      style: TextStyle(fontSize: 8.5, color: AppColors.textAlpha(0.55), shadows: const [
+                        Shadow(color: kBasemapBackground, blurRadius: 3),
+                      ])),
                 ),
               ),
               const IgnorePointer(child: Center(child: PartyPinMarker(size: 34))),

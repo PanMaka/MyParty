@@ -1,28 +1,16 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
-/// What every map in the app shares: the tiles, the fallback centre and the
-/// device fix. Lifted out of `map_screen.dart` when the host wizard's location
-/// picker became the second map, so the CARTO key handling and the
-/// best-effort location logic each have one definition.
+/// What every map in the app shares: the fallback centre and the device fix.
+/// Lifted out of `map_screen.dart` when the host wizard's location picker
+/// became the second map, so the best-effort location logic has one
+/// definition. The tiles, which used to live here too, are in `basemap.dart`.
 
 /// Central Athens — where a map opens when there is no device fix.
 const kDefaultMapCentre = LatLng(37.9748, 23.7232);
-
-/// The dark CARTO basemap every map in the app draws on.
-TileLayer mpTileLayer() => TileLayer(
-      // CARTO serves an "API KEY REQUIRED" placeholder for every tile
-      // without `key`. Read guarded: widget tests never load .env.
-      urlTemplate: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
-          '?key=${dotenv.isInitialized ? dotenv.maybeGet('CARTO_API_KEY') ?? '' : ''}',
-      subdomains: const ['a', 'b', 'c', 'd'],
-      userAgentPackageName: 'com.myparty.app',
-    );
 
 /// Why [locateDevice] has no point to give. Each one asks the user for a
 /// different thing — switch location on, grant it, grant it from Settings
