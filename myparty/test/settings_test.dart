@@ -6,7 +6,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:myparty/data/profile_repository.dart';
 import 'package:myparty/models/gender.dart';
 import 'package:myparty/models/profile_privacy.dart';
+import 'package:myparty/services/auth_service.dart';
 import 'package:myparty/ui/screens/settings_screen.dart';
+import 'package:myparty/utils/app_info.dart';
 
 /// Stands in for the real repository. Subclasses rather than implements so it
 /// stays in sync with the real constructor, and overrides every method that
@@ -87,8 +89,36 @@ class _FakeProfileRepository extends ProfileRepository {
   }
 }
 
-Future<void> _pumpSettings(WidgetTester tester, _FakeProfileRepository repo) async {
-  await tester.pumpWidget(MaterialApp(home: SettingsScreen(repository: repo)));
+/// Records sign-outs instead of reaching for a Supabase client.
+class _FakeAuthService extends AuthService {
+  _FakeAuthService({this.email = 'me@example.com'});
+
+  final String? email;
+  int signOuts = 0;
+
+  @override
+  String? get currentEmail => email;
+
+  @override
+  Future<void> signOut() async => signOuts++;
+}
+
+Future<String> _version() async => '1.2.3 (45)';
+
+Future<void> _pumpSettings(
+  WidgetTester tester,
+  _FakeProfileRepository repo, {
+  _FakeAuthService? auth,
+  Future<bool> Function(Uri)? openUrl,
+}) async {
+  await tester.pumpWidget(MaterialApp(
+    home: SettingsScreen(
+      repository: repo,
+      auth: auth ?? _FakeAuthService(),
+      appVersion: _version,
+      openUrl: openUrl ?? (_) async => true,
+    ),
+  ));
   await tester.pumpAndSettle();
 }
 
@@ -116,36 +146,67 @@ Future<void> _scrollTo(WidgetTester tester, Finder finder) async {
   await tester.pumpAndSettle();
 }
 
+/// Taps a settings row by its title, scrolling it on screen first: since
+/// Phase 43 the privacy rows sit below ACCOUNT and PROFILE, partly past the
+/// bottom of the 800x600 test surface.
+Future<void> _tapRow(WidgetTester tester, String title) async {
+  await tester.ensureVisible(find.text(title));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(title));
+  await tester.pumpAndSettle();
+}
+
 void main() {
   group('layout', () {
-    testWidgets('gathers every owner control the profile tab used to trail', (tester) async {
+    testWidgets('five sections, in order, each holding its rows', (tester) async {
       await _pumpSettings(tester, _FakeProfileRepository());
 
-      // The three sections, in the order the screen argues for: preferences,
-      // then consent, then the irreversible one.
-      expect(find.text('PRIVACY'), findsOneWidget);
+      // Every section and every row, because this is the ONLY screen they
+      // exist on: a row dropped in a reshuffle would otherwise be invisible
+      // to the whole suite. Scrolled to one by one, since a ListView builds
+      // only what is near the viewport.
+      const expected = [
+        'ACCOUNT', 'Email', 'Data & deletion',
+        'PROFILE', 'Edit profile', 'Gender', genderVisibilityNote,
+        'PRIVACY & SAFETY', 'Who sees my parties on the map', 'Who can invite me',
+        'Who can message me', 'Blocked accounts',
+        'NOTIFICATIONS', 'Notifications & location',
+        'SUPPORT & LEGAL', 'Contact support', 'Open-source licences', 'App version',
+        'Sign out',
+      ];
+      double? lastY;
+      for (final label in expected) {
+        await _scrollTo(tester, find.text(label));
+        expect(find.text(label), findsOneWidget, reason: label);
+        // Order, not just presence: each label sits below the previous one in
+        // the list's own coordinates (screen y plus how far it has scrolled).
+        final scrolled = tester.state<ScrollableState>(find.byType(Scrollable).first).position.pixels;
+        final y = tester.getTopLeft(find.text(label)).dy + scrolled;
+        if (lastY != null) expect(y, greaterThan(lastY), reason: '$label is out of order');
+        lastY = y;
+      }
 
-      // And every row that used to trail the profile tab. All six are asserted
-      // here because this is now the ONLY screen they exist on — a row dropped
-      // in the move would otherwise be invisible to the whole suite.
-      expect(find.text('Who sees which parties I go to'), findsOneWidget);
-      expect(find.text('Who sees my parties on the map'), findsOneWidget);
-      expect(find.text('Who can invite me'), findsOneWidget);
-      expect(find.text('Who can message me'), findsOneWidget);
-      expect(find.text('Blocked accounts'), findsOneWidget);
+      // The old section names are gone, not duplicated.
+      expect(find.text('PRIVACY'), findsNothing);
+      expect(find.text('ABOUT YOU'), findsNothing);
+    });
 
-      // Below the fold since ABOUT YOU (Phase 41) went in above it.
-      await _scrollTo(tester, find.text('Notifications & location'));
-      expect(find.text('ABOUT YOU'), findsOneWidget);
-      expect(find.text('Gender'), findsOneWidget);
-      expect(find.text('NOTIFICATIONS'), findsOneWidget);
-      expect(find.text('Notifications & location'), findsOneWidget);
+    testWidgets('the unbuilt "who sees which parties I go to" row is gone, not "coming soon"', (tester) async {
+      await _pumpSettings(tester, _FakeProfileRepository());
+      for (final label in ['ACCOUNT', 'PRIVACY & SAFETY', 'SUPPORT & LEGAL', 'Sign out']) {
+        await _scrollTo(tester, find.text(label));
+        expect(find.text('Who sees which parties I go to'), findsNothing);
+        expect(find.textContaining('Coming soon'), findsNothing);
+      }
+    });
 
-      // Below the fold since the PRIVACY card grew two rows.
-      await _scrollTo(tester, find.text('Sign out'));
-      expect(find.text('ACCOUNT'), findsOneWidget);
-      expect(find.text('Data & deletion'), findsOneWidget);
-      expect(find.text('Sign out'), findsOneWidget);
+    testWidgets('nothing on the screen offers analytics', (tester) async {
+      await _pumpSettings(tester, _FakeProfileRepository());
+      // Checked at every scroll stop, so a row anywhere in the list is caught.
+      for (final label in ['ACCOUNT', 'PRIVACY & SAFETY', 'SUPPORT & LEGAL', 'Sign out']) {
+        await _scrollTo(tester, find.text(label));
+        expect(find.textContaining(RegExp('analytic', caseSensitive: false)), findsNothing);
+      }
     });
 
     testWidgets('says so when the tiers do not load, rather than loading forever', (tester) async {
@@ -154,7 +215,11 @@ void main() {
       // That is the offline case, and the row has to admit it — an eternal "…"
       // reads as a broken app, and a tier rendered as a guess is worse than
       // either.
-      await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+      // Tall enough for the gender row and all three tier rows at once.
+      tester.view.physicalSize = const Size(800, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(MaterialApp(home: SettingsScreen(auth: _FakeAuthService(), appVersion: _version)));
       await tester.pumpAndSettle();
 
       // Three tier rows (map, invites, messages) and the gender row, which
@@ -183,8 +248,7 @@ void main() {
       final repo = _FakeProfileRepository();
       await _pumpSettings(tester, repo);
 
-      await tester.tap(find.text('Who sees my parties on the map'));
-      await tester.pumpAndSettle();
+      await _tapRow(tester, 'Who sees my parties on the map');
 
       // The sheet explains what each tier does — a tier list with only labels
       // would be guessable at best.
@@ -203,8 +267,7 @@ void main() {
       final repo = _FakeProfileRepository();
       await _pumpSettings(tester, repo);
 
-      await tester.tap(find.text('Who can invite me'));
-      await tester.pumpAndSettle();
+      await _tapRow(tester, 'Who can invite me');
       await tester.tap(_sheetOption('Anyone'));
       await tester.pumpAndSettle();
 
@@ -215,8 +278,7 @@ void main() {
       final repo = _FakeProfileRepository();
       await _pumpSettings(tester, repo);
 
-      await tester.tap(find.text('Who can invite me'));
-      await tester.pumpAndSettle();
+      await _tapRow(tester, 'Who can invite me');
       await tester.tap(_sheetOption('Only people I follow'));
       await tester.pumpAndSettle();
 
@@ -229,8 +291,7 @@ void main() {
       final repo = _FakeProfileRepository(failWrites: true);
       await _pumpSettings(tester, repo);
 
-      await tester.tap(find.text('Who sees my parties on the map'));
-      await tester.pumpAndSettle();
+      await _tapRow(tester, 'Who sees my parties on the map');
       await tester.tap(_sheetOption('Nobody'));
       await tester.pumpAndSettle();
 
@@ -246,7 +307,12 @@ void main() {
     testWidgets('a row with nothing loaded yet is not tappable', (tester) async {
       final gate = Completer<void>();
       final repo = _FakeProfileRepository(gate: gate);
-      await tester.pumpWidget(MaterialApp(home: SettingsScreen(repository: repo)));
+      await tester.pumpWidget(MaterialApp(
+        home: SettingsScreen(repository: repo, auth: _FakeAuthService(), appVersion: _version),
+      ));
+      await tester.pump();
+      // PRIVACY & SAFETY is below ACCOUNT and PROFILE now.
+      await tester.drag(find.byType(Scrollable).first, const Offset(0, -300));
       await tester.pump();
 
       // fetchPrivacy is still in flight, so the row is showing "…". Tapping it
@@ -269,8 +335,7 @@ void main() {
       final repo = _FakeProfileRepository();
       await _pumpSettings(tester, repo);
 
-      await tester.tap(find.text('Who can message me'));
-      await tester.pumpAndSettle();
+      await _tapRow(tester, 'Who can message me');
 
       // Both things the tiers do NOT do are said where the choice is made.
       expect(find.textContaining('already replied in stay open'), findsOneWidget);
@@ -288,11 +353,22 @@ void main() {
   });
   group('gender', () {
     testWidgets('the row shows the stored answer, with the note directly under it', (tester) async {
+      // All on the first screen, with no scrolling: the gender row, its note
+      // and the heading of the next section.
       await _pumpSettings(tester, _FakeProfileRepository());
-      await _scrollTo(tester, find.text(genderVisibilityNote));
 
       expect(_tierValue('Gender', 'Female'), findsOneWidget);
       expect(find.text(genderVisibilityNote), findsOneWidget);
+      // In PROFILE now, with the note directly under its card: below the
+      // Gender row, above PRIVACY & SAFETY.
+      expect(
+        tester.getTopLeft(find.text(genderVisibilityNote)).dy,
+        greaterThan(tester.getTopLeft(find.text('Gender')).dy),
+      );
+      expect(
+        tester.getTopLeft(find.text('PRIVACY & SAFETY')).dy,
+        greaterThan(tester.getTopLeft(find.text(genderVisibilityNote)).dy),
+      );
     });
 
     testWidgets('"Prefer not to say" clears the answer: null on the wire', (tester) async {
@@ -343,6 +419,89 @@ void main() {
 
       expect(repo.genderWrites, ['male']);
       expect(_tierValue('Gender', 'Female'), findsOneWidget);
+    });
+  });
+
+  group('account', () {
+    testWidgets('shows the signed-in email, read-only', (tester) async {
+      await _pumpSettings(tester, _FakeProfileRepository(), auth: _FakeAuthService(email: 'ada@example.com'));
+
+      expect(find.text('ada@example.com'), findsOneWidget);
+      // A label, not a control: nothing opens when it is tapped.
+      await tester.tap(find.text('ada@example.com'));
+      await tester.pumpAndSettle();
+      expect(find.byType(Dialog), findsNothing);
+      expect(find.byType(BottomSheet), findsNothing);
+      expect(find.text('ACCOUNT'), findsOneWidget);
+    });
+
+    testWidgets('sign out asks first, and Cancel signs nobody out', (tester) async {
+      final auth = _FakeAuthService();
+      await _pumpSettings(tester, _FakeProfileRepository(), auth: auth);
+      await _scrollTo(tester, find.text('Sign out'));
+
+      await tester.tap(find.text('Sign out'));
+      await tester.pumpAndSettle();
+      expect(find.text('Sign out?'), findsOneWidget);
+      expect(auth.signOuts, 0, reason: 'the dialog is a gate, not a formality');
+
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(auth.signOuts, 0);
+
+      await tester.tap(find.text('Sign out'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('Sign out')));
+      await tester.pumpAndSettle();
+      expect(auth.signOuts, 1);
+    });
+  });
+
+  group('support & legal', () {
+    testWidgets('shows the app version', (tester) async {
+      await _pumpSettings(tester, _FakeProfileRepository());
+      await _scrollTo(tester, find.text('App version'));
+
+      expect(find.text('1.2.3 (45)'), findsOneWidget);
+    });
+
+    testWidgets('contact support opens a mailto to the support address, with the version', (tester) async {
+      final opened = <Uri>[];
+      await _pumpSettings(tester, _FakeProfileRepository(), openUrl: (uri) async {
+        opened.add(uri);
+        return true;
+      });
+      await _scrollTo(tester, find.text('Contact support'));
+
+      await tester.tap(find.text('Contact support'));
+      await tester.pumpAndSettle();
+
+      expect(opened, hasLength(1));
+      expect(opened.single.scheme, 'mailto');
+      expect(opened.single.path, supportEmail);
+      expect(Uri.decodeComponent(opened.single.query), contains('MyParty 1.2.3 (45)'));
+      // Encoded as %20, not '+', which mail apps would print literally.
+      expect(opened.single.query, isNot(contains('+')));
+    });
+
+    testWidgets('with no mail app, contact support says where to write', (tester) async {
+      await _pumpSettings(tester, _FakeProfileRepository(), openUrl: (_) async => false);
+      await _scrollTo(tester, find.text('Contact support'));
+
+      await tester.tap(find.text('Contact support'));
+      await tester.pump();
+
+      expect(find.text('No email app found. Write to us at $supportEmail'), findsOneWidget);
+    });
+
+    testWidgets('open-source licences opens the licence page', (tester) async {
+      await _pumpSettings(tester, _FakeProfileRepository());
+      await _scrollTo(tester, find.text('Open-source licences'));
+
+      await tester.tap(find.text('Open-source licences'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(LicensePage), findsOneWidget);
     });
   });
 }

@@ -13,6 +13,11 @@ class AuthService {
   /// [ProfileRepository].
   SupabaseClient get _supabase => _clientOverride ?? Supabase.instance.client;
 
+  /// The signed-in user's email, for display only (Settings → Account).
+  /// Changing it is not offered yet: it needs SMTP and an email-link callback,
+  /// and `detectSessionInUri` is off on purpose (see `main.dart`).
+  String? get currentEmail => _supabase.auth.currentUser?.email;
+
   // Sign Up Logic
   Future<AuthResponse> signUp({
     required String email,

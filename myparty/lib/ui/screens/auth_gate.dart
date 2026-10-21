@@ -6,6 +6,7 @@ import '../../services/notifications.dart';
 import '../widgets/party_link_handler.dart';
 import 'login_screen.dart';
 import 'home_screen.dart';
+import 'pending_deletion_screen.dart';
 import 'username_setup_screen.dart';
 
 class AuthGate extends StatelessWidget {
@@ -28,7 +29,7 @@ class AuthGate extends StatelessWidget {
         if (session != null) {
           // User is logged in: still need to know if they've picked a
           // username yet before deciding where to send them.
-          return _ProfileGate(userId: session.user.id);
+          return ProfileGate(userId: session.user.id);
         } else {
           // Sign-out is triggered from Settings and the account-deletion
           // screen, which are pushed ON TOP of this route. Swapping this route
@@ -51,47 +52,114 @@ class AuthGate extends StatelessWidget {
   }
 }
 
-/// Routes a logged-in user to [UsernameSetupScreen] or [HomeScreen]
-/// depending on whether `profiles.onboarding_completed_at` is set.
-class _ProfileGate extends StatefulWidget {
-  const _ProfileGate({required this.userId});
+/// The slice of the caller's own `profiles` row the gate decides on.
+@visibleForTesting
+class ProfileGateRow {
+  const ProfileGateRow({
+    required this.onboarded,
+    required this.pushConsent,
+    required this.locationConsent,
+    this.notificationTz,
+    this.deletionRequestedAt,
+  });
 
-  final String userId;
-
-  @override
-  State<_ProfileGate> createState() => _ProfileGateState();
-}
-
-class _ProfileGateState extends State<_ProfileGate> {
-  late Future<bool> _needsUsername = _checkOnboarding();
-
-  Future<bool> _checkOnboarding() async {
-    final row = await Supabase.instance.client
-        .from('profiles')
-        .select('onboarding_completed_at, push_consent, location_consent')
-        .eq('id', widget.userId)
-        .single();
-
-    // Phase 7c. The one place in the app that knows a session exists AND
-    // onboarding is settled, which is the earliest point a device row should
-    // be written — `user_devices.user_id` references `profiles`, and
-    // registering mid-signup would race the row `handle_new_user` creates.
-    //
-    // Both flags are read here and passed down rather than re-queried, so this
-    // stays one round trip. Nothing is prompted: a user who has never granted
-    // push consent is left alone until they open the settings screen.
-    unawaited(Notifications.onSignedIn(
+  factory ProfileGateRow.fromRow(Map<String, dynamic> row) {
+    final deletedAt = row['deleted_at'] as String?;
+    return ProfileGateRow(
+      onboarded: row['onboarding_completed_at'] != null,
       pushConsent: (row['push_consent'] as bool?) ?? false,
       locationConsent: (row['location_consent'] as bool?) ?? false,
-    ));
-
-    return row['onboarding_completed_at'] == null;
+      notificationTz: row['notification_tz'] as String?,
+      deletionRequestedAt: deletedAt == null ? null : DateTime.parse(deletedAt).toLocal(),
+    );
   }
+
+  final bool onboarded;
+  final bool pushConsent;
+  final bool locationConsent;
+  final String? notificationTz;
+
+  /// `profiles.deleted_at`: non-null while the account is in its grace period.
+  final DateTime? deletionRequestedAt;
+}
+
+typedef ProfileGateLoader = Future<ProfileGateRow> Function(String userId);
+typedef SignedInHook = Future<void> Function(ProfileGateRow row);
+
+Future<ProfileGateRow> _loadGateRow(String userId) async {
+  final row = await Supabase.instance.client
+      .from('profiles')
+      .select('onboarding_completed_at, push_consent, location_consent, notification_tz, deleted_at')
+      .eq('id', userId)
+      .single();
+  return ProfileGateRow.fromRow(row);
+}
+
+Future<void> _notificationsSignedIn(ProfileGateRow row) => Notifications.onSignedIn(
+      pushConsent: row.pushConsent,
+      locationConsent: row.locationConsent,
+      notificationTz: row.notificationTz,
+    );
+
+/// Routes a logged-in user to [PendingDeletionScreen], [UsernameSetupScreen]
+/// or [HomeScreen], in that order of precedence.
+///
+/// Public, with injectable seams, only so the routing can be widget-tested:
+/// [load], [onSignedIn] and [home] default to the real Supabase read, the real
+/// [Notifications] wiring and the real [HomeScreen].
+@visibleForTesting
+class ProfileGate extends StatefulWidget {
+  const ProfileGate({
+    super.key,
+    required this.userId,
+    this.load = _loadGateRow,
+    this.onSignedIn = _notificationsSignedIn,
+    this.home,
+    this.pendingDeletion,
+  });
+
+  final String userId;
+  final ProfileGateLoader load;
+  final SignedInHook onSignedIn;
+  final WidgetBuilder? home;
+
+  /// Builds the pending-deletion screen; tests swap in one with a fake
+  /// repository. The callback is the gate's re-check.
+  final Widget Function(DateTime requestedAt, VoidCallback onRestored)? pendingDeletion;
+
+  @override
+  State<ProfileGate> createState() => _ProfileGateState();
+}
+
+class _ProfileGateState extends State<ProfileGate> {
+  late Future<ProfileGateRow> _row = _check();
+
+  Future<ProfileGateRow> _check() async {
+    final row = await widget.load(widget.userId);
+
+    // Phase 7c. The one place in the app that knows a session exists, which
+    // is the earliest point a device row should be written. Both flags (and,
+    // since Phase 43, the stored time zone) come from this one read and are
+    // passed down rather than re-queried. Nothing is prompted: a user who has
+    // never granted push consent is left alone until they open settings.
+    //
+    // Phase 43: NOT for an account with a pending deletion. It has no device
+    // rows and both consents are off, and until the user says "restore" there
+    // is nothing for it to do. Restoring re-runs this check, which is when it
+    // fires.
+    if (row.deletionRequestedAt == null) unawaited(widget.onSignedIn(row));
+
+    return row;
+  }
+
+  void _recheck() => setState(() {
+        _row = _check();
+      });
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<bool>(
-      future: _needsUsername,
+    return FutureBuilder<ProfileGateRow>(
+      future: _row,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
           return const _LoadingScaffold();
@@ -102,30 +170,42 @@ class _ProfileGateState extends State<_ProfileGate> {
         // blindly (backend unreachable, schema behind the client, no profiles
         // row), so show the error and offer the only two useful exits.
         if (snapshot.hasError) {
-          return _ProfileGateError(
-            error: snapshot.error!,
-            onRetry: () => setState(() {
-              _needsUsername = _checkOnboarding();
-            }),
-          );
+          return _ProfileGateError(error: snapshot.error!, onRetry: _recheck);
         }
+        final row = snapshot.data!;
+
+        // Before onboarding, deliberately: an account inside its grace period
+        // has finished onboarding by definition (deletion is reachable only
+        // from Settings), and the question it must answer first is whether it
+        // still wants to exist.
+        final requestedAt = row.deletionRequestedAt;
+        if (requestedAt != null) {
+          return widget.pendingDeletion?.call(requestedAt, _recheck) ??
+              PendingDeletionScreen(deletionRequestedAt: requestedAt, onRestored: _recheck);
+        }
+
         // PartyLinkHandler only around the signed-in, onboarded root: a link
         // opened earlier waits in PartyLinks.pending until this exists.
-        return snapshot.data!
+        return !row.onboarded
             ? UsernameSetupScreen(
                 // No re-query: the write just succeeded, and Notifications
                 // already ran on the first check.
                 onOnboarded: () => setState(() {
-                  _needsUsername = Future.value(false);
+                  _row = Future.value(ProfileGateRow(
+                    onboarded: true,
+                    pushConsent: row.pushConsent,
+                    locationConsent: row.locationConsent,
+                    notificationTz: row.notificationTz,
+                  ));
                 }),
               )
-            : const PartyLinkHandler(child: HomeScreen());
+            : (widget.home?.call(context) ?? const PartyLinkHandler(child: HomeScreen()));
       },
     );
   }
 }
 
-/// Terminal state for [_ProfileGate]. Deliberately shows the raw error: the
+/// Terminal state for [ProfileGate]. Deliberately shows the raw error: the
 /// only people who reach it are a developer pointed at the wrong backend or a
 /// user whose profile row is missing, and both need the actual message.
 class _ProfileGateError extends StatelessWidget {

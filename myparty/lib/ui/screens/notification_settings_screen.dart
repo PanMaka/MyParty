@@ -198,7 +198,11 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
                 _card([
                   _switchRow(
                     'Push notifications',
-                    'Invitations, messages and parties near you.',
+                    // Only what the engine actually sends. `nearby_party` is
+                    // the one kind ever enqueued; invitations, messages and
+                    // cancellations send nothing yet (docs/backlog.md 1.22,
+                    // 1.25). Add each here when it ships, not before.
+                    'Parties near you.',
                     prefs.pushConsent,
                     _togglePush,
                   ),

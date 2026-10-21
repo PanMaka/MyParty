@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:share_plus/share_plus.dart';
 
 import 'party_link.dart';
@@ -8,6 +10,22 @@ typedef ShareText = Future<void> Function(String text);
 
 Future<void> systemShare(String text) async {
   await SharePlus.instance.share(ShareParams(text: text));
+}
+
+/// Hands a text file to the system share sheet, which is also where "Save to
+/// Files" / "Save to Drive" live: one sheet covers both sharing and saving.
+/// A seam for the same reason as [ShareText].
+typedef ShareFile = Future<void> Function({required String fileName, required String contents, required String mimeType});
+
+/// Built in memory rather than saved to the app's documents first: an export
+/// left there would be a second copy of everything the account holds,
+/// outliving the account. share_plus still writes a temporary copy to the
+/// app's cache for the hand-off, which the OS may clear at any time.
+Future<void> systemShareFile({required String fileName, required String contents, required String mimeType}) async {
+  await SharePlus.instance.share(ShareParams(
+    files: [XFile.fromData(utf8.encode(contents), mimeType: mimeType, name: fileName)],
+    fileNameOverrides: [fileName],
+  ));
 }
 
 /// What sharing a party actually sends.
