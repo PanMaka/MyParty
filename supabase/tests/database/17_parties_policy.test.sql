@@ -27,7 +27,7 @@
 -- No blocks are seeded; they are created inside this transaction.
 begin;
 set search_path to public, extensions;
-select plan(65);
+select plan(57);
 
 
 -- ============================================================
@@ -107,11 +107,10 @@ cross join (values
   ('33333333-3333-3333-3333-333333333333'::uuid),  -- friend_not_invited
   ('44444444-4444-4444-4444-444444444444'::uuid),  -- stranger
   ('55555555-5555-5555-5555-555555555555'::uuid),  -- blocked_user
-  ('66666666-6666-6666-6666-666666666666'::uuid),  -- second_host
-  (null::uuid)                                     -- anon
+  ('66666666-6666-6666-6666-666666666666'::uuid)   -- second_host
 ) as v(viewer);
 
-grant select on expected_visibility to authenticated, anon;
+grant select on expected_visibility to authenticated;
 
 -- A guard on the guard: if the fixture set were empty or the helper answered
 -- uniformly, every containment assertion below would pass vacuously.
@@ -233,23 +232,8 @@ select is_empty(
 );
 
 -- ---------- anon ----------
--- The row that carries the most risk in the whole file. See section 2.
-select tests.clear_authentication();
-
-select is_empty(
-  $$ select p.id from public.parties p
-     join expected_visibility e on e.id = p.id and e.viewer is null
-     where not e.helper_admits $$,
-  'anon: every row the policy admits, the helper admits too'
-);
-select is_empty(
-  $$ select e.id from expected_visibility e
-     where e.viewer is null
-       and e.helper_admits
-       and not exists (select 1 from public.parties p where p.id = e.id) $$,
-  'anon: every row the helper admits, the policy admits too'
-);
-
+-- No anon arm since 20261021205851: anon holds no SELECT on parties, so the
+-- grant refuses before either copy of the rule runs. Section 2 asserts that.
 
 -- ============================================================
 -- 2. The visibility matrix (section 5.2)
@@ -345,75 +329,24 @@ select isnt_empty(
 );
 
 -- ---------- viewer: anon ----------
--- `is_blocked` returns false when either argument is null, so
--- `not is_blocked(null, host_id)` is TRUE and an anonymous caller keeps seeing
--- every public party -- including ones hosted by users who are in a block
--- relationship with somebody else. That is current behaviour and must not
--- change.
---
--- The brief predicted the failure mode here would be a hoist spelled
---   host_id not in (select blocked_id from public.blocks
---                   where blocker_id = (select auth.uid()))
--- collapsing anon's result set via NULL-in-list. That was ASSERTED rather than
--- reasoned about, and the assertion says it does not reproduce -- for two
--- independent reasons, both measured against this database:
---
---   1. `NULL not in (<empty set>)` is TRUE, not NULL. For anon,
---      `blocker_id = (select auth.uid())` matches nothing, so the list is
---      empty and NOT IN is well-defined. NULL-in-list needs a NULL *inside*
---      a non-empty list, or a NULL on the left of a non-empty one.
---   2. Even a spelling that puts `auth.uid()` on the left cannot bite, because
---      the `blocks` SELECT policy is `blocker_id = (select auth.uid())` -- anon
---      can read no block rows at all, so any inlined subquery on `blocks` is
---      empty for anon whatever its shape.
---
--- The inlined hoist IS broken, just not here and not for that reason: it fails
--- for the STRANGER, and section 1's equivalence assertion catches it on the
--- first run. The `blocks` policy only exposes rows where the viewer is the
--- BLOCKER, so an inlined probe cannot see "the host blocked me" -- exactly half
--- of a symmetric relation. That is the second reason `is_blocked` must stay
--- SECURITY DEFINER, alongside the 42P17 one, and it is the sharper of the two
--- because it produces a silent visibility LEAK rather than a loud error.
---
--- The assertions below stay regardless, and they are not decorative: verified
--- by gating the policy on `(select auth.uid()) is not null`, which fires seven
--- of them including the equivalence direction and the degenerate-set guard.
+-- Until Phase 46 anon read the table and this section proved it saw exactly the
+-- public parties (is_blocked(null, x) being false, and NULL-in-list not
+-- reproducing; see git history for that argument). Since 20261021205851 anon
+-- reaches neither the table nor the helpers, which is the stronger statement.
 select tests.clear_authentication();
 
-select isnt_empty(
-  $$ select 1 from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000002' $$,
-  'anon sees a public party'
+select throws_ok(
+  $$ select 1 from public.parties $$,
+  '42501', null,
+  'anon cannot read parties at all -- refused at the grant, before the policy'
 );
-select isnt_empty(
-  $$ select 1 from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000021' $$,
-  'anon sees a public party whose host blocked SOMEBODY ELSE -- blocks are irrelevant to anon'
+select ok(
+  not has_function_privilege('anon', 'public.can_access_party(uuid)', 'execute'),
+  'anon cannot call can_access_party'
 );
-select isnt_empty(
-  $$ select 1 from public.parties p
-     where p.host_id = '66666666-6666-6666-6666-666666666666'
-       and not p.is_private $$,
-  'anon sees public parties hosted by a user somebody else blocked'
-);
--- The blunt form of the same guard: not "anon sees this row" but "anon sees
--- roughly what it should". A NULL-in-list hoist returns zero rows here while
--- every single-row assertion above could in principle be satisfied by an
--- unrelated bug.
-select is(
-  (select count(*)::int from public.parties),
-  (select count(*)::int from expected_visibility where viewer is null and helper_admits),
-  'anon sees exactly as many parties as the helper admits -- not zero'
-);
-select cmp_ok(
-  (select count(*)::int from public.parties), '>', 10,
-  'anon''s visible set is a real number of public parties, not a degenerate one'
-);
-select is_empty(
-  $$ select 1 from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000001' $$,
-  'anon cannot see a private party'
-);
-select is_empty(
-  $$ select 1 from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000022' $$,
-  'anon cannot see a private party whose host has blocks against them'
+select ok(
+  not has_function_privilege('anon', 'public.is_blocked(uuid,uuid)', 'execute'),
+  'anon cannot call is_blocked'
 );
 
 
@@ -454,15 +387,6 @@ select isnt_empty(
   'a stranger DOES see a PUBLIC draft -- status plays no part in the policy, in either direction'
 );
 
-select tests.clear_authentication();
-select is_empty(
-  $$ select 1 from public.parties where id = 'aaaaaaaa-0000-0000-0000-0000000000d1' $$,
-  'anon cannot see the private draft'
-);
-select isnt_empty(
-  $$ select 1 from public.parties where id = 'aaaaaaaa-0000-0000-0000-0000000000d2' $$,
-  'anon sees the public draft -- confirming status is not a visibility term anywhere'
-);
 
 
 -- ============================================================

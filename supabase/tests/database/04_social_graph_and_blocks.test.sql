@@ -333,9 +333,12 @@ select isnt_empty(
 
 select tests.clear_authentication();
 
-select isnt_empty(
+-- Reversed on purpose in Phase 46 (20261021205851): anon reads no parties at
+-- all, so the is_blocked(null, x) question no longer arises for it.
+select throws_ok(
   $$ select 1 from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000002' $$,
-  'an anonymous session still sees public parties -- is_blocked(null, x) is false, not true'
+  '42501', null,
+  'an anonymous session reads no parties, public ones included'
 );
 
 select * from finish();

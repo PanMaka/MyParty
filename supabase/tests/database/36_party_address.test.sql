@@ -92,7 +92,7 @@ select results_eq(
 
 select results_eq(
   $$ select p.is_sponsored, p.party_tier, p.status::text, p.going_count, p.interested_count, p.cover_path
-     from public.parties p join made m on m.id = p.id $$,
+     from tests.parties_unfiltered p join made m on m.id = p.id $$,
   $$ values (false, 'standard'::text, 'published'::text, 0, 0, null::text) $$,
   'everything the host may not set takes the server default');
 
@@ -318,9 +318,10 @@ select is(
 
 select tests.clear_authentication();
 set local role anon;
-select is_empty(
+select throws_ok(
   $$ select address from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000001' $$,
-  'anon cannot read a private party''s address');
+  '42501', null,
+  'anon cannot read a private party''s address -- nor any parties row, since Phase 46');
 reset role;
 
 

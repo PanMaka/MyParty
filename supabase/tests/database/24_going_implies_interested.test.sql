@@ -33,7 +33,7 @@ select plan(15);
 -- delta from a known zero rather than from whatever the fixtures happened to
 -- leave behind.
 select results_eq(
-  $$ select going_count, interested_count from public.parties
+  $$ select going_count, interested_count from tests.parties_unfiltered
      where id = 'aaaaaaaa-0000-0000-0000-000000000002' $$,
   $$ values (0, 0) $$,
   'the public fixture party starts with both counters at 0'
@@ -48,7 +48,7 @@ insert into public.rsvps (party_id, user_id, status) values
   ('aaaaaaaa-0000-0000-0000-000000000002', '44444444-4444-4444-4444-444444444444', 'going');
 
 select results_eq(
-  $$ select going_count, interested_count from public.parties
+  $$ select going_count, interested_count from tests.parties_unfiltered
      where id = 'aaaaaaaa-0000-0000-0000-000000000002' $$,
   $$ values (1, 1) $$,
   'a GOING rsvp increments both counters -- going implies interested'
@@ -66,7 +66,7 @@ insert into public.rsvps (party_id, user_id, status) values
   ('aaaaaaaa-0000-0000-0000-000000000002', '55555555-5555-5555-5555-555555555555', 'interested');
 
 select results_eq(
-  $$ select going_count, interested_count from public.parties
+  $$ select going_count, interested_count from tests.parties_unfiltered
      where id = 'aaaaaaaa-0000-0000-0000-000000000002' $$,
   $$ values (1, 2) $$,
   'an INTERESTED rsvp increments interested_count only -- the nesting is one-way'
@@ -83,7 +83,7 @@ where party_id = 'aaaaaaaa-0000-0000-0000-000000000002'
 and user_id = '55555555-5555-5555-5555-555555555555';
 
 select results_eq(
-  $$ select going_count, interested_count from public.parties
+  $$ select going_count, interested_count from tests.parties_unfiltered
      where id = 'aaaaaaaa-0000-0000-0000-000000000002' $$,
   $$ values (2, 2) $$,
   'interested -> going increments going_count and does NOT decrement interested_count'
@@ -93,7 +93,7 @@ select results_eq(
 -- differs" and a reader chasing a red build should not have to work out which
 -- half moved. This is the exact number the old trigger got wrong.
 select is(
-  (select interested_count from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
+  (select interested_count from tests.parties_unfiltered where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
   2,
   'interested_count specifically did not move on the interested -> going flip'
 );
@@ -110,14 +110,14 @@ where party_id = 'aaaaaaaa-0000-0000-0000-000000000002'
 and user_id = '55555555-5555-5555-5555-555555555555';
 
 select results_eq(
-  $$ select going_count, interested_count from public.parties
+  $$ select going_count, interested_count from tests.parties_unfiltered
      where id = 'aaaaaaaa-0000-0000-0000-000000000002' $$,
   $$ values (1, 2) $$,
   'going -> interested decrements going_count and leaves interested_count alone'
 );
 
 select is(
-  (select interested_count from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
+  (select interested_count from tests.parties_unfiltered where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
   2,
   'interested_count did not double-count on the way back either'
 );
@@ -130,7 +130,7 @@ where party_id = 'aaaaaaaa-0000-0000-0000-000000000002'
 and user_id = '55555555-5555-5555-5555-555555555555';
 
 select results_eq(
-  $$ select going_count, interested_count from public.parties
+  $$ select going_count, interested_count from tests.parties_unfiltered
      where id = 'aaaaaaaa-0000-0000-0000-000000000002' $$,
   $$ values (2, 2) $$,
   'a full interested -> going -> interested -> going round trip is idempotent'
@@ -153,7 +153,7 @@ where party_id = 'aaaaaaaa-0000-0000-0000-000000000002'
 and user_id = '55555555-5555-5555-5555-555555555555';
 
 select results_eq(
-  $$ select going_count, interested_count from public.parties
+  $$ select going_count, interested_count from tests.parties_unfiltered
      where id = 'aaaaaaaa-0000-0000-0000-000000000002' $$,
   $$ values (1, 1) $$,
   'deleting a GOING rsvp decrements both counters'
@@ -167,7 +167,7 @@ insert into public.rsvps (party_id, user_id, status) values
   ('aaaaaaaa-0000-0000-0000-000000000002', '33333333-3333-3333-3333-333333333333', 'interested');
 
 select results_eq(
-  $$ select going_count, interested_count from public.parties
+  $$ select going_count, interested_count from tests.parties_unfiltered
      where id = 'aaaaaaaa-0000-0000-0000-000000000002' $$,
   $$ values (1, 2) $$,
   'the interested row for the delete case is in place'
@@ -178,7 +178,7 @@ where party_id = 'aaaaaaaa-0000-0000-0000-000000000002'
 and user_id = '33333333-3333-3333-3333-333333333333';
 
 select results_eq(
-  $$ select going_count, interested_count from public.parties
+  $$ select going_count, interested_count from tests.parties_unfiltered
      where id = 'aaaaaaaa-0000-0000-0000-000000000002' $$,
   $$ values (1, 1) $$,
   'deleting an INTERESTED rsvp decrements interested_count and leaves going_count'
@@ -192,7 +192,7 @@ where party_id = 'aaaaaaaa-0000-0000-0000-000000000002'
 and user_id = '44444444-4444-4444-4444-444444444444';
 
 select results_eq(
-  $$ select going_count, interested_count from public.parties
+  $$ select going_count, interested_count from tests.parties_unfiltered
      where id = 'aaaaaaaa-0000-0000-0000-000000000002' $$,
   $$ values (0, 0) $$,
   'the last delete returns both counters to 0 -- no residue from six transitions'
@@ -221,7 +221,7 @@ select set_config('request.jwt.claims', '', true);
 reset role;
 
 select is_empty(
-  $$ select id from public.parties where going_count > interested_count $$,
+  $$ select id from tests.parties_unfiltered where going_count > interested_count $$,
   'no party anywhere has going_count > interested_count'
 );
 
@@ -229,13 +229,13 @@ select is_empty(
 -- one interested; before the backfill that was interested_count = 1, and the
 -- migration adds going_count to it.
 select is(
-  (select interested_count from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000031'),
+  (select interested_count from tests.parties_unfiltered where id = 'aaaaaaaa-0000-0000-0000-000000000031'),
   (select count(*)::int from public.rsvps where party_id = 'aaaaaaaa-0000-0000-0000-000000000031'),
   'the backfill left interested_count equal to the actual rsvp count on a seeded party'
 );
 
 select is(
-  (select going_count from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000031'),
+  (select going_count from tests.parties_unfiltered where id = 'aaaaaaaa-0000-0000-0000-000000000031'),
   (select count(*)::int from public.rsvps
    where party_id = 'aaaaaaaa-0000-0000-0000-000000000031' and status = 'going'),
   'and going_count still equals the going subset of them'

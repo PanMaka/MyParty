@@ -404,6 +404,15 @@ begin
 end;
 $$;
 
+-- The raw parties counters, for tests of the counter arithmetic. Since Phase 46
+-- no client role may read going_count/interested_count off the table, so a
+-- test that checks the trigger's maths while impersonating a user reads them
+-- here. The view runs as its owner (postgres): no RLS, no column grant. It
+-- answers "what is the number", never "who may see it".
+create or replace view tests.parties_unfiltered as
+  select * from public.parties;
+grant select on tests.parties_unfiltered to public;
+
 -- Drop back to an anonymous, unauthenticated session.
 create or replace function tests.clear_authentication()
 returns void

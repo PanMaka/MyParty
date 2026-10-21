@@ -24,7 +24,7 @@ select isnt_empty(
 );
 
 select is(
-  (select interested_count from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
+  (select interested_count from tests.parties_unfiltered where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
   1,
   'interested_count on the public party ticks up by 1 after insert'
 );
@@ -56,7 +56,7 @@ select isnt_empty(
 -- going_count rather than interested_count, for the same reason. The counter
 -- trigger's interested branch is still covered, on the public party below.
 select is(
-  (select going_count from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000001'),
+  (select going_count from tests.parties_unfiltered where id = 'aaaaaaaa-0000-0000-0000-000000000001'),
   1,
   'going_count on the private party ticks up by 1 after the invitee''s insert'
 );
@@ -68,7 +68,7 @@ where party_id = 'aaaaaaaa-0000-0000-0000-000000000002'
 and user_id = '44444444-4444-4444-4444-444444444444';
 
 select is(
-  (select going_count from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
+  (select going_count from tests.parties_unfiltered where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
   1,
   'going_count on the public party ticks up by 1 on an interested->going update'
 );
@@ -81,7 +81,7 @@ select is(
 -- here because a reader of this file would otherwise still be told the two
 -- counters are disjoint.
 select is(
-  (select interested_count from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
+  (select interested_count from tests.parties_unfiltered where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
   1,
   'interested_count does NOT tick back down on the same update -- going implies interested'
 );
@@ -91,7 +91,7 @@ where party_id = 'aaaaaaaa-0000-0000-0000-000000000002'
 and user_id = '44444444-4444-4444-4444-444444444444';
 
 select is(
-  (select going_count from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
+  (select going_count from tests.parties_unfiltered where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
   0,
   'going_count on the public party ticks back down after the rsvp is deleted'
 );
@@ -100,7 +100,7 @@ select is(
 -- decremented only going_count would leave interested_count permanently
 -- inflated, and nothing else in this file would notice.
 select is(
-  (select interested_count from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
+  (select interested_count from tests.parties_unfiltered where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
   0,
   'interested_count ticks back down too -- the delete leaves both sets'
 );
