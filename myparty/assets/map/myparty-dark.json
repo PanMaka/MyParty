@@ -327,8 +327,8 @@
       "source-layer": "building",
       "minzoom": 14,
       "paint": {
-        "fill-color": "#1c1d30",
-        "fill-outline-color": "#23253a",
+        "fill-color": "#1f2333",
+        "fill-outline-color": "#262a3b",
         "fill-opacity": [
           "interpolate",
           [
@@ -393,7 +393,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#2c2f47",
+        "line-color": "#2f323f",
         "line-width": [
           "interpolate",
           [
@@ -457,7 +457,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#2a2d42",
+        "line-color": "#2c2f3a",
         "line-width": [
           "interpolate",
           [
@@ -525,7 +525,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#2b2e42",
+        "line-color": "#2f323c",
         "line-width": [
           "interpolate",
           [
@@ -592,7 +592,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#2c2f47",
+        "line-color": "#2f323f",
         "line-width": [
           "interpolate",
           [
@@ -662,7 +662,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#3a3e58",
+        "line-color": "#3f4353",
         "line-width": [
           "interpolate",
           [
@@ -734,7 +734,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#4a4f6c",
+        "line-color": "#4e5265",
         "line-width": [
           "interpolate",
           [
@@ -807,7 +807,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#585e7e",
+        "line-color": "#5b6076",
         "line-width": [
           "interpolate",
           [
@@ -890,16 +890,34 @@
       "source": "openmaptiles",
       "source-layer": "water_name",
       "filter": [
-        "match",
+        "all",
         [
-          "geometry-type"
+          "match",
+          [
+            "geometry-type"
+          ],
+          [
+            "LineString",
+            "MultiLineString"
+          ],
+          true,
+          false
         ],
         [
-          "LineString",
-          "MultiLineString"
-        ],
-        true,
-        false
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "ocean",
+            "sea",
+            "bay",
+            "strait"
+          ],
+          true,
+          false
+        ]
       ],
       "layout": {
         "text-field": [
@@ -934,16 +952,34 @@
       "source": "openmaptiles",
       "source-layer": "water_name",
       "filter": [
-        "match",
+        "all",
         [
-          "geometry-type"
+          "match",
+          [
+            "geometry-type"
+          ],
+          [
+            "MultiPoint",
+            "Point"
+          ],
+          true,
+          false
         ],
         [
-          "MultiPoint",
-          "Point"
-        ],
-        true,
-        false
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "ocean",
+            "sea",
+            "bay",
+            "strait"
+          ],
+          true,
+          false
+        ]
       ],
       "layout": {
         "text-field": [
@@ -1039,10 +1075,10 @@
           [
             "zoom"
           ],
-          15,
-          10.5,
-          17,
-          12.5
+          16,
+          11,
+          18,
+          13
         ],
         "symbol-placement": "line",
         "text-rotation-alignment": "map"
@@ -1052,7 +1088,7 @@
         "text-halo-color": "#12131f",
         "text-halo-width": 1.6
       },
-      "minzoom": 15
+      "minzoom": 16
     },
     {
       "id": "road_name_major",
@@ -1230,7 +1266,7 @@
           [
             "zoom"
           ],
-          10,
+          11,
           10.5,
           15,
           13
@@ -1242,7 +1278,7 @@
         "text-halo-color": "#12131f",
         "text-halo-width": 1.6
       },
-      "minzoom": 10,
+      "minzoom": 11,
       "maxzoom": 16
     },
     {
