@@ -556,6 +556,32 @@ and its assertion in `test/account_test.dart` with it.
 *What it costs to leave:* a string like `deleted_3f2a…` in a chat reads as a
 bug, though it reveals nothing about who wrote it.
 
+### 1.38 Notification settings and consents are readable by everyone
+
+`profiles` has a table-wide SELECT for `anon` and `authenticated`, filtered only
+by blocks, and 14_profile_and_party_media's regression guard keeps it that way
+so that bio inherits the block filter. That is right for the public columns
+(username, bio, avatar, counters), but the same row also carries
+`location_consent`, `push_consent`, `analytics_consent`, `notify_nearby`,
+`notify_radius_meters`, `notify_daily_cap`, `quiet_hours_start`/`_end` and
+`notification_tz`. Any caller, signed in or not, can read whether a given user
+shares their location, when they sleep, and which time zone they are in.
+Found in the Phase 44 audit. Phase 44 put the new `*_consent_at` stamps in the
+owner-read-only `user_consents` table for exactly this reason, and left the
+existing columns alone.
+
+*Fix:* move the private settings out of `profiles` into an owner-read-only
+table (the `user_genders` / `user_names` / `user_consents` pattern). Every
+reader is the owner's own (`DeviceRepository.fetchPrefs`) or a definer engine
+(`wants_nearby_notifications`, `in_quiet_hours`, `claim_notification_jobs`),
+so the change is mechanical, but it touches the proximity engine's hot path
+and its tests. A column-scoped SELECT is not the fix: it is what the guard
+exists to stop.
+
+*What it costs to leave:* no content leaks, but quiet hours plus a time zone is
+a daily routine, and "has location on" marks who the proximity engine can
+reach.
+
 ---
 
 ## 2. Costed: should the map adopt `party_is_past()`?
