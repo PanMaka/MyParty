@@ -10,7 +10,7 @@
 -- invited), both in the Syntagma cluster.
 begin;
 set search_path to public, extensions;
-select plan(29);
+select plan(30);
 
 -- ============================================================
 -- follows: the graph itself
@@ -88,13 +88,20 @@ select isnt_empty(
   'follow edges between two other users are publicly readable'
 );
 
--- Blocked users must not be able to write their own credibility/follow
--- counters through the profiles UPDATE policy, which gates rows, not columns.
+-- Users must not be able to write their own credibility/follow counters. The
+-- profiles UPDATE policy gates rows, not columns; since Phase 44 the column
+-- allow-list (20261021094726) refuses the statement outright, and
+-- protect_credibility_score stays behind it as a second layer.
 select tests.authenticate_as('44444444-4444-4444-4444-444444444444'); -- stranger
 
-update public.profiles
-set follower_count = 9999, credibility_score = 9999
-where id = '44444444-4444-4444-4444-444444444444';
+select throws_ok(
+  $$ update public.profiles
+     set follower_count = 9999, credibility_score = 9999
+     where id = '44444444-4444-4444-4444-444444444444' $$,
+  '42501',
+  null,
+  'the counters are outside the profiles column grant: the UPDATE is refused, not silently reverted'
+);
 
 select is(
   (select follower_count from public.profiles where id = '44444444-4444-4444-4444-444444444444'),

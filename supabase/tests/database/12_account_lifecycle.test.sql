@@ -19,7 +19,7 @@
 --   aaaa...0002  public,  hosted by 1111 ("Syntagma Afterparty")
 begin;
 set search_path to public, extensions;
-select plan(52);
+select plan(54);
 
 
 -- ============================================================
@@ -187,21 +187,32 @@ select is(
 -- ============================================================
 -- 3. The markers are not client-writable.
 --
--- profiles carries a table-wide UPDATE grant and RLS cannot protect a column
--- (gotcha #8), so without the trigger a client could backdate deleted_at and
--- have itself erased tonight, or set erased_at on a live account.
+-- RLS cannot protect a column (gotcha #8). Until Phase 44 profiles carried a
+-- table-wide UPDATE grant and protect_credibility_score silently put these
+-- back; since 20261021094726 they are outside the column allow-list, so the
+-- statement is refused before the trigger runs. Without either, a client
+-- could backdate deleted_at and have itself erased tonight, or set erased_at
+-- on a live account.
 -- ============================================================
-update public.profiles
-set deleted_at = now() - interval '90 days'
-where id = '33333333-3333-3333-3333-333333333333';
+select throws_ok(
+  $$ update public.profiles
+     set deleted_at = now() - interval '90 days'
+     where id = '33333333-3333-3333-3333-333333333333' $$,
+  '42501',
+  null,
+  'deleted_at is outside the profiles column grant');
 
 select ok(
   (select deleted_at from public.profiles where id = '33333333-3333-3333-3333-333333333333')
     > now() - interval '1 day',
-  'a client cannot backdate deleted_at to skip the grace period -- the trigger freezes it');
+  'a client cannot backdate deleted_at to skip the grace period');
 
-update public.profiles set erased_at = now()
-where id = '33333333-3333-3333-3333-333333333333';
+select throws_ok(
+  $$ update public.profiles set erased_at = now()
+     where id = '33333333-3333-3333-3333-333333333333' $$,
+  '42501',
+  null,
+  'erased_at is outside the profiles column grant');
 
 select is(
   (select erased_at from public.profiles where id = '33333333-3333-3333-3333-333333333333'),

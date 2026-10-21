@@ -160,9 +160,10 @@ class DeviceRepository {
     return NotificationPrefs.fromRow(row);
   }
 
-  /// Writes the preference columns. `profiles` already carries a table-wide
-  /// UPDATE grant and an owner-only policy, so these are a plain PATCH — the
-  /// CHECK constraints are what keep them honest, not the client.
+  /// Writes the preference columns. All six are in the `profiles` UPDATE
+  /// column grant (20261021094726) under an owner-only policy, so these are a
+  /// plain PATCH — the CHECK constraints are what keep them honest, not the
+  /// client. The consents are NOT in that grant: see [setPushConsent].
   Future<void> updatePrefs({
     bool? notifyNearby,
     int? radiusMeters,
@@ -195,13 +196,18 @@ class DeviceRepository {
     await _client.from('profiles').update(patch).eq('id', userId);
   }
 
+  /// Sets `profiles.push_consent` through `set_push_consent`, the only write
+  /// door since Phase 44: the column is outside the UPDATE grant. The function
+  /// also records when consent was given (`user_consents`, kept on
+  /// withdrawal) and refuses `true` while the account is scheduled for
+  /// deletion, with 42501.
   Future<void> setPushConsent(bool granted) async {
-    final userId = currentUserId;
-    if (userId == null) return;
-    await _client.from('profiles').update({'push_consent': granted}).eq('id', userId);
+    if (currentUserId == null) return;
+    await _client.rpc('set_push_consent', params: {'p_granted': granted});
   }
 
-  /// Sets `profiles.location_consent`.
+  /// Sets `profiles.location_consent` through `set_location_consent`, for the
+  /// same reasons as [setPushConsent].
   ///
   /// Setting it to false is not merely bookkeeping: a trigger on that column
   /// going true→false nulls every `last_location` this user has, immediately
@@ -210,9 +216,8 @@ class DeviceRepository {
   /// collection leaves the last cell on disk for up to 24 hours, still matchable
   /// by the proximity queries.
   Future<void> setLocationConsent(bool granted) async {
-    final userId = currentUserId;
-    if (userId == null) return;
-    await _client.from('profiles').update({'location_consent': granted}).eq('id', userId);
+    if (currentUserId == null) return;
+    await _client.rpc('set_location_consent', params: {'p_granted': granted});
   }
 
   /// Distance in metres between two points, used only to decide whether a new

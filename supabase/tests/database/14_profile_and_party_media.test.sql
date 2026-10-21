@@ -246,11 +246,13 @@ select throws_ok(
 -- grant would let a future migration hand out `username` without `bio`, and the
 -- policy would be none the wiser.
 --
--- So this section asserts the shape of the grant rather than its effect, and
--- pairs each assertion with a control on `user_devices` -- the one table that
--- deliberately DOES carry column-scoped grants (gotcha #8/#12). Without those
--- controls, both assertions below would pass just as happily against a query
--- that was broken and finding nothing.
+-- So this section asserts the shape of the SELECT grant rather than its
+-- effect. Phase 44 (20261021094726) narrowed UPDATE to a column list, which is
+-- exactly why the guard below reads SELECT entries only: a column-scoped
+-- UPDATE decides what the owner may write, not what anyone may read, and
+-- leaves bio's inherited filter alone. The UPDATE entries double as the
+-- control: the same query over the same catalog DOES find them, so an empty
+-- SELECT answer means there are none, not that the query is broken.
 --
 -- Run as postgres: these read catalogs, not data, and the current role must not
 -- be able to change the answer.
@@ -261,20 +263,22 @@ set local role postgres;
 select is_empty(
   $$ select a.attname
      from pg_attribute a
+     cross join lateral aclexplode(a.attacl) g
      where a.attrelid = 'public.profiles'::regclass
        and a.attnum > 0
        and not a.attisdropped
-       and a.attacl is not null $$,
-  'THE REGRESSION GUARD: no column of public.profiles carries a column-scoped ACL -- a migration that narrows the table-wide grant to a column list breaks bio''s inherited block filter, and must fail here first');
+       and g.privilege_type = 'SELECT' $$,
+  'THE REGRESSION GUARD: no column of public.profiles carries a column-scoped SELECT -- a migration that narrows the table-wide read to a column list breaks bio''s inherited block filter, and must fail here first');
 
 select isnt_empty(
   $$ select a.attname
      from pg_attribute a
-     where a.attrelid = 'public.user_devices'::regclass
+     cross join lateral aclexplode(a.attacl) g
+     where a.attrelid = 'public.profiles'::regclass
        and a.attnum > 0
        and not a.attisdropped
-       and a.attacl is not null $$,
-  'CONTROL: the identical query DOES find column ACLs on user_devices -- so the assertion above is empty because profiles has none, not because the query is broken');
+       and g.privilege_type = 'UPDATE' $$,
+  'CONTROL: the identical query DOES find the column-scoped UPDATE entries -- so the assertion above is empty because there is no column SELECT, not because the query is broken');
 
 select ok(
   has_table_privilege('anon', 'public.profiles', 'select')
@@ -282,12 +286,14 @@ select ok(
   'SELECT on profiles is granted table-wide, so columns added later are readable without touching 20260812115436');
 
 select ok(
-  has_table_privilege('authenticated', 'public.profiles', 'update'),
-  'UPDATE on profiles is granted table-wide, which is what makes bio and avatar_path client-writable -- the CHECK constraints are the guard, since a grant cannot express one');
+  has_column_privilege('authenticated', 'public.profiles', 'bio', 'update')
+  and has_column_privilege('authenticated', 'public.profiles', 'avatar_path', 'update'),
+  'bio and avatar_path are in the UPDATE column list -- the CHECK constraints are the guard on their values, since a grant cannot express one');
 
 select ok(
-  not has_table_privilege('authenticated', 'public.user_devices', 'update'),
-  'CONTROL: has_table_privilege returns FALSE on user_devices, whose UPDATE is column-scoped -- proving the two assertions above would go red if profiles were ever narrowed the same way');
+  not has_table_privilege('authenticated', 'public.profiles', 'update')
+  and not has_column_privilege('authenticated', 'public.profiles', 'username', 'update'),
+  'but UPDATE is no longer table-wide: username, like every column outside the list, goes through a function (Phase 44)');
 
 
 -- ============================================================

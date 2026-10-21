@@ -41,15 +41,6 @@ class AuthService {
     );
   }
 
-  /// First and last name, picked on the username screen. Kept in the owner's
-  /// user_metadata, which nothing else can read — and which the account export
-  /// does not include yet (docs/backlog.md 1.32).
-  Future<void> saveNames({required String firstName, required String lastName}) async {
-    await _supabase.auth.updateUser(
-      UserAttributes(data: {'first_name': firstName, 'last_name': lastName}),
-    );
-  }
-
   /// The username screen's way back: deletes the account Create Account just
   /// made (abandon_signup, which refuses once onboarding is complete), then
   /// signs out. Without the delete, the email would stay taken by an account

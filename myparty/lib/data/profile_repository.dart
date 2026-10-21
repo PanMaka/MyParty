@@ -36,6 +36,55 @@ class AvatarCommitFailure implements Exception {
       'AvatarCommitFailure(cause: $cause, orphanedPath: $orphanedPath)';
 }
 
+/// Why `complete_onboarding` or `change_username` refused a username.
+enum UsernameRefusal {
+  /// Fails `username_is_valid` (22023). The client's [UsernameConstraint]
+  /// should have caught it first.
+  invalid,
+
+  /// The exact name the account already has (22023). Refused so a slip does
+  /// not cost 30 days.
+  unchanged,
+
+  /// Held by another account or reserved after a rename (23505). One reason
+  /// for both, on purpose: the server does not say which.
+  taken,
+
+  /// Changed less than 30 days ago (42501); [UsernameRefused.nextChangeAt]
+  /// says when.
+  cooldown,
+}
+
+/// A username write the server refused for a reason the user can act on.
+/// Anything else (network, a 42501 that is not the cooldown) is rethrown as it
+/// came.
+class UsernameRefused implements Exception {
+  const UsernameRefused(this.reason, {this.nextChangeAt});
+
+  final UsernameRefusal reason;
+
+  /// Only for [UsernameRefusal.cooldown]: when a change is next allowed, from
+  /// the error's DETAIL. Null if it could not be read.
+  final DateTime? nextChangeAt;
+
+  /// Turns the PostgREST error into a refusal, or null when it is not one.
+  static UsernameRefused? fromPostgrest(PostgrestException error) {
+    return switch ((error.code, error.message)) {
+      ('23505', _) => const UsernameRefused(UsernameRefusal.taken),
+      ('22023', 'invalid username') => const UsernameRefused(UsernameRefusal.invalid),
+      ('22023', 'username unchanged') => const UsernameRefused(UsernameRefusal.unchanged),
+      ('42501', 'username change cooldown') => UsernameRefused(
+          UsernameRefusal.cooldown,
+          nextChangeAt: DateTime.tryParse('${error.details ?? ''}')?.toLocal(),
+        ),
+      _ => null,
+    };
+  }
+
+  @override
+  String toString() => 'UsernameRefused($reason, nextChangeAt: $nextChangeAt)';
+}
+
 /// Every widget-level Supabase call for the profile screen's own data — the two
 /// privacy columns and the three counters — goes through here. Screens never
 /// call `Supabase.instance.client` directly. Mirrors [SocialRepository] and
@@ -144,11 +193,11 @@ class ProfileRepository {
   /// bio a no-op — the failure would be invisible, and it would look exactly
   /// like the code above it. Do not unify them.
   ///
-  /// A plain PATCH, like the privacy tiers: `profiles` carries a table-wide
-  /// UPDATE grant with an owner-only row policy, and this is the user's own
-  /// text about themselves — the same shape as `map_visibility`, and
-  /// deliberately not covered by `protect_credibility_score`, which is for
-  /// system-maintained columns.
+  /// A plain PATCH, like the privacy tiers: `bio` is in the `profiles` UPDATE
+  /// column grant (20261021094726) with an owner-only row policy, and this is
+  /// the user's own text about themselves — the same shape as
+  /// `map_visibility`. The username is not in that grant; see
+  /// [changeUsername].
   ///
   /// Validation is [BioConstraint]'s job on the way in, and the CHECK
   /// constraint's job for real. A value that gets past the first arrives here
@@ -170,19 +219,84 @@ class ProfileRepository {
     ) as bool;
   }
 
-  /// Onboarding's last step: sets the signed-in user's username and stamps
-  /// `onboarding_completed_at`, which is what routes them past
-  /// [UsernameSetupScreen] from then on. The unique constraint on `username`
-  /// is the real arbiter; [isUsernameAvailable] only gives a friendlier error
-  /// for the common case.
-  Future<void> completeOnboarding(String username) async {
-    final userId = currentUserId;
-    if (userId == null) throw StateError('No signed-in user to onboard');
+  /// Onboarding's last step, through `complete_onboarding`: the username, the
+  /// first and last name, and `onboarding_completed_at` (the server's clock),
+  /// in one transaction. The stamp is what routes the user past
+  /// [UsernameSetupScreen] from then on.
+  ///
+  /// The server is the real arbiter of the name; [isUsernameAvailable] only
+  /// gives a friendlier error for the common case. Throws [UsernameRefused]
+  /// for a taken or invalid name. Choosing the first name does not start the
+  /// 30-day cooldown, so it can be fixed once straight away.
+  Future<void> completeOnboarding({
+    required String username,
+    required String firstName,
+    required String lastName,
+  }) async {
+    if (currentUserId == null) throw StateError('No signed-in user to onboard');
 
-    await _client.from('profiles').update({
-      'username': username,
-      'onboarding_completed_at': DateTime.now().toUtc().toIso8601String(),
-    }).eq('id', userId);
+    try {
+      await _client.rpc('complete_onboarding', params: {
+        'p_username': username,
+        'p_first_name': firstName,
+        'p_last_name': lastName,
+      });
+    } on PostgrestException catch (error) {
+      throw UsernameRefused.fromPostgrest(error) ?? error;
+    }
+  }
+
+  /// Changes the signed-in user's username through `change_username`, and
+  /// returns when the next change is allowed.
+  ///
+  /// The server enforces everything: the format rule, the 30-day cooldown
+  /// (which is also the rate limit) and the 14-day reservation of the name
+  /// given up. Throws [UsernameRefused] for each of those. No `DataChange`:
+  /// nothing of the viewer's own already renders their handle except the
+  /// profile, which reloads (backlog 1.20).
+  Future<DateTime> changeUsername(String username) async {
+    try {
+      final next = await _client.rpc('change_username', params: {'p_username': username});
+      return DateTime.parse(next as String).toLocal();
+    } on PostgrestException catch (error) {
+      throw UsernameRefused.fromPostgrest(error) ?? error;
+    }
+  }
+
+  /// When the signed-in user may next change their username, or null when
+  /// they may now. The 30 days lives on the server only, so the screen asks
+  /// rather than adding it to anything.
+  Future<DateTime?> fetchUsernameNextChangeAt() async {
+    if (currentUserId == null) return null;
+    final next = await _client.rpc('username_next_change_at');
+    return next == null ? null : DateTime.parse(next as String).toLocal();
+  }
+
+  /// The signed-in user's first and last name, from `user_names` under its
+  /// owner-only policy. Null when there is no row (an account onboarded
+  /// before names were asked for) or when signed out. Nobody else can read
+  /// them.
+  Future<({String firstName, String lastName})?> fetchMyNames() async {
+    final userId = currentUserId;
+    if (userId == null) return null;
+
+    final row = await _client
+        .from('user_names')
+        .select('first_name, last_name')
+        .eq('user_id', userId)
+        .maybeSingle();
+    if (row == null) return null;
+    return (firstName: row['first_name'] as String, lastName: row['last_name'] as String);
+  }
+
+  /// Sets both names through `set_my_names`, never `.upsert()`: the table has
+  /// no client write grant. The server trims and refuses an empty or
+  /// over-long name with 22023.
+  Future<void> setNames({required String firstName, required String lastName}) async {
+    await _client.rpc('set_my_names', params: {
+      'p_first_name': firstName,
+      'p_last_name': lastName,
+    });
   }
 
   /// Uploads a new avatar and points `profiles.avatar_path` at it, removing the
@@ -238,7 +352,10 @@ class ProfileRepository {
   ///     not a leak.
   ///
   /// [previousPath] is the caller's current `avatar_path`, or null on a first
-  /// upload. Passed in rather than re-read here so this method makes exactly
+  /// upload.
+  ///
+  /// The hourly `avatar-sweep` (20261021094728) collects whatever (3) and the
+  /// orphan branch of (2) leave behind, so "bounded" now also means "temporary". Passed in rather than re-read here so this method makes exactly
   /// two writes and one delete, and so a caller holding a stale profile cannot
   /// cause it to delete an object the column still points at.
   Future<String?> replaceAvatar({
@@ -282,6 +399,22 @@ class ProfileRepository {
     return newPath;
   }
 
+  /// Removes the avatar: nulls `profiles.avatar_path`, then deletes the
+  /// object [previousPath] names.
+  ///
+  /// The same order as [replaceAvatar] and for the same reason: the column is
+  /// the commit, and until it is written the old photo is still the live one.
+  /// If the column write fails this throws and nothing has changed. If the
+  /// delete fails it does NOT throw — the photo is gone from the profile,
+  /// which is what was asked — and returns false; the object is unreferenced
+  /// from that moment, so the hourly `avatar-sweep` deletes it through the
+  /// Storage API within the hour. The bucket is public, so until then a URL
+  /// someone already holds still loads.
+  Future<bool> removeAvatar({required String previousPath}) async {
+    await writeAvatarPath(null);
+    return removeAvatarObject(previousPath);
+  }
+
   // ---- The three primitives [replaceAvatar] sequences. ----
   //
   // Split out as one seam so the ORDER can be tested, which is the part of
@@ -293,8 +426,8 @@ class ProfileRepository {
   // about what the caller saw.
   //
   // Not private, for that reason alone. Nothing outside this class and its
-  // test doubles should call them; [replaceAvatar] is the only supported way
-  // to change an avatar, because it is the only one that gets the order right.
+  // test doubles should call them; [replaceAvatar] and [removeAvatar] are the
+  // only supported ways to change an avatar, because they get the order right.
 
   /// PUTs the bytes. Direct client write, owner-scoped by the bucket policy.
   Future<void> uploadAvatarObject(String path, Uint8List bytes, String contentType) async {
@@ -305,9 +438,10 @@ class ProfileRepository {
         );
   }
 
-  /// The commit: points the column at [path]. Throws on refusal — the caller
-  /// turns that into an [AvatarCommitFailure] after cleaning up.
-  Future<void> writeAvatarPath(String path) async {
+  /// The commit: points the column at [path], or clears it when null. Throws
+  /// on refusal — [replaceAvatar] turns that into an [AvatarCommitFailure]
+  /// after cleaning up.
+  Future<void> writeAvatarPath(String? path) async {
     final userId = currentUserId;
     if (userId == null) throw StateError('Not signed in');
 
@@ -353,8 +487,8 @@ class ProfileRepository {
 
   /// Writes any of the three tiers.
   ///
-  /// A plain PATCH: `profiles` already carries a table-wide UPDATE grant and an
-  /// owner-only policy, and both columns are `not null` enums, so a bad value is
+  /// A plain PATCH: all three columns are in the `profiles` UPDATE column
+  /// grant under an owner-only policy, and all three columns are `not null` enums, so a bad value is
   /// a 22P02 from the database rather than a silently stored string. The
   /// `protect_credibility_score` trigger deliberately does not freeze these —
   /// it exists for system-maintained columns, and freezing a preference the user

@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:myparty/data/profile_repository.dart';
 import 'package:myparty/models/profile.dart';
@@ -26,6 +27,10 @@ class _FakeProfileRepository extends ProfileRepository {
     this.failCommit = false,
     this.failRemove = false,
     this.failBio = false,
+    this.names = (firstName: 'Nikos', lastName: 'Papas'),
+    this.nextUsernameChange,
+    this.refuseUsername,
+    this.failNames = false,
   });
 
   static const _defaultProfile = Profile(
@@ -43,6 +48,19 @@ class _FakeProfileRepository extends ProfileRepository {
   final bool failCommit;
   final bool failRemove;
   final bool failBio;
+
+  /// What `user_names` holds; null for an account with no row.
+  final ({String firstName, String lastName})? names;
+
+  /// What `username_next_change_at` answers; null means a change is open.
+  final DateTime? nextUsernameChange;
+
+  /// When set, changeUsername is refused for this reason.
+  final UsernameRefusal? refuseUsername;
+  final bool failNames;
+
+  final List<String> usernameWrites = [];
+  final List<(String, String)> nameWrites = [];
 
   /// Every primitive call in order, as `verb:argument`. Asserting on the whole
   /// list rather than on individual flags is deliberate — the ordering is the
@@ -87,7 +105,28 @@ class _FakeProfileRepository extends ProfileRepository {
   }
 
   @override
-  Future<void> writeAvatarPath(String path) async {
+  Future<({String firstName, String lastName})?> fetchMyNames() async => names;
+
+  @override
+  Future<DateTime?> fetchUsernameNextChangeAt() async => nextUsernameChange;
+
+  @override
+  Future<DateTime> changeUsername(String username) async {
+    usernameWrites.add(username);
+    if (refuseUsername != null) {
+      throw UsernameRefused(refuseUsername!, nextChangeAt: DateTime(2026, 11, 20));
+    }
+    return DateTime(2026, 11, 20);
+  }
+
+  @override
+  Future<void> setNames({required String firstName, required String lastName}) async {
+    nameWrites.add((firstName, lastName));
+    if (failNames) throw const PostgrestException(message: 'invalid name', code: '22023');
+  }
+
+  @override
+  Future<void> writeAvatarPath(String? path) async {
     calls.add('write:$path');
     if (failCommit) throw Exception('42501');
   }
@@ -128,11 +167,29 @@ final _bytes = base64Decode(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
 );
 
+/// The bio is the last of the screen's four fields (username, first name,
+/// last name, bio).
+final _bioInput = find.byType(TextField).last;
+final _usernameInput = find.byType(TextField).first;
+final _firstNameInput = find.byType(TextField).at(1);
+final _lastNameInput = find.byType(TextField).at(2);
+
+Future<void> _tapSave(WidgetTester tester) async {
+  await tester.ensureVisible(find.text('Save'));
+  await tester.tap(find.text('Save'));
+  await tester.pumpAndSettle();
+}
+
 Future<void> _pumpEditor(
   WidgetTester tester,
   _FakeProfileRepository repo, {
   ImagePicker? picker,
 }) async {
+  // Tall enough for the whole form (photo, username, names, bio, Save) to be
+  // built: the ListView is lazy, and a Save below the fold does not exist.
+  tester.view.physicalSize = const Size(800, 2000);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.reset);
   await tester.pumpWidget(
     MaterialApp(
       theme: buildAppTheme(),
@@ -372,19 +429,32 @@ void main() {
   // The screen.
   // ---------------------------------------------------------------------
   group('the form', () {
-    testWidgets('offers a bio and a photo, and nothing else', (tester) async {
+    testWidgets('offers a username, a private name, a bio and a photo, and nothing else',
+        (tester) async {
       await _pumpEditor(tester, _FakeProfileRepository());
 
-      expect(find.byType(TextField), findsOneWidget);
+      expect(find.byType(TextField), findsNWidgets(4));
+      expect(find.text('USERNAME'), findsOneWidget);
+      expect(find.text('YOUR NAME'), findsOneWidget);
       expect(find.text('BIO'), findsOneWidget);
       expect(find.text('Change photo'), findsOneWidget);
+      // The name is the owner's alone (user_names), which the screen says.
+      expect(find.text('Only you can see your name. Others see your username.'), findsOneWidget);
 
       // There is no display_name, school or department column, and a form is
       // exactly where that decision would quietly be reversed.
-      expect(find.textContaining('Name'), findsNothing);
+      expect(find.textContaining('Display name'), findsNothing);
       expect(find.textContaining('School'), findsNothing);
       expect(find.textContaining('Department'), findsNothing);
       expect(find.textContaining('University'), findsNothing);
+    });
+
+    testWidgets('seeds the username and the names', (tester) async {
+      await _pumpEditor(tester, _FakeProfileRepository());
+
+      expect(find.text('nikos'), findsOneWidget);
+      expect(find.text('Nikos'), findsOneWidget);
+      expect(find.text('Papas'), findsOneWidget);
     });
 
     testWidgets('seeds the field from the stored bio', (tester) async {
@@ -429,7 +499,7 @@ void main() {
       final repo = _FakeProfileRepository();
       await _pumpEditor(tester, repo);
 
-      await tester.enterText(find.byType(TextField), '  Ψυρρή, κάθε Πέμπτη  ');
+      await tester.enterText(_bioInput, '  Ψυρρή, κάθε Πέμπτη  ');
       await tester.pumpAndSettle();
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
@@ -445,7 +515,7 @@ void main() {
       final repo = _FakeProfileRepository();
       await _pumpEditor(tester, repo);
 
-      await tester.enterText(find.byType(TextField), '   ');
+      await tester.enterText(_bioInput, '   ');
       await tester.pumpAndSettle();
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
@@ -457,7 +527,7 @@ void main() {
       final repo = _FakeProfileRepository();
       await _pumpEditor(tester, repo);
 
-      await tester.enterText(find.byType(TextField), '  Κουκάκι · ταράτσες και techno ');
+      await tester.enterText(_bioInput, '  Κουκάκι · ταράτσες και techno ');
       await tester.pumpAndSettle();
 
       // Normalizes to what is already stored, so the form is not dirty and the
@@ -473,7 +543,7 @@ void main() {
       final repo = _FakeProfileRepository();
       await _pumpEditor(tester, repo);
 
-      await tester.enterText(find.byType(TextField), 'α' * 161);
+      await tester.enterText(_bioInput, 'α' * 161);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
@@ -485,7 +555,7 @@ void main() {
     testWidgets('counts what the constraint counts', (tester) async {
       await _pumpEditor(tester, _FakeProfileRepository());
 
-      await tester.enterText(find.byType(TextField), '🎉🎉🎉');
+      await tester.enterText(_bioInput, '🎉🎉🎉');
       await tester.pumpAndSettle();
 
       // 3, not 6. The counter reads BioConstraint.length for the same reason
@@ -569,7 +639,7 @@ void main() {
       final repo = _FakeProfileRepository(failBio: true);
       await _pumpEditor(tester, repo);
 
-      await tester.enterText(find.byType(TextField), 'Νέο bio');
+      await tester.enterText(_bioInput, 'Νέο bio');
       await tester.pumpAndSettle();
       await tester.tap(find.text('Change photo'));
       await tester.pumpAndSettle();
@@ -640,6 +710,257 @@ void main() {
       expect(repo.calls.any((c) => c.startsWith('write:')), isFalse);
       expect(repo.calls.last, startsWith('remove:'));
       expect(repo.calls.last, isNot('remove:me/old.jpg'));
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // The username: format, confirmation, cooldown (Phase 44).
+  // ---------------------------------------------------------------------
+  group('the username', () {
+    testWidgets('a change is confirmed before anything is written', (tester) async {
+      final repo = _FakeProfileRepository();
+      await _pumpEditor(tester, repo);
+
+      await tester.enterText(_usernameInput, ' nikos.p ');
+      await tester.pumpAndSettle();
+      await _tapSave(tester);
+
+      expect(find.text('Change your username to @nikos.p?'), findsOneWidget);
+      expect(find.textContaining('@nikos stays reserved for you for 14 days'), findsOneWidget);
+      expect(repo.usernameWrites, isEmpty);
+
+      await tester.tap(find.text('Change'));
+      await tester.pumpAndSettle();
+
+      expect(repo.usernameWrites, ['nikos.p']);
+    });
+
+    testWidgets('declining the confirmation writes nothing at all', (tester) async {
+      final repo = _FakeProfileRepository();
+      await _pumpEditor(tester, repo);
+
+      await tester.enterText(_usernameInput, 'nikos.p');
+      await tester.enterText(_bioInput, 'Νέο bio');
+      await tester.pumpAndSettle();
+      await _tapSave(tester);
+      await tester.tap(find.text('Not now'));
+      await tester.pumpAndSettle();
+
+      expect(repo.usernameWrites, isEmpty);
+      expect(repo.bioWrites, isEmpty);
+      expect(find.text('Save'), findsOneWidget);
+    });
+
+    testWidgets('a name breaking the rule is refused before the round trip', (tester) async {
+      final repo = _FakeProfileRepository();
+      await _pumpEditor(tester, repo);
+
+      await tester.enterText(_usernameInput, 'nikos..p');
+      await tester.pumpAndSettle();
+      await _tapSave(tester);
+
+      expect(find.text("A username can't have two dots in a row."), findsOneWidget);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(repo.usernameWrites, isEmpty);
+    });
+
+    testWidgets('a taken name is said under the field, and nothing after it is written',
+        (tester) async {
+      final repo = _FakeProfileRepository(refuseUsername: UsernameRefusal.taken);
+      await _pumpEditor(tester, repo);
+
+      await tester.enterText(_usernameInput, 'maria');
+      await tester.enterText(_bioInput, 'Νέο bio');
+      await tester.pumpAndSettle();
+      await _tapSave(tester);
+      await tester.tap(find.text('Change'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('That username is already taken.'), findsOneWidget);
+      expect(repo.bioWrites, isEmpty);
+    });
+
+    testWidgets('during the cooldown the field is locked and says until when', (tester) async {
+      await _pumpEditor(tester, _FakeProfileRepository(nextUsernameChange: DateTime(2026, 11, 20)));
+
+      expect(tester.widget<TextField>(_usernameInput).enabled, isFalse);
+      expect(find.text('You can change your username again on 20 Nov 2026.'), findsOneWidget);
+      expect(find.text(UsernameConstraint.rules), findsNothing);
+    });
+
+    testWidgets('when a change is open, the rules and the 30/14 days are stated', (tester) async {
+      await _pumpEditor(tester, _FakeProfileRepository());
+
+      expect(tester.widget<TextField>(_usernameInput).enabled, isTrue);
+      expect(find.text(UsernameConstraint.rules), findsOneWidget);
+      expect(
+        find.text('You can change it once every 30 days. Your old username stays reserved for 14 days.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a name from before the rule is flagged, not forced', (tester) async {
+      final repo = _FakeProfileRepository(
+        profile: const Profile(id: 'me', username: 'old..style', followerCount: 0, followingCount: 0),
+      );
+      await _pumpEditor(tester, repo);
+
+      expect(find.textContaining("doesn't meet these rules. You can keep it"), findsOneWidget);
+      // Nothing is dirty: keeping the name is a valid choice, not a pending fix.
+      await tester.enterText(_bioInput, 'Νέο bio');
+      await tester.pumpAndSettle();
+      await _tapSave(tester);
+      expect(repo.usernameWrites, isEmpty);
+      expect(repo.bioWrites, ['Νέο bio']);
+    });
+
+    testWidgets('a valid name shows no such notice', (tester) async {
+      await _pumpEditor(tester, _FakeProfileRepository());
+      expect(find.textContaining("doesn't meet these rules"), findsNothing);
+    });
+
+    testWidgets('a retry after a later failure does not spend the username twice', (tester) async {
+      final repo = _FakeProfileRepository(failCommit: true);
+      await _pumpEditor(tester, repo);
+
+      await tester.enterText(_usernameInput, 'nikos.p');
+      await tester.tap(find.text('Change photo'));
+      await tester.pumpAndSettle();
+      await _tapSave(tester);
+      await tester.tap(find.text('Change'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Your photo was not saved. Try again.'), findsOneWidget);
+      expect(repo.usernameWrites, ['nikos.p']);
+
+      await _tapSave(tester);
+
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(repo.usernameWrites, ['nikos.p']);
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // First and last name (user_names, owner-only).
+  // ---------------------------------------------------------------------
+  group('the names', () {
+    testWidgets('saves both names, trimmed', (tester) async {
+      final repo = _FakeProfileRepository();
+      await _pumpEditor(tester, repo);
+
+      await tester.enterText(_firstNameInput, ' Νίκος ');
+      await tester.pumpAndSettle();
+      await _tapSave(tester);
+
+      expect(repo.nameWrites, [('Νίκος', 'Papas')]);
+      expect(repo.usernameWrites, isEmpty);
+    });
+
+    testWidgets('half a name is refused under its field', (tester) async {
+      final repo = _FakeProfileRepository();
+      await _pumpEditor(tester, repo);
+
+      await tester.enterText(_lastNameInput, '   ');
+      await tester.pumpAndSettle();
+      await _tapSave(tester);
+
+      expect(find.text('Please enter your last name.'), findsOneWidget);
+      expect(repo.nameWrites, isEmpty);
+    });
+
+    testWidgets('an account with no names starts empty and stays clean', (tester) async {
+      final repo = _FakeProfileRepository(names: null);
+      await _pumpEditor(tester, repo);
+
+      expect(tester.widget<TextField>(_firstNameInput).controller!.text, '');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(repo.nameWrites, isEmpty);
+    });
+
+    testWidgets('a refused name write says so', (tester) async {
+      final repo = _FakeProfileRepository(failNames: true);
+      await _pumpEditor(tester, repo);
+
+      await tester.enterText(_firstNameInput, 'Νίκος');
+      await tester.pumpAndSettle();
+      await _tapSave(tester);
+
+      expect(find.text('Your name was not saved. Try again.'), findsOneWidget);
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // Remove photo (backlog 1.1): the third state.
+  // ---------------------------------------------------------------------
+  group('removing the photo', () {
+    testWidgets('clears the column first, then deletes the object', (tester) async {
+      final repo = _FakeProfileRepository();
+      await _pumpEditor(tester, repo);
+
+      await tester.tap(find.text('Remove photo'));
+      await tester.pumpAndSettle();
+      expect(find.text('It will be removed when you save.'), findsOneWidget);
+      expect(repo.calls, isEmpty);
+
+      await _tapSave(tester);
+
+      expect(repo.calls, ['write:null', 'remove:me/old.jpg']);
+    });
+
+    testWidgets('a failed column write removes nothing and says so', (tester) async {
+      final repo = _FakeProfileRepository(failCommit: true);
+      await _pumpEditor(tester, repo);
+
+      await tester.tap(find.text('Remove photo'));
+      await tester.pumpAndSettle();
+      await _tapSave(tester);
+
+      expect(repo.calls, ['write:null']);
+      expect(find.text('Your photo was not removed. Try again.'), findsOneWidget);
+    });
+
+    testWidgets('an object that will not delete is not a failure: the sweep has it',
+        (tester) async {
+      final repo = _FakeProfileRepository(failRemove: true);
+      await _pumpEditor(tester, repo);
+
+      await tester.tap(find.text('Remove photo'));
+      await tester.pumpAndSettle();
+      await _tapSave(tester);
+
+      expect(repo.calls, ['write:null', 'remove:me/old.jpg']);
+      expect(find.textContaining('not removed'), findsNothing);
+    });
+
+    testWidgets('"Keep photo" takes it back, and picking a photo replaces the removal',
+        (tester) async {
+      final repo = _FakeProfileRepository();
+      await _pumpEditor(tester, repo);
+
+      await tester.tap(find.text('Remove photo'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Keep photo'));
+      await tester.pumpAndSettle();
+      expect(find.text('It will be removed when you save.'), findsNothing);
+      expect(find.text('Remove photo'), findsOneWidget);
+
+      await tester.tap(find.text('Remove photo'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Change photo'));
+      await tester.pumpAndSettle();
+      expect(find.text('It will upload when you save.'), findsOneWidget);
+      expect(find.text('Keep photo'), findsNothing);
+    });
+
+    testWidgets('is not offered when there is no photo', (tester) async {
+      await _pumpEditor(
+        tester,
+        _FakeProfileRepository(
+          profile: const Profile(id: 'me', username: 'nikos', followerCount: 0, followingCount: 0),
+        ),
+      );
+      expect(find.text('Remove photo'), findsNothing);
     });
   });
 }

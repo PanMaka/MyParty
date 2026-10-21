@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../data/profile_repository.dart';
+import '../../models/profile.dart';
 import '../../services/auth_drafts.dart';
 import '../../services/auth_service.dart';
 import '../widgets/auth_branding.dart';
@@ -25,8 +26,7 @@ class UsernameSetupScreen extends StatefulWidget {
   /// [ProfileRepository].
   final ProfileRepository? repository;
 
-  /// Same, for saving the names and for the undo behind the back arrow; null
-  /// means [AuthService].
+  /// Same, for the undo behind the back arrow; null means [AuthService].
   final AuthService? authService;
 
   @override
@@ -53,9 +53,9 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
     final lastName = _lastNameController.text.trim();
     final username = _usernameController.text.trim();
     setState(() {
-      _firstNameError = firstName.isEmpty ? 'Please enter your first name.' : null;
-      _lastNameError = lastName.isEmpty ? 'Please enter your last name.' : null;
-      _errorText = username.length < 3 ? 'Username must be at least 3 characters' : null;
+      _firstNameError = PersonNameConstraint.validate(firstName, label: 'first name');
+      _lastNameError = PersonNameConstraint.validate(lastName, label: 'last name');
+      _errorText = UsernameConstraint.validate(username);
     });
     if (_firstNameError != null || _lastNameError != null || _errorText != null) return;
 
@@ -72,13 +72,23 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
         return;
       }
 
-      // Names first: completeOnboarding is what makes AuthGate stop showing
-      // this screen, so anything after it might never run.
-      await _auth.saveNames(firstName: firstName, lastName: lastName);
-      await _profiles.completeOnboarding(username);
+      // One call: complete_onboarding writes the names and the username
+      // together, so there is no order to get wrong.
+      await _profiles.completeOnboarding(
+        username: username,
+        firstName: firstName,
+        lastName: lastName,
+      );
       _drafts.clear();
 
       if (mounted) widget.onOnboarded();
+    } on UsernameRefused catch (e) {
+      // Only taken and invalid can happen here: the other two need an
+      // onboarded account. A race with someone else claiming the name between
+      // the check and the write lands as taken.
+      setState(() => _errorText = e.reason == UsernameRefusal.taken
+          ? 'That username is already taken'
+          : UsernameConstraint.rules);
     } on PostgrestException catch (e) {
       setState(() => _errorText = e.message);
     } on AuthException catch (e) {
@@ -196,7 +206,11 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
                     decoration: InputDecoration(
                       labelText: 'Username',
                       labelStyle: const TextStyle(color: Colors.white70),
+                      helperText: UsernameConstraint.rules,
+                      helperMaxLines: 2,
+                      helperStyle: const TextStyle(color: Colors.white60),
                       errorText: _errorText,
+                      errorMaxLines: 2,
                       focusedBorder: const UnderlineInputBorder(
                         borderSide: BorderSide(color: Colors.white),
                       ),
