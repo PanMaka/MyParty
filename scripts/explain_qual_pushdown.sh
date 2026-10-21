@@ -218,7 +218,7 @@ select p.id, p.going_count
 from public.parties p join public.profiles pr on p.host_id = pr.id
 where p.status = 'published' and (p.ends_at is null or p.ends_at > now())
   and st_dwithin(p.location, st_point(:lon, :lat)::geography, 5000)
-  and (pr.map_visibility = 'public' or p.host_id = (select auth.uid()));
+  and (p.host_id = (select auth.uid()) or public.host_on_my_map(p.host_id));
 
 \echo ''
 \echo '### + "tonight" WINDOW -- what the Αργότερα απόψε chip would add'
@@ -228,7 +228,7 @@ from public.parties p join public.profiles pr on p.host_id = pr.id
 where p.status = 'published' and (p.ends_at is null or p.ends_at > now())
   and p.starts_at >= now() and p.starts_at < now() + interval '6 hours'
   and st_dwithin(p.location, st_point(:lon, :lat)::geography, 5000)
-  and (pr.map_visibility = 'public' or p.host_id = (select auth.uid()));
+  and (p.host_id = (select auth.uid()) or public.host_on_my_map(p.host_id));
 
 \echo ''
 \echo '==================================================================='

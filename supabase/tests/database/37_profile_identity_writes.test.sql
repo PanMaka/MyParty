@@ -86,7 +86,7 @@ select is(
 -- ===========================================================================
 select lives_ok($$ select public.set_location_consent(true) $$, 'set_location_consent(true) runs');
 select is(
-  (select location_consent from public.profiles where id = '11111111-1111-1111-1111-111111111111'),
+  (select location_consent from public.get_my_settings()),
   true, 'it sets the boolean');
 select isnt(
   (select location_consent_at from public.user_consents where user_id = '11111111-1111-1111-1111-111111111111'),
@@ -106,7 +106,7 @@ select is(
 
 select public.set_location_consent(false);
 select is(
-  (select location_consent from public.profiles where id = '11111111-1111-1111-1111-111111111111'),
+  (select location_consent from public.get_my_settings()),
   false, 'false withdraws');
 select is(
   (select location_consent_at from public.user_consents where user_id = '11111111-1111-1111-1111-111111111111'),
@@ -183,7 +183,7 @@ select is(
   (select username from public.profiles where id = 'e44e0000-0000-0000-0000-000000000001'),
   'ana.pap', 'it sets the username');
 select ok(
-  (select onboarding_completed_at from public.profiles where id = 'e44e0000-0000-0000-0000-000000000001')
+  (select onboarding_completed_at from public.get_my_settings())
     > now() - interval '1 minute',
   'and stamps onboarding_completed_at from the server clock');
 select is(

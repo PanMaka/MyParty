@@ -417,7 +417,7 @@ insert into public.blocks (blocker_id, blocked_id)
 values ('11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222');
 
 select ok(
-  (select dm_policy = 'everyone' from public.profiles where id = '11111111-1111-1111-1111-111111111111'),
+  (select dm_policy = 'everyone' from public.get_my_settings()),
   'CONTROL: the blocker''s dm_policy is still everyone'
 );
 

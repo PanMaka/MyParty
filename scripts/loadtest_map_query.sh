@@ -315,7 +315,8 @@ delete from load_results where variant = 'warmup';
 -- ALTER FUNCTION needs the EXACT signature -- a defaulted parameter does not
 -- make it optional here the way it is at a call site. All four of these named
 -- the 3-argument form and silently stopped resolving when 20260821173147 added
--- `p_limit`, breaking this script on main until Phase 13 ran it again. If the
+-- `p_limit`, breaking this script on main until Phase 13 ran it again, and again
+-- when 20260823091942 added `p_window`/`p_tz` (fixed in Phase 45). If the
 -- RPC's arity changes, change it here too.
 -- ------------------------------------------------------------------
 \set QUIET on
@@ -326,7 +327,7 @@ select pg_temp.bench('public.get_parties_near_user', 'A: as shipped (volatile)',
 select pg_temp.bench('public.get_parties_near_user', 'A: as shipped (volatile)', 500000, :iters);
 
 reset role;
-alter function public.get_parties_near_user(double precision, double precision, double precision, integer)
+alter function public.get_parties_near_user(double precision, double precision, double precision, integer, text, text)
   set search_path = public, extensions;
 select tests.authenticate_as((select id from load_viewer));
 
@@ -335,7 +336,7 @@ select pg_temp.bench('public.get_parties_near_user', 'B: search_path pinned', 50
 select pg_temp.bench('public.get_parties_near_user', 'B: search_path pinned', 500000, :iters);
 
 reset role;
-alter function public.get_parties_near_user(double precision, double precision, double precision, integer)
+alter function public.get_parties_near_user(double precision, double precision, double precision, integer, text, text)
   reset search_path;
 select tests.authenticate_as((select id from load_viewer));
 
@@ -366,7 +367,7 @@ select pg_temp.bench('public.map_query_stable', 'D: RLS bypassed (control)', 500
 select tests.authenticate_as((select id from load_viewer));
 
 reset role;
-alter function public.get_parties_near_user(double precision, double precision, double precision, integer)
+alter function public.get_parties_near_user(double precision, double precision, double precision, integer, text, text)
   set search_path = public, extensions;
 select tests.authenticate_as((select id from load_viewer));
 
@@ -375,7 +376,7 @@ select pg_temp.bench('public.get_parties_near_user', 'B: search_path pinned', 50
 select pg_temp.bench('public.get_parties_near_user', 'B: search_path pinned', 500000, :iters);
 
 reset role;
-alter function public.get_parties_near_user(double precision, double precision, double precision, integer)
+alter function public.get_parties_near_user(double precision, double precision, double precision, integer, text, text)
   reset search_path;
 select tests.authenticate_as((select id from load_viewer));
 

@@ -22,6 +22,14 @@ set search_path to public, extensions;
 select plan(54);
 
 
+-- erased_at is server-only since Phase 45 (20261021121734): not even the owner
+-- reads it, so the assertions on it read as the table owner.
+create function pg_temp.erased_at_of(p_user_id uuid) returns timestamptz
+language sql security definer set search_path = '' as $$
+  select erased_at from public.profiles where id = p_user_id;
+$$;
+grant execute on function pg_temp.erased_at_of(uuid) to authenticated, anon;
+
 -- ============================================================
 -- 1. The FK graph. Structural, and the most valuable thing in this file.
 -- ============================================================
@@ -143,12 +151,12 @@ select isnt(
   'request_account_deletion returns the deletion timestamp');
 
 select isnt(
-  (select deleted_at from public.profiles where id = '33333333-3333-3333-3333-333333333333'),
+  (select deleted_at from public.get_my_settings()),
   null,
   'deleted_at is set');
 
 select is(
-  (select erased_at from public.profiles where id = '33333333-3333-3333-3333-333333333333'),
+  pg_temp.erased_at_of('33333333-3333-3333-3333-333333333333'),
   null,
   'erased_at is NOT set -- 30 days of grace, not immediate erasure');
 
@@ -161,7 +169,7 @@ select is(
   'user_devices is purged IMMEDIATELY -- last_location does not wait out the grace period');
 
 select is(
-  (select location_consent from public.profiles where id = '33333333-3333-3333-3333-333333333333'),
+  (select location_consent from public.get_my_settings()),
   false,
   'location_consent is withdrawn, which also fires 7a''s erasure trigger');
 
@@ -180,7 +188,7 @@ select is(
 -- screen -- would be a deletion that never happens.
 select is(
   (select public.request_account_deletion()),
-  (select deleted_at from public.profiles where id = '33333333-3333-3333-3333-333333333333'),
+  (select deleted_at from public.get_my_settings()),
   'calling it twice returns the ORIGINAL timestamp and does not restart the 30 days');
 
 
@@ -203,7 +211,7 @@ select throws_ok(
   'deleted_at is outside the profiles column grant');
 
 select ok(
-  (select deleted_at from public.profiles where id = '33333333-3333-3333-3333-333333333333')
+  (select deleted_at from public.get_my_settings())
     > now() - interval '1 day',
   'a client cannot backdate deleted_at to skip the grace period');
 
@@ -215,7 +223,7 @@ select throws_ok(
   'erased_at is outside the profiles column grant');
 
 select is(
-  (select erased_at from public.profiles where id = '33333333-3333-3333-3333-333333333333'),
+  pg_temp.erased_at_of('33333333-3333-3333-3333-333333333333'),
   null,
   'a client cannot set erased_at on its own live account');
 

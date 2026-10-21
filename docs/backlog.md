@@ -14,7 +14,9 @@ than a gap, move it to §3 instead of deleting it.
 Last swept: 2026-08-22, after Phase 14B. Phase 39 updated 1.12 and 1.17 and
 added 1.21-1.24 (2026-10-14). Phase 40 shipped 1.24 (invite_to_party) and
 added 1.25-1.29. Phase 44 shipped 1.1 (Remove photo) and 1.32 (names in the
-export), raised 1.38 to high priority, and added 1.39 (2026-10-21).
+export), raised 1.38 to high priority, and added 1.39 (2026-10-21). Phase 45
+shipped 1.38, moved its fix decision to §3, and added 1.40-1.41 for Phase 46
+(2026-10-21).
 
 ---
 
@@ -531,35 +533,7 @@ and its assertion in `test/account_test.dart` with it.
 *What it costs to leave:* a string like `deleted_3f2a…` in a chat reads as a
 bug, though it reveals nothing about who wrote it.
 
-### 1.38 HIGH PRIORITY — next phase (45): notification settings and consents are readable by everyone
-
-**Decided 2026-10-21: this is the phase after Phase 44.**
-
-`profiles` has a table-wide SELECT for `anon` and `authenticated`, filtered only
-by blocks, and 14_profile_and_party_media's regression guard keeps it that way
-so that bio inherits the block filter. That is right for the public columns
-(username, bio, avatar, counters), but the same row also carries
-`location_consent`, `push_consent`, `analytics_consent`, `notify_nearby`,
-`notify_radius_meters`, `notify_daily_cap`, `quiet_hours_start`/`_end` and
-`notification_tz`. Any caller, signed in or not, can read whether a given user
-shares their location, when they sleep, and which time zone they are in.
-Found in the Phase 44 audit. Phase 44 put the new `*_consent_at` stamps in the
-owner-read-only `user_consents` table for exactly this reason, and left the
-existing columns alone.
-
-*Fix:* move the private settings out of `profiles` into an owner-read-only
-table (the `user_genders` / `user_names` / `user_consents` pattern). Every
-reader is the owner's own (`DeviceRepository.fetchPrefs`) or a definer engine
-(`wants_nearby_notifications`, `in_quiet_hours`, `claim_notification_jobs`),
-so the change is mechanical, but it touches the proximity engine's hot path
-and its tests. A column-scoped SELECT is not the fix: it is what the guard
-exists to stop.
-
-*What it costs to leave:* no content leaks, but quiet hours plus a time zone is
-a daily routine, and "has location on" marks who the proximity engine can
-reach. Readable signed out, so it needs no account to collect.
-
-### 1.39 Hosted deployment: phases 39-44 go out together, with an app update
+### 1.39 Hosted deployment: phases 39-45 go out together, with an app update
 
 The hosted project is behind local. Phases 39-44 have to be deployed together
 **and with an app update**: since Phase 44 (`20261021094726`) the client can no
@@ -568,6 +542,11 @@ older build cannot complete onboarding or change a consent against this
 schema, and its `saveNames` writes names nobody reads. Ship the migrations and
 the store build in the same window, and expect sign-ups on old builds to fail
 until users update.
+
+Phase 45 (`20261021121734`) makes the break total rather than partial: an older
+build reads its own settings off `profiles` in `ProfileGate`, which the
+narrowed SELECT refuses, so it cannot get past sign-in at all. Same window,
+same app update.
 
 **Before applying, run both checks against the hosted database.**
 
@@ -617,6 +596,40 @@ use must exist on hosted too, or `avatar-sweep` fails every hour (P0002 from
 
 *Why it is still open:* deploying is a release decision, and the hosted project
 has not been brought forward since well before Phase 39.
+
+### 1.40 HIGH PRIORITY — Phase 46: invitees read a private party's counters off the table
+
+CLAUDE.md says private counters reach the host on the dashboard "and nowhere
+else". That holds for the RPCs, which all NULL `going_count` and
+`interested_count` on a private row. It does not hold for a direct
+`select going_count, interested_count from parties`: the `parties` SELECT policy
+admits every invitee to the row, and the table grant covers every column.
+Measured in the Phase 45 audit: invitee 2222 reads both counters of
+`aaaa…0001` and `aaaa…0032`.
+
+*Why it is still open:* found while auditing `profiles`; out of that phase's
+scope. The fix and the CLAUDE.md correction are Phase 46.
+
+*What it costs to leave:* the guest-list size of every private party you are
+invited to, which is the number Phases 16b-17 exist to withhold.
+
+### 1.41 Phase 46: signed-out callers read user data
+
+`anon` still holds SELECT on `parties`, `follows`, `party_posts`,
+`post_comments` and `post_likes` (Phase 45 audit, local reset of 2026-10-21):
+every public party including its `address` (often the host's home) and
+`location`, the whole follow graph, and who liked which post. The map RPC has
+been authenticated-only since `20260821175831`, but the table underneath was
+never closed. About 60 functions in `public` also still carry PUBLIC's default
+EXECUTE, which `27_explicit_grants` deliberately does not look at, so anon can
+call them; among them were `get_post_comments` and `get_party_stories`, which
+gotcha 4 says were revoked from anon. Phase 45 revoked those two, and nothing
+else.
+
+*Why it is still open:* Phase 45 closed `profiles` only. Phase 46 audits every
+table and RPC for anon access. Nothing signed out should read user data unless
+something is found that genuinely needs it; the `/p` and `/i` pages fetch
+nothing, so neither does.
 
 ---
 
@@ -672,6 +685,32 @@ showing dead pins before the wizard changes. Do not take B or C as written.
 ## 3. NOT backlog — decisions that look like gaps
 
 Here so they are not "fixed" by somebody reading §1 and pattern-matching.
+
+- **The private columns of `profiles` are hidden by a column-scoped SELECT, not
+  moved to their own table.** Decided in Phase 45 (2026-10-21), reversing what
+  1.38 recorded. The table move rested on `14_profile_and_party_media`'s guard,
+  "a column-scoped SELECT breaks bio's inherited block filter". It does not:
+  the block filter is a ROW policy and applies to every column whatever the
+  grants say, and a column grant can only make a column less visible. What the
+  guard was really protecting against, bio quietly getting a visibility of its
+  own, is caught as well by pinning the exact public column list, which the
+  guard now does. The move would have bought the same privacy for a rewrite of
+  the proximity engine's hot path (including gotcha 10's radius coupling),
+  three triggers and about 40 test fixtures. A grant names a role and never a
+  row, so the owner reads their own settings through `get_my_settings()`
+  (definer). Writes did not change: a PostgREST PATCH with return=minimal reads
+  only `id` (`scripts/verify_profile_privacy.sh`).
+  - **`map_visibility` stays private, read through `host_on_my_map`.** That is
+    one definer call per surviving map candidate. Measured at 10k parties,
+    interleaved against the old body: +9% / +9% / +11% p50 at 5 / 50 / 500 km,
+    p95 within noise. The fallback, making the tier public, was agreed in
+    advance in case of a >20% regression; it was not needed.
+  - **`is_discoverable` is a public generated column** (`deleted_at is null and
+    erased_at is null`). The bit is public by design, since search has always
+    dropped those accounts; the date stays private. It is a column and not a
+    helper because `search_profiles` evaluates every prefix match: a helper
+    took a two-letter search at 20k users from 93ms to 165ms p50, and the
+    column is back at parity.
 
 - **Party addresses ARE geocoded, through MapTiler, from the host's device.**
   Reversed on purpose in Phase 42 (2026-10-20); it was §1.11. Until then the

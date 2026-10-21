@@ -143,18 +143,13 @@ class DeviceRepository {
     }
   }
 
+  /// The current user's own preferences, through `get_my_settings`: the
+  /// columns are owner-only since Phase 45 and not readable off `profiles`,
+  /// not even by their owner.
   Future<NotificationPrefs?> fetchPrefs() async {
-    final userId = currentUserId;
-    if (userId == null) return null;
+    if (currentUserId == null) return null;
 
-    final row = await _client
-        .from('profiles')
-        .select(
-          'push_consent, location_consent, notify_nearby, notify_radius_meters, '
-          'notify_daily_cap, notification_tz, quiet_hours_start, quiet_hours_end',
-        )
-        .eq('id', userId)
-        .maybeSingle();
+    final row = await _client.rpc('get_my_settings').maybeSingle();
 
     if (row == null) return null;
     return NotificationPrefs.fromRow(row);

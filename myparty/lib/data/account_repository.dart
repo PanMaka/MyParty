@@ -68,16 +68,12 @@ class AccountRepository {
   /// Read from the user's own row rather than cached in memory, for the same
   /// reason Phase 8 deleted `mapVisible` from `mp_store` instead of migrating
   /// it: a mirror of server state can only ever disagree with the server. The
-  /// grace period can also expire while the app is open.
+  /// grace period can also expire while the app is open. Through
+  /// `get_my_settings`: `deleted_at` is owner-only since Phase 45.
   Future<DateTime?> deletionScheduledAt() async {
-    final userId = _client.auth.currentUser?.id;
-    if (userId == null) return null;
+    if (_client.auth.currentUser == null) return null;
 
-    final row = await _client
-        .from('profiles')
-        .select('deleted_at')
-        .eq('id', userId)
-        .maybeSingle();
+    final row = await _client.rpc('get_my_settings').maybeSingle();
 
     final value = row?['deleted_at'] as String?;
     return value == null ? null : DateTime.parse(value).toLocal();

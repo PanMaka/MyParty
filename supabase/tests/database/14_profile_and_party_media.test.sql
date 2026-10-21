@@ -16,12 +16,11 @@
 --      uuid followed by `..`. One passing tells you nothing about the other.
 --
 --   2. bio and avatar_path inherit the block filter from the `profiles` SELECT
---      policy, and they inherit it because the SELECT GRANT is table-wide.
---      That is the fragile part -- not the policy, which cannot express a
---      column, but the grant, which can. Section 5 asserts no column of
---      `profiles` carries a column-scoped ACL at all, so a future migration
---      that "tightens" the grant into a column list turns this red instead of
---      quietly giving bio a visibility rule of its own.
+--      policy. The fragile part is not the policy, which cannot express a
+--      column, but the grant, which can. Since Phase 45 the SELECT grant is a
+--      column list (the row also carries private settings), and section 5
+--      pins that list exactly, so a migration that drops bio from it -- or
+--      adds a private column to it -- turns this red.
 --
 --   3. complete_account_erasure scrubs bio and avatar_path, and deliberately
 --      does NOT scrub parties.cover_path. Both halves are asserted (section 8),
@@ -242,23 +241,36 @@ select throws_ok(
 -- The SELECT policy on `profiles` is `not is_blocked(auth.uid(), id)` and it is
 -- row-scoped -- there is no formulation of it that could give bio a different
 -- visibility from username, which is exactly why the migration changed nothing
--- there. What CAN break the inheritance is the grant: a column-scoped SELECT
--- grant would let a future migration hand out `username` without `bio`, and the
--- policy would be none the wiser.
+-- there. A grant cannot route around it either: a column grant only ever makes
+-- a column LESS visible. What can still drift is the grant's list -- a future
+-- migration handing out `username` without `bio` would give bio a visibility
+-- of its own, and the policy would be none the wiser.
 --
--- So this section asserts the shape of the SELECT grant rather than its
--- effect. Phase 44 (20261021094726) narrowed UPDATE to a column list, which is
--- exactly why the guard below reads SELECT entries only: a column-scoped
--- UPDATE decides what the owner may write, not what anyone may read, and
--- leaves bio's inherited filter alone. The UPDATE entries double as the
--- control: the same query over the same catalog DOES find them, so an empty
--- SELECT answer means there are none, not that the query is broken.
+-- Until Phase 45 this guard asserted that SELECT stayed table-wide. Phase 45
+-- (20261021121734) narrowed it to a column list on purpose, because the same
+-- row carries settings and consents nobody else may read (backlog §3), so the
+-- guard now pins the EXACT list instead. bio and avatar_path dropping out of
+-- it, or a private column joining it, both turn this red.
 --
 -- Run as postgres: these read catalogs, not data, and the current role must not
 -- be able to change the answer.
 -- ============================================================
 select tests.clear_authentication();
 set local role postgres;
+
+select is(
+  array(select a.attname::text
+        from pg_attribute a
+        cross join lateral aclexplode(a.attacl) g
+        where a.attrelid = 'public.profiles'::regclass
+          and a.attnum > 0
+          and not a.attisdropped
+          and g.privilege_type = 'SELECT'
+          and g.grantee = 'authenticated'::regrole
+        order by a.attname),
+  array['avatar_path', 'bio', 'follower_count', 'following_count',
+        'id', 'is_discoverable', 'username', 'username_search'],
+  'THE REGRESSION GUARD: authenticated reads exactly the public columns of profiles -- bio and avatar_path among them, so they keep the row''s block filter, and no private column');
 
 select is_empty(
   $$ select a.attname
@@ -267,23 +279,14 @@ select is_empty(
      where a.attrelid = 'public.profiles'::regclass
        and a.attnum > 0
        and not a.attisdropped
-       and g.privilege_type = 'SELECT' $$,
-  'THE REGRESSION GUARD: no column of public.profiles carries a column-scoped SELECT -- a migration that narrows the table-wide read to a column list breaks bio''s inherited block filter, and must fail here first');
-
-select isnt_empty(
-  $$ select a.attname
-     from pg_attribute a
-     cross join lateral aclexplode(a.attacl) g
-     where a.attrelid = 'public.profiles'::regclass
-       and a.attnum > 0
-       and not a.attisdropped
-       and g.privilege_type = 'UPDATE' $$,
-  'CONTROL: the identical query DOES find the column-scoped UPDATE entries -- so the assertion above is empty because there is no column SELECT, not because the query is broken');
+       and g.privilege_type = 'SELECT'
+       and g.grantee = 'anon'::regrole $$,
+  'anon holds no column SELECT on profiles -- nothing signed out reads a profile');
 
 select ok(
-  has_table_privilege('anon', 'public.profiles', 'select')
-  and has_table_privilege('authenticated', 'public.profiles', 'select'),
-  'SELECT on profiles is granted table-wide, so columns added later are readable without touching 20260812115436');
+  not has_table_privilege('anon', 'public.profiles', 'select')
+  and not has_table_privilege('authenticated', 'public.profiles', 'select'),
+  'SELECT on profiles is no longer table-wide -- a column added later is unreadable until a migration grants it');
 
 select ok(
   has_column_privilege('authenticated', 'public.profiles', 'bio', 'update')

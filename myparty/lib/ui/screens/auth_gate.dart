@@ -86,12 +86,12 @@ class ProfileGateRow {
 typedef ProfileGateLoader = Future<ProfileGateRow> Function(String userId);
 typedef SignedInHook = Future<void> Function(ProfileGateRow row);
 
+/// Through `get_my_settings`, not a select on `profiles`: since Phase 45
+/// (20261021121734) these columns are owner-only, and a grant cannot say
+/// "your own row", so nobody reads them off the table. The function reads the
+/// session's own row; [userId] is the session's user by construction.
 Future<ProfileGateRow> _loadGateRow(String userId) async {
-  final row = await Supabase.instance.client
-      .from('profiles')
-      .select('onboarding_completed_at, push_consent, location_consent, notification_tz, deleted_at')
-      .eq('id', userId)
-      .single();
+  final row = await Supabase.instance.client.rpc('get_my_settings').single();
   return ProfileGateRow.fromRow(row);
 }
 
