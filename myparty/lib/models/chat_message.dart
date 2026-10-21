@@ -98,7 +98,12 @@ class PartyChatSummary {
   final String partyTitle;
   final bool isPrivate;
   final DateTime startsAt;
-  final int goingCount;
+
+  /// NULL on a private party, and group chat exists only on private parties,
+  /// so in practice always NULL: `get_party_chats` stopped sending a private
+  /// party's guest-list size to its chat members in Phase 46. Nullable rather
+  /// than dropped so a surface that forgets fails to compile, not prints 0.
+  final int? goingCount;
   final String? lastMessageBody;
   final String? lastMessageAuthorUsername;
   final DateTime? lastMessageAt;
@@ -127,7 +132,7 @@ class PartyChatSummary {
       partyTitle: row['party_title'] as String,
       isPrivate: (row['party_is_private'] as bool?) ?? false,
       startsAt: DateTime.parse(row['party_starts_at'] as String).toLocal(),
-      goingCount: (row['going_count'] as int?) ?? 0,
+      goingCount: row['going_count'] as int?,
       lastMessageBody: row['last_message_body'] as String?,
       lastMessageAuthorUsername: row['last_message_author_username'] as String?,
       lastMessageAt: lastAt == null ? null : DateTime.parse(lastAt).toLocal(),

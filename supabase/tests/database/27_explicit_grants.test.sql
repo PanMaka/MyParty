@@ -8,8 +8,10 @@
 -- went missing. Adding a grant in a migration means adding its row here; that
 -- is the point, not a chore.
 --
--- PUBLIC's EXECUTE on functions is deliberately out of scope (Postgres's own
--- default, revoked case by case under gotcha 13), as are extension members.
+-- PUBLIC's EXECUTE on functions is out of scope here, as are extension
+-- members. Since Phase 46 no function we own in public keeps PUBLIC's EXECUTE,
+-- and 41_anon_access asserts that, so every function grant to authenticated
+-- below is one some migration wrote.
 begin;
 set search_path to public, extensions;
 select plan(7);
@@ -148,6 +150,35 @@ insert into allowed_grants values
   ('function', 'request_account_deletion()', 'authenticated', 'EXECUTE', null),
   ('function', 'rsvp_status_allowed(uuid,rsvp_status)', 'authenticated', 'EXECUTE', null),
   ('function', 'search_parties(text,integer)', 'authenticated', 'EXECUTE', null),
+  -- Phase 46: off PUBLIC (20261021205851). Client RPCs, policy helpers, the
+  -- topic builders and what invoker callers reach.
+  ('function', 'can_access_party(uuid)', 'authenticated', 'EXECUTE', null),
+  ('function', 'can_chat_in_party(uuid)', 'authenticated', 'EXECUTE', null),
+  ('function', 'can_send_direct_message(uuid)', 'authenticated', 'EXECUTE', null),
+  ('function', 'can_view_direct_thread(uuid)', 'authenticated', 'EXECUTE', null),
+  ('function', 'check_username_available(text)', 'authenticated', 'EXECUTE', null),
+  ('function', 'confirm_story_upload(uuid)', 'authenticated', 'EXECUTE', null),
+  ('function', 'create_party_with_invites(jsonb,uuid[])', 'authenticated', 'EXECUTE', null),
+  ('function', 'direct_thread_id_from_topic(text)', 'authenticated', 'EXECUTE', null),
+  ('function', 'direct_thread_topic(uuid)', 'authenticated', 'EXECUTE', null),
+  ('function', 'get_story_rails()', 'authenticated', 'EXECUTE', null),
+  ('function', 'hide_comment(uuid,text)', 'authenticated', 'EXECUTE', null),
+  ('function', 'hide_message(uuid,text)', 'authenticated', 'EXECUTE', null),
+  ('function', 'hide_post(uuid,text)', 'authenticated', 'EXECUTE', null),
+  ('function', 'hide_story(uuid,text)', 'authenticated', 'EXECUTE', null),
+  ('function', 'inbox_topic(uuid)', 'authenticated', 'EXECUTE', null),
+  ('function', 'inbox_user_id_from_topic(text)', 'authenticated', 'EXECUTE', null),
+  ('function', 'is_blocked(uuid,uuid)', 'authenticated', 'EXECUTE', null),
+  ('function', 'is_direct_thread_member(uuid)', 'authenticated', 'EXECUTE', null),
+  ('function', 'party_host_topic(uuid)', 'authenticated', 'EXECUTE', null),
+  ('function', 'party_id_from_host_topic(text)', 'authenticated', 'EXECUTE', null),
+  ('function', 'party_id_from_topic(text)', 'authenticated', 'EXECUTE', null),
+  ('function', 'party_is_past(timestamp with time zone,timestamp with time zone,timestamp with time zone)', 'authenticated', 'EXECUTE', null),
+  ('function', 'party_topic(uuid)', 'authenticated', 'EXECUTE', null),
+  ('function', 'round_location(geography)', 'authenticated', 'EXECUTE', null),
+  ('function', 'search_normalize(text)', 'authenticated', 'EXECUTE', null),
+  ('function', 'search_prefix_upper(text)', 'authenticated', 'EXECUTE', null),
+  ('function', 'story_upload_target(uuid)', 'authenticated', 'EXECUTE', null),
   ('function', 'search_profiles(text,integer)', 'authenticated', 'EXECUTE', null),
   ('function', 'set_my_gender(gender)', 'authenticated', 'EXECUTE', null),
   ('function', 'change_username(text)', 'authenticated', 'EXECUTE', null),
@@ -164,13 +195,11 @@ insert into allowed_grants values
   ('table', 'direct_messages', 'authenticated', 'SELECT', null),
   ('table', 'direct_reads', 'authenticated', 'SELECT', null),
   ('table', 'direct_threads', 'authenticated', 'SELECT', null),
-  ('table', 'follows', 'anon', 'SELECT', null),
   ('table', 'follows', 'authenticated', 'DELETE', null),
   ('table', 'follows', 'authenticated', 'INSERT', null),
   ('table', 'follows', 'authenticated', 'SELECT', null),
   ('table', 'invitations', 'authenticated', 'SELECT', null),
   ('table', 'messages', 'authenticated', 'SELECT', null),
-  ('table', 'parties', 'anon', 'SELECT', null),
   -- No UPDATE or DELETE since 20261014113214: edits go through update_party,
   -- cancellation through cancel_party, and a hard delete is erasure's alone.
   -- INSERT is column-scoped since 20261020103856, so a client cannot set
@@ -186,14 +215,32 @@ insert into allowed_grants values
   ('column', 'parties', 'authenticated', 'INSERT', 'max_capacity'),
   ('column', 'parties', 'authenticated', 'INSERT', 'starts_at'),
   ('column', 'parties', 'authenticated', 'INSERT', 'title'),
-  ('table', 'parties', 'authenticated', 'SELECT', null),
-  ('table', 'party_posts', 'anon', 'SELECT', null),
+  -- Phase 46: SELECT is a column list without the raw counters; clients read
+  -- public_going_count/public_interested_count, NULL on a private party.
+  ('column', 'parties', 'authenticated', 'SELECT', 'address'),
+  ('column', 'parties', 'authenticated', 'SELECT', 'area'),
+  ('column', 'parties', 'authenticated', 'SELECT', 'bbox_lat'),
+  ('column', 'parties', 'authenticated', 'SELECT', 'bbox_lon'),
+  ('column', 'parties', 'authenticated', 'SELECT', 'cover_path'),
+  ('column', 'parties', 'authenticated', 'SELECT', 'created_at'),
+  ('column', 'parties', 'authenticated', 'SELECT', 'description'),
+  ('column', 'parties', 'authenticated', 'SELECT', 'ends_at'),
+  ('column', 'parties', 'authenticated', 'SELECT', 'host_id'),
+  ('column', 'parties', 'authenticated', 'SELECT', 'id'),
+  ('column', 'parties', 'authenticated', 'SELECT', 'is_private'),
+  ('column', 'parties', 'authenticated', 'SELECT', 'is_sponsored'),
+  ('column', 'parties', 'authenticated', 'SELECT', 'location'),
+  ('column', 'parties', 'authenticated', 'SELECT', 'max_capacity'),
+  ('column', 'parties', 'authenticated', 'SELECT', 'party_tier'),
+  ('column', 'parties', 'authenticated', 'SELECT', 'public_going_count'),
+  ('column', 'parties', 'authenticated', 'SELECT', 'public_interested_count'),
+  ('column', 'parties', 'authenticated', 'SELECT', 'starts_at'),
+  ('column', 'parties', 'authenticated', 'SELECT', 'status'),
+  ('column', 'parties', 'authenticated', 'SELECT', 'title'),
   ('table', 'party_posts', 'authenticated', 'SELECT', null),
   ('table', 'party_reads', 'authenticated', 'SELECT', null),
   ('table', 'party_search_tokens', 'authenticated', 'SELECT', null),
-  ('table', 'post_comments', 'anon', 'SELECT', null),
   ('table', 'post_comments', 'authenticated', 'SELECT', null),
-  ('table', 'post_likes', 'anon', 'SELECT', null),
   ('table', 'post_likes', 'authenticated', 'DELETE', null),
   ('table', 'post_likes', 'authenticated', 'SELECT', null),
   -- Phase 45: SELECT narrowed to the public columns, anon off the table. The

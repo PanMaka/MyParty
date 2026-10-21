@@ -18,6 +18,8 @@ export), raised 1.38 to high priority, and added 1.39 (2026-10-21). Phase 45
 shipped 1.38, moved its fix decision to §3, and added 1.40-1.41 for Phase 46
 (2026-10-21).
 Phase 47 added 1.42-1.45, with 1.44 the auth-email release checklist.
+Phase 46 shipped 1.40 and 1.41, moved the avatars and PostGIS decisions to §3,
+and added 1.44 F (re-run the erasures a pre-existing bug failed) (2026-10-22).
 
 ---
 
@@ -534,7 +536,7 @@ and its assertion in `test/account_test.dart` with it.
 *What it costs to leave:* a string like `deleted_3f2a…` in a chat reads as a
 bug, though it reveals nothing about who wrote it.
 
-### 1.39 Hosted deployment: phases 39-45 go out together, with an app update
+### 1.39 Hosted deployment: phases 39-46 go out together, with an app update
 
 The hosted project is behind local. Phases 39-44 have to be deployed together
 **and with an app update**: since Phase 44 (`20261021094726`) the client can no
@@ -548,6 +550,13 @@ Phase 45 (`20261021121734`) makes the break total rather than partial: an older
 build reads its own settings off `profiles` in `ProfileGate`, which the
 narrowed SELECT refuses, so it cannot get past sign-in at all. Same window,
 same app update.
+
+Phase 46 (`20261021205851`-`…211609`) adds two more breaks for an older
+build. Another host's profile loses its past-parties strip, because
+`fetchHostedParties` selected the raw counters, which clients may no longer
+read. And the party chat list shows a "0" member badge, because
+`get_party_chats` now sends NULL. Same window, same app update. After applying,
+do 1.44 F.
 
 **Before applying, run both checks against the hosted database.**
 
@@ -597,40 +606,6 @@ use must exist on hosted too, or `avatar-sweep` fails every hour (P0002 from
 
 *Why it is still open:* deploying is a release decision, and the hosted project
 has not been brought forward since well before Phase 39.
-
-### 1.40 HIGH PRIORITY — Phase 46: invitees read a private party's counters off the table
-
-CLAUDE.md says private counters reach the host on the dashboard "and nowhere
-else". That holds for the RPCs, which all NULL `going_count` and
-`interested_count` on a private row. It does not hold for a direct
-`select going_count, interested_count from parties`: the `parties` SELECT policy
-admits every invitee to the row, and the table grant covers every column.
-Measured in the Phase 45 audit: invitee 2222 reads both counters of
-`aaaa…0001` and `aaaa…0032`.
-
-*Why it is still open:* found while auditing `profiles`; out of that phase's
-scope. The fix and the CLAUDE.md correction are Phase 46.
-
-*What it costs to leave:* the guest-list size of every private party you are
-invited to, which is the number Phases 16b-17 exist to withhold.
-
-### 1.41 Phase 46: signed-out callers read user data
-
-`anon` still holds SELECT on `parties`, `follows`, `party_posts`,
-`post_comments` and `post_likes` (Phase 45 audit, local reset of 2026-10-21):
-every public party including its `address` (often the host's home) and
-`location`, the whole follow graph, and who liked which post. The map RPC has
-been authenticated-only since `20260821175831`, but the table underneath was
-never closed. About 60 functions in `public` also still carry PUBLIC's default
-EXECUTE, which `27_explicit_grants` deliberately does not look at, so anon can
-call them; among them were `get_post_comments` and `get_party_stories`, which
-gotcha 4 says were revoked from anon. Phase 45 revoked those two, and nothing
-else.
-
-*Why it is still open:* Phase 45 closed `profiles` only. Phase 46 audits every
-table and RPC for anon access. Nothing signed out should read user data unless
-something is found that genuinely needs it; the `/p` and `/i` pages fetch
-nothing, so neither does.
 
 ### 1.42 Before launch: the hosted project must require the current password (step C.6 of 1.44)
 
@@ -748,6 +723,52 @@ as verified.
    SPF/DKIM/DMARC pass (the received headers, or a mail-tester style check).
 5. A reset link tapped on the phone that asked opens the app at "Choose a new
    password"; the same link tapped elsewhere shows the static page.
+
+**F. Account erasures the post-media bug failed (Phase 46, `20261021211609`)**
+
+Not an email step, but it is a hosted-side step that must follow a deploy, so
+it lives here. Before `20261021211609`, `complete_account_erasure` nulled only
+`media_path` on a captioned media post, which violates the Phase 23 checks, so
+the erasure of any account with such a post rolled back on every daily sweep.
+`fail_account_erasure` keeps the error; after 5 attempts
+`claim_accounts_for_erasure` never claims the row again. Those accounts are
+past their 30-day grace and still hold an auth user and personal data: an
+Art. 17 erasure that did not happen.
+
+After `20261021211609` is applied to hosted:
+
+1. Find them (SQL editor, as postgres):
+
+   ```sql
+   select e.user_id, e.attempts, e.claimed_at, e.created_at, p.deleted_at,
+          e.attempts >= 5 as gave_up, e.last_error
+   from public.account_erasures e
+   join public.profiles p on p.id = e.user_id
+   where e.completed_at is null
+     and (e.last_error like '%party_posts_media_path_implies_type%'
+          or e.last_error like '%party_posts_uploaded_implies_path%')
+   order by e.created_at;
+   ```
+
+   Rows with `gave_up = false` will finish on the next sweep by themselves; the
+   rest need step 2. Keep the result: it is the record of which erasures ran
+   late, and by how long (`now() - deleted_at - 30 days`).
+2. Re-queue them. Resetting `attempts` and `claimed_at` is all the claim looks
+   at; `last_error` stays until the next attempt overwrites it.
+
+   ```sql
+   update public.account_erasures
+   set attempts = 0, claimed_at = null
+   where completed_at is null
+     and (last_error like '%party_posts_media_path_implies_type%'
+          or last_error like '%party_posts_uploaded_implies_path%');
+   ```
+3. Run the eraser now rather than at 03:30:
+   `select public.post_to_account_eraser('manual_rerun');`
+4. Re-run the query in step 1. It must return no rows, and each user from step
+   1 must have `completed_at` set and `profiles.erased_at` stamped. A row that
+   is still there with a different `last_error` is a different fault: read it
+   before re-queuing again.
 
 ### 1.45 A second sign-up for an unconfirmed email keeps the first password
 
@@ -917,5 +938,19 @@ Here so they are not "fixed" by somebody reading §1 and pattern-matching.
   column.
 - **`parties_location` reads as an unused index.** It is reached by the
   notification engine, which is `SECURITY DEFINER`. Do not drop it.
+- **Avatar URLs stay public; only listing the bucket needs a sign-in.**
+  Decided in Phase 46 (2026-10-21), Option 1. The `avatars` bucket is public,
+  so `/storage/v1/object/public/avatars/<user>/<file>` serves a known path to
+  anyone, which is how the app draws avatars and how a shared link could show
+  one. What closed is enumeration: the SELECT policy is `to authenticated`, so
+  signed out nobody can list which users have a photo. A signed-in user still
+  can; making avatars private would mean signed URLs on every avatar the app
+  draws, for a photo the user chose to show everyone who opens their profile.
+- **PostGIS's own functions and `geography_columns`/`geometry_columns` stay
+  executable/readable by anon.** Phase 46 revoked PUBLIC from every function we
+  own, and these are not ours: `supabase_admin` owns them, as it owns
+  `spatial_ref_sys`, so a migration cannot revoke them. They hold no user data
+  (the two views list geometry columns, i.e. the schema). `41_anon_access`
+  leaves them out: the functions by owner, the views by name.
 - **`spatial_ref_sys` has RLS off.** Cannot be fixed from a migration —
   `supabase_admin` owns it. Allowlisted by name in `13_hardening.test.sql`.

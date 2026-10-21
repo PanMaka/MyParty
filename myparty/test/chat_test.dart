@@ -377,7 +377,8 @@ void main() {
         partyTitle: 'Ταράτσα στο Κουκάκι',
         isPrivate: true,
         startsAt: DateTime.now(),
-        goingCount: 12,
+        // What get_party_chats sends for every private party since Phase 46.
+        goingCount: null,
         lastMessageBody: 'παίρνω ταξί',
         lastMessageAuthorUsername: 'zoi',
         lastMessageAt: DateTime.now(),
@@ -391,6 +392,10 @@ void main() {
     expect(find.text('Ταράτσα στο Κουκάκι'), findsOneWidget);
     expect(find.text('zoi: παίρνω ταξί'), findsOneWidget);
     expect(find.text('7'), findsOneWidget);
+    // No member count: the guest-list size of a private party is not sent, and
+    // a NULL must not render as a confident 0.
+    expect(find.byKey(const Key('chat-member-count')), findsNothing);
+    expect(find.text('0'), findsNothing);
     // The two hardcoded mock rows are gone.
     expect(find.text('Techno Δευτέρα'), findsNothing);
   });

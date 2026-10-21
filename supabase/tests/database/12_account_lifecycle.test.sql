@@ -19,7 +19,7 @@
 --   aaaa...0002  public,  hosted by 1111 ("Syntagma Afterparty")
 begin;
 set search_path to public, extensions;
-select plan(54);
+select plan(56);
 
 
 -- erased_at is server-only since Phase 45 (20261021121734): not even the owner
@@ -321,6 +321,16 @@ values ('dddddddd-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-0000000
 insert into public.follows (follower_id, followee_id)
 values ('33333333-3333-3333-3333-333333333333', '11111111-1111-1111-1111-111111111111');
 
+-- A captioned media post, confirmed, the shape every host photo post has had
+-- since 20260825095311. As postgres: the posts INSERT policy is host-only.
+-- Erasure strips its media and keeps its caption, which has to clear
+-- media_type and media_uploaded_at with the path (party_posts_media_path_
+-- implies_type, party_posts_uploaded_implies_path). Before Phase 46 it cleared
+-- only the path, and the erasure failed on this row.
+insert into public.party_posts (id, party_id, author_id, body, media_type, media_uploaded_at)
+values ('dddddddd-0000-0000-0000-000000000002', 'aaaaaaaa-0000-0000-0000-000000000002',
+        '33333333-3333-3333-3333-333333333333', 'what a night', 'image/jpeg', now());
+
 -- Captured BEFORE erasure, in a temp table. Reading it afterwards would be
 -- reading a number the erasure itself changed -- gotcha #15's failure mode.
 create temp table control_counts as
@@ -331,6 +341,16 @@ select
 select lives_ok(
   $$ select public.complete_account_erasure('33333333-3333-3333-3333-333333333333') $$,
   'complete_account_erasure runs once the grace period has expired');
+
+select results_eq(
+  $$ select body, media_path, media_type, media_uploaded_at from public.party_posts
+     where id = 'dddddddd-0000-0000-0000-000000000002' $$,
+  $$ values ('what a night'::text, null::text, null::text, null::timestamptz) $$,
+  'a captioned media post keeps its caption and loses its path, type and upload stamp together');
+select is(
+  (select hidden_at from public.party_posts where id = 'dddddddd-0000-0000-0000-000000000002'),
+  null,
+  'and it stays visible -- only a media post with no caption is hidden');
 
 select is(
   (select count(*)::int from public.parties

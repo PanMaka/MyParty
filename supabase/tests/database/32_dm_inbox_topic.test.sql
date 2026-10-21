@@ -119,6 +119,9 @@ select is_empty(
 -- ============================================================
 -- C. The parsers, and the three policies' prefixes
 -- ============================================================
+-- As a signed-in user: since Phase 46 anon executes none of them, and the
+-- policies that call them run as authenticated.
+select tests.authenticate_as('22222222-2222-2222-2222-222222222222');
 select is(
   public.inbox_user_id_from_topic(public.inbox_topic('22222222-2222-2222-2222-222222222222')),
   '22222222-2222-2222-2222-222222222222'::uuid,

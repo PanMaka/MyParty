@@ -143,7 +143,7 @@ where party_id = 'aaaaaaaa-0000-0000-0000-000000000001'
 and user_id = '22222222-2222-2222-2222-222222222222';
 
 select is(
-  (select going_count from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000001'),
+  (select going_count from tests.parties_unfiltered where id = 'aaaaaaaa-0000-0000-0000-000000000001'),
   0,
   'deleting the rsvp is the un-rsvp, and going_count follows it back to 0'
 );
@@ -155,7 +155,7 @@ insert into public.rsvps (party_id, user_id, status) values
   ('aaaaaaaa-0000-0000-0000-000000000002', '22222222-2222-2222-2222-222222222222', 'interested');
 
 select is(
-  (select interested_count from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
+  (select interested_count from tests.parties_unfiltered where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
   1,
   'a public party still accepts interested'
 );
@@ -169,7 +169,7 @@ and user_id = '22222222-2222-2222-2222-222222222222';
 -- is still counted after. Reading this as "both counters moving" is what the
 -- old assertion said, and it is now exactly backwards.
 select results_eq(
-  $$ select interested_count, going_count from public.parties
+  $$ select interested_count, going_count from tests.parties_unfiltered
      where id = 'aaaaaaaa-0000-0000-0000-000000000002' $$,
   $$ values (1, 1) $$,
   'a public party switches interested -> going with going_count alone moving'
@@ -239,7 +239,7 @@ select results_eq(
 select tests.authenticate_as('11111111-1111-1111-1111-111111111111'); -- host
 
 select is(
-  (select going_count from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000001'),
+  (select going_count from tests.parties_unfiltered where id = 'aaaaaaaa-0000-0000-0000-000000000001'),
   1,
   'parties.going_count is still maintained on a private party -- the host has a guest list'
 );
@@ -254,7 +254,7 @@ select is(
 -- guarantee by special-casing private parties in the trigger, which would put
 -- a party lookup on every rsvp write to defend a figure nobody can read.
 select is(
-  (select interested_count from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000001'),
+  (select interested_count from tests.parties_unfiltered where id = 'aaaaaaaa-0000-0000-0000-000000000001'),
   1,
   'interested_count on a private party counts the going rsvp -- the old "always 0" invariant is retired, not broken'
 );

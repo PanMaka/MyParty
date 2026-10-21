@@ -44,9 +44,11 @@ select is_empty(
 
 select tests.clear_authentication();
 
-select is_empty(
+-- Since Phase 46 (20261021205851) anon holds no SELECT on parties at all.
+select throws_ok(
   $$ select 1 from public.parties where id = 'aaaaaaaa-0000-0000-0000-000000000001' $$,
-  'unauthenticated session cannot view a private party'
+  '42501', null,
+  'unauthenticated session cannot read parties, a private one included'
 );
 
 select * from finish();

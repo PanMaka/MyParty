@@ -117,17 +117,21 @@ pass "functions served"
 step "1. give the doomed account something to lose"
 # ============================================================
 AVATAR_FILE="face.jpg"
-POST_FILE="post_$(date +%s).jpg"
 STORY_ID=$(sql "select gen_random_uuid()")
 POST_ID=$(sql "select gen_random_uuid()")
+# The key set_post_media_path derives (20260825095311): {party_id}/{post_id}.jpg.
+# A media_path written by hand is overwritten by that trigger, so the eraser
+# would be handed a different key, or none, and the bytes would stay.
+POST_FILE="$POST_ID.jpg"
 MESSAGE_ID=$(sql "select gen_random_uuid()")
 
 [ "$(upload avatars "$DOOMED_ID/$AVATAR_FILE")" = "200" ] || fail "avatar upload failed"
 [ "$(upload post-media "$PUBLIC_PARTY/$POST_FILE")" = "200" ] || fail "post media upload failed"
 [ "$(upload story-media "$PUBLIC_PARTY/$STORY_ID.jpg")" = "200" ] || fail "story media upload failed"
 
-sql "insert into public.party_posts (id, party_id, author_id, body, media_path)
-     values ('$POST_ID', '$PUBLIC_PARTY', '$DOOMED_ID', 'my post', '$PUBLIC_PARTY/$POST_FILE')" >/dev/null
+sql "insert into public.party_posts (id, party_id, author_id, body, media_type, media_uploaded_at)
+     values ('$POST_ID', '$PUBLIC_PARTY', '$DOOMED_ID', 'my post', 'image/jpeg', now())" >/dev/null
+[ "$(sql "select media_path from public.party_posts where id = '$POST_ID'")" = "$PUBLIC_PARTY/$POST_FILE" ]   || fail "control: the post's media_path should be the key the bytes were uploaded to"
 
 sql "insert into public.stories (id, party_id, author_id, media_path, content_type, media_uploaded_at)
      values ('$STORY_ID', '$PUBLIC_PARTY', '$DOOMED_ID', '$PUBLIC_PARTY/$STORY_ID.jpg', 'image/jpeg', now())" >/dev/null
