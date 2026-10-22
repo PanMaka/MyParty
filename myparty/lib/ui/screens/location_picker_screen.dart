@@ -6,6 +6,7 @@ import 'package:latlong2/latlong.dart';
 import '../../services/geocoding_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/address_suggestions.dart';
+import '../widgets/basemap.dart';
 import '../widgets/map_base.dart';
 
 /// What [LocationPickerScreen] pops with: the point under the pin, and the
@@ -161,6 +162,8 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                   options: MapOptions(
                     initialCenter: _startingPoint!,
                     initialZoom: 17,
+                    maxZoom: kBasemapMaxZoom,
+                    backgroundColor: kBasemapBackground,
                     onPositionChanged: _onPositionChanged,
                     onTap: (_, point) {
                       _queryFocus.unfocus();
@@ -171,7 +174,12 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                       });
                     },
                   ),
-                  children: [mpTileLayer()],
+                  children: const [
+                    MpBasemap(),
+                    // Above the recenter button (bottom 190, 44 tall), the one
+                    // thing on this side of the map clear of the bottom panel.
+                    MpBasemapAttribution(bottom: 242),
+                  ],
                 ),
                 const IgnorePointer(child: Center(child: PartyPinMarker())),
                 _recenterButton(),
@@ -257,7 +265,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
           width: 44,
           height: 44,
           decoration: BoxDecoration(
-            color: AppColors.chipFill,
+            color: AppColors.mapOverlayFill,
             borderRadius: BorderRadius.circular(15),
             border: Border.all(color: AppColors.hairline),
           ),

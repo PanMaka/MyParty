@@ -76,6 +76,10 @@ class AppColors {
   static Color hairline = Colors.white.withValues(alpha: 0.09);
   static Color glassFill = Colors.white.withValues(alpha: 0.05);
   static Color chipFill = const Color(0xFF14121C).withValues(alpha: 0.82);
+
+  /// [chipFill], nearly opaque, for controls floating over the map. The
+  /// basemap's street names are light enough to read through 82%.
+  static Color mapOverlayFill = const Color(0xFF14121C).withValues(alpha: 0.94);
 }
 
 class AppTextStyles {

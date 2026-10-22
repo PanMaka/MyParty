@@ -452,9 +452,10 @@ It has to cover, at least:
   sent from their device to MapTiler's Geocoding API, private parties included.
   The chosen address is stored on the party (`parties.address`), visible to
   whoever can see the party, and cleared when the host's account is erased.
-  MapTiler is a processor here; name it. (The map tiles are CARTO's, which
-  receive the tile coordinates of whatever map area is on screen: list CARTO
-  too.)
+  MapTiler is a processor here; name it. (The map tiles are OpenFreeMap's
+  since Phase 47 — CARTO's before — and OpenFreeMap receives the tile
+  coordinates of whatever map area is on screen, plus the device's IP: list
+  OpenFreeMap too.)
 
 *Why it is still open:* it is a legal document, not code; someone has to write
 and own it. The text above is a checklist of what the schema actually does, not
@@ -478,8 +479,8 @@ then the export and erasure behave as documented, minus this.
 
 ### 1.34 Confirm with MapTiler: geocoding on a non-MapTiler map — before launch
 
-Address search uses MapTiler's Geocoding API while the map tiles are CARTO's
-`dark_all`. MapTiler's Terms of Service (read 2026-10-20) do not address this
+Address search uses MapTiler's Geocoding API while the map tiles are
+OpenFreeMap's (CARTO's `dark_all` until Phase 47; the question is the same). MapTiler's Terms of Service (read 2026-10-20) do not address this
 either way: §4 restricts reselling/redistribution and commercial derivative
 works, §6.1–6.4 cover attribution on *displayed MapTiler maps* (not shown here),
 and §6.5 asks for attribution "as part of the database" when search results are
@@ -487,7 +488,7 @@ stored (done: the comment on `parties.address`). The wizard shows "Address
 search is provided by MapTiler. © OpenStreetMap contributors" under the field.
 
 *To do:* get MapTiler's written confirmation that their geocoding may be used
-with a third-party (CARTO) basemap on the plan we are on, and whether storing
+with a third-party (OpenFreeMap) basemap on the plan we are on, and whether storing
 the chosen address permanently is within it. If not, the options are MapTiler
 tiles (a tile switch was considered and declined in Phase 42) or another
 geocoder.
@@ -809,6 +810,33 @@ typical viewers, 38ms for someone following 500, 117ms p50 for the worst case
   `(follower_count desc, id)` bought nothing at 20k and would cost a HOT update
   on every follow, since each follow rewrites `follower_count`. Revisit around
   100k accounts, measuring the follow write path as well as the read.
+
+### 1.48 The basemap: OpenFreeMap has no SLA, and the plugin is a beta (Phase 47)
+
+The map draws OpenFreeMap's vector tiles through `vector_map_tiles`
+**9.0.0-beta.13**, pinned exactly in `pubspec.yaml`: no stable release supports
+flutter_map 8 (8.0.0 needs ^7; 10.x betas need latlong2 0.9). Two things follow.
+
+- **OpenFreeMap is a free, donation-run service with no uptime guarantee.** An
+  outage leaves every map on its plain background with working pins, search and
+  filters, retrying with backoff — not broken, but no streets. The way out is
+  to host OpenMapTiles-schema tiles ourselves (a Protomaps/OpenMapTiles
+  planet on Cloudflare R2 or similar) and change the source `url` in
+  `assets/map/myparty-dark.json`; the style is unchanged as long as the schema
+  is. Decide before the user count makes an outage expensive.
+- **The beta line has been fixing memory leaks in the raster mode we use**
+  (beta.12) and then a blank-tile regression those fixes caused (beta.13). Any
+  bump of the pin needs the low-RAM Android run repeated: a long pan/zoom
+  session and an offline cold start, watching memory, not just "it draws".
+  If raster mode ever proves too heavy, the next step is native `maplibre_gl`
+  with the same style, which is a bigger change (markers move off flutter_map).
+
+### 1.49 The basemap's labels are Greek where OSM's `name` is
+
+`assets/map/myparty-dark.json` labels streets and places with
+`coalesce(name, name_en)`, i.e. as signposted, which matches the Greek
+addresses MapTiler returns. International students may want Latin script;
+`name:latin` exists in the tiles. A product call, one expression to change.
 
 ---
 

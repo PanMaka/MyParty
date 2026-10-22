@@ -12,6 +12,7 @@ import '../../models/map_time_window.dart';
 import '../../state/data_changes.dart';
 import '../../state/live_refresh.dart';
 import '../theme/app_theme.dart';
+import '../widgets/basemap.dart';
 import '../widgets/map_base.dart';
 import '../widgets/map_pin_sheet.dart';
 import '../widgets/mp_bottom_nav.dart' show MpTab;
@@ -55,6 +56,11 @@ const _kLocateZoom = 15.0;
 /// How far the legend/recenter row sits above the screen's bottom edge: clear
 /// of the bottom nav, with the ~1cm of air the legend was given in phase 30.
 const double _kControlsBottom = 142;
+
+/// Where the basemap credit sits: just above the legend/recenter row (the
+/// legend is ~58 tall), so its popup opens upwards over open map instead of
+/// under the recenter button, and the bottom nav never covers it.
+const double _kAttributionBottom = _kControlsBottom + 64;
 
 class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin, LiveRefresh<MapScreen> {
   final MapController _mapController = MapController();
@@ -249,7 +255,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin, Li
   ///
   /// A target more than a few screens away is jumped to instead: a linear
   /// tween at street zoom would sweep through every tile row in between and
-  /// request all of them from CARTO for a frame each.
+  /// request all of them from the tile server for a frame each.
   void _flyTo(LatLng target, double zoom) {
     _stopFlight();
     final camera = _mapController.camera;
@@ -333,6 +339,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin, Li
             options: MapOptions(
               initialCenter: startingPoint,
               initialZoom: 15,
+              maxZoom: kBasemapMaxZoom,
+              backgroundColor: kBasemapBackground,
               onMapReady: () {
                 _mapReady = true;
                 _fetchEventsInBounds();
@@ -344,7 +352,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin, Li
               },
             ),
             children: [
-              mpTileLayer(),
+              const MpBasemap(),
               MarkerLayer(
                 markers: [
                   for (final pin in _painted(now)) _marker(pin, now),
@@ -364,6 +372,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin, Li
                     ),
                 ],
               ),
+              const MpBasemapAttribution(bottom: _kAttributionBottom),
             ],
           ),
           _topOverlay(),
@@ -392,7 +401,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin, Li
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
               decoration: BoxDecoration(
-                color: AppColors.chipFill,
+                color: AppColors.mapOverlayFill,
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(color: AppColors.hairline),
               ),
@@ -452,7 +461,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin, Li
         padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
         decoration: BoxDecoration(
           gradient: active ? AppColors.purpleGradient : null,
-          color: active ? null : AppColors.chipFill,
+          color: active ? null : AppColors.mapOverlayFill,
           borderRadius: BorderRadius.circular(99),
           border: active ? null : Border.all(color: AppColors.hairline),
           boxShadow: active ? [BoxShadow(color: AppColors.purpleDeep.withValues(alpha: 0.5), blurRadius: 18)] : null,
@@ -497,7 +506,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin, Li
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: AppColors.chipFill,
+        color: AppColors.mapOverlayFill,
         borderRadius: BorderRadius.circular(13),
         border: Border.all(color: AppColors.hairline),
       ),
@@ -537,7 +546,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin, Li
         width: 44,
         height: 44,
         decoration: BoxDecoration(
-          color: AppColors.chipFill,
+          color: AppColors.mapOverlayFill,
           borderRadius: BorderRadius.circular(15),
           border: Border.all(color: AppColors.hairline),
         ),

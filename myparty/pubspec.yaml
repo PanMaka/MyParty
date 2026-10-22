@@ -38,6 +38,18 @@ dependencies:
   flutter_dotenv: ^6.0.1
   flutter_map: ^8.3.1
   latlong2: ^0.10.1
+  # Phase 47. The basemap: OpenFreeMap vector tiles drawn inside flutter_map,
+  # replacing CARTO's raster tiles, whose free tier is non-commercial only.
+  # Pinned EXACTLY, and to a beta, on purpose: no stable release supports
+  # flutter_map 8 (8.0.0 needs ^7), and the 9.x betas have been shipping
+  # memory fixes for the raster mode we use, so `pub upgrade` must not move
+  # this without someone re-running the low-RAM checks. 10.x needs latlong2
+  # 0.9. Style and loading live in lib/ui/widgets/basemap.dart.
+  vector_map_tiles: 9.0.0-beta.13
+  # What vector_map_tiles renders with. Declared because basemap.dart reads the
+  # bundled style through its ThemeReader; pinned to the version 9.0.0-beta.13
+  # resolves, so the two move together.
+  vector_tile_renderer: 6.1.0
   geolocator: ^14.0.3
   google_fonts: ^6.2.1
   provider: ^6.1.2
@@ -98,6 +110,7 @@ flutter:
   assets:
     - .env
     - assets/images/
+    - assets/map/
     
 
   # To add assets to your application, add an assets section, like this:

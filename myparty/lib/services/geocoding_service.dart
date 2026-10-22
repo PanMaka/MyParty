@@ -14,9 +14,9 @@ import 'package:latlong2/latlong.dart';
 // guest. That is a decision, reversed on purpose in Phase 42 — see
 // docs/backlog.md §3 — not an accident to be "fixed" by removing it.
 //
-// The map tiles are CARTO's, not MapTiler's; only search goes here
-// (docs/backlog.md 1.34). The key is `MAPTILER_API_KEY` in `.env`, read the
-// same guarded way as `CARTO_API_KEY` in map_base.dart. Without one, every
+// The map tiles are OpenFreeMap's, not MapTiler's; only search goes here
+// (docs/backlog.md 1.34). The key is `MAPTILER_API_KEY` in `.env`, read
+// guarded because widget tests never load `.env`. Without one, every
 // call answers [GeocodeFailure.unavailable] without touching the network, and
 // the host places the pin by hand.
 //
@@ -107,7 +107,7 @@ class GeocodingService {
   final String _apiKey;
   final Duration timeout;
 
-  /// Read guarded, like CARTO's: widget tests never load .env.
+  /// Read guarded: widget tests never load .env.
   static String _keyFromEnv() =>
       dotenv.isInitialized ? (dotenv.maybeGet('MAPTILER_API_KEY') ?? '').trim() : '';
 
