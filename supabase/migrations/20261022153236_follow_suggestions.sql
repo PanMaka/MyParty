@@ -188,6 +188,17 @@ comment on function public.undismiss_follow_suggestion(uuid) is
 -- same filtered set, so the label can never say "and 2 others" about people
 -- it is not allowed to name.
 --
+-- BLOCKS are decided by is_blocked, called once per account that shares a
+-- blocks row with me (block_peers: two index probes, usually zero rows), and
+-- then applied as an anti-join. The probes only ENUMERATE whom to ask; the
+-- helper still answers, so the rule has one copy. The obvious spellings were
+-- measured and lost (scripts/explain_follow_suggestions.sh, 20k users):
+-- is_blocked per candidate put the call on a seq scan of profiles, 19.4k calls
+-- and 614ms; per mutual it is ~37us a call, ~18ms for someone following 500.
+-- The enumeration is sound because is_blocked is true only where a blocks row
+-- joins the pair (blocked_between). If that ever widens beyond the blocks
+-- table, block_peers has to widen with it.
+--
 -- POPULAR is bounded to the 200 most-followed eligible accounts. It is a
 -- fallback, not a directory: search is the directory.
 -- ===========================================================================
@@ -221,18 +232,25 @@ begin
   end if;
 
   return query
-  with mutuals as (
+  with block_peers as materialized (
+    select x.id
+    from (
+      select b.blocked_id as id from public.blocks b where b.blocker_id = v_uid
+      union
+      select b.blocker_id from public.blocks b where b.blocked_id = v_uid
+    ) x
+    where public.is_blocked(v_uid, x.id)
+  ),
+  mutuals as materialized (
     select pr.id, pr.username, pr.follower_count
     from public.follows f
     join public.profiles pr on pr.id = f.followee_id
     where f.follower_id = v_uid
       and pr.is_discoverable
-      and not public.is_blocked(v_uid, pr.id)
+      and not exists (select 1 from block_peers bp where bp.id = pr.id)
   ),
   fof as (
-    select f2.followee_id as candidate_id,
-           count(*)::int as n,
-           (array_agg(m.username order by m.follower_count desc, m.username))[1:2] as names
+    select f2.followee_id as candidate_id, count(*)::int as n
     from mutuals m
     join public.follows f2 on f2.follower_id = m.id
     group by f2.followee_id
@@ -276,7 +294,6 @@ begin
       pr.username,
       pr.avatar_path,
       fo.n,
-      fo.names,
       fm.candidate_id is not null as follows_me,
       case
         when fo.n is not null then 1
@@ -304,23 +321,47 @@ begin
         select 1 from public.follow_suggestion_dismissals d
         where d.user_id = v_uid and d.dismissed_id = pr.id
       )
-      and not public.is_blocked(v_uid, pr.id)
+      and not exists (select 1 from block_peers bp where bp.id = pr.id)
+  ),
+  page as (
+    select r.*
+    from ranked r
+    where p_cursor_tier is null
+       or (r.tier, r.rnk, r.id) > (p_cursor_tier, p_cursor_rank, p_cursor_id)
+    order by r.tier, r.rnk, r.id
+    limit greatest(1, least(coalesce(p_limit, 20), 50))
   )
   select
-    r.id,
-    r.username,
-    r.avatar_path,
-    case r.tier when 1 then 'mutuals' when 2 then 'follows_you' else 'popular' end,
-    r.follows_me,
-    coalesce(r.n, 0),
-    coalesce(r.names, '{}'::text[]),
-    r.tier,
-    r.rnk
-  from ranked r
-  where p_cursor_tier is null
-     or (r.tier, r.rnk, r.id) > (p_cursor_tier, p_cursor_rank, p_cursor_id)
-  order by r.tier, r.rnk, r.id
-  limit greatest(1, least(coalesce(p_limit, 20), 50));
+    pg.id,
+    pg.username,
+    pg.avatar_path,
+    case pg.tier when 1 then 'mutuals' when 2 then 'follows_you' else 'popular' end,
+    pg.follows_me,
+    coalesce(pg.n, 0),
+    -- Names for the page's rows only: choosing two per candidate inside fof
+    -- meant sorting every two-hop row by username (197k rows, spilled to disk,
+    -- ~40ms for the worst viewer). From the same filtered `mutuals`, so a name
+    -- is never someone the count left out. Each mutual must be ONE probe of
+    -- follows_pkey (mutual, candidate). As a join, or as a plain EXISTS (which
+    -- the planner pulls up into the same semi-join), it hashed the candidate's
+    -- whole follower list instead -- thousands of rows per page row for a
+    -- popular account, 2.2-2.5ms x 20 measured. `offset 0` keeps the EXISTS a
+    -- correlated probe.
+    case when pg.tier = 1 then array(
+      select m.username
+      from mutuals m
+      where exists (
+        select 1 from public.follows f
+        where f.follower_id = m.id and f.followee_id = pg.id
+        offset 0
+      )
+      order by m.follower_count desc, m.username
+      limit 2
+    ) else '{}'::text[] end,
+    pg.tier,
+    pg.rnk
+  from page pg
+  order by pg.tier, pg.rnk, pg.id;
 end;
 $$;
 

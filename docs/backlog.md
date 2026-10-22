@@ -783,6 +783,33 @@ proven by then.
 never-confirmed accounts older than a day (they also hold a `profiles` row,
 created at sign-up).
 
+### 1.46 "Rising" instead of "Popular" for the suggestions fallback
+
+Phase 48 ranks the fallback tier by `follower_count`, which favours accounts
+that are already big. A fairer ranking is most NEW followers in the last 30
+days: it still reads only the public follow graph (never party attendance),
+and it gives new accounts a way in. Decided as a later improvement.
+
+*Why it is still open:* it needs an index on `follows (created_at)` and an
+aggregate over 30 days of follows on every call, or a periodically refreshed
+table. Price it with `scripts/explain_follow_suggestions.sh` first.
+
+### 1.47 Follow suggestions: the two costs that grow with the user base
+
+Measured at 20k users (`scripts/explain_follow_suggestions.sh`): 10-13ms for
+typical viewers, 38ms for someone following 500, 117ms p50 for the worst case
+(following the 200 heaviest followers, ~200k two-hop rows).
+
+- **The worst case grows with the graph.** Mutual counts are exact, so every
+  two-hop edge is counted on every page. If it becomes a problem, cap each
+  mutual's contribution or cache the ranking per user, and say so in the label
+  logic (an approximate count cannot say "and 2 others").
+- **The floor grows with `profiles`.** v0's ~10ms is two passes over profiles
+  (Popular's top 200, and the candidate join). A partial index on
+  `(follower_count desc, id)` bought nothing at 20k and would cost a HOT update
+  on every follow, since each follow rewrites `follower_count`. Revisit around
+  100k accounts, measuring the follow write path as well as the read.
+
 ---
 
 ## 2. Costed: should the map adopt `party_is_past()`?
