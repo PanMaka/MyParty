@@ -19,9 +19,16 @@ class FollowButton extends StatefulWidget {
     this.compact = false,
     this.repository,
     this.onChanged,
+    this.initialFollowing,
   });
 
   final String targetUserId;
+
+  /// The state when the caller already knows it, which skips the
+  /// `isFollowing` round trip. A row of suggestion cards is the case: the
+  /// server only suggests people the viewer does not follow, and twenty cards
+  /// asking would be twenty requests for one known answer.
+  final bool? initialFollowing;
 
   /// Called with the new state the instant the button flips, and again with
   /// the old one if the write is refused. This is how the follower count
@@ -57,7 +64,13 @@ class _FollowButtonState extends State<FollowButton> {
         setState(() => _following = change.following);
       }
     });
-    _load();
+    final known = widget.initialFollowing;
+    if (known != null) {
+      _following = known;
+      _loading = false;
+    } else {
+      _load();
+    }
   }
 
   @override

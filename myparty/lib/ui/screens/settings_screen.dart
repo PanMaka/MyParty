@@ -317,6 +317,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onTap: _privacy == null ? null : _pickDmPolicy,
             ),
             _divider(),
+            // Enforced in get_follow_suggestions, which reads this owner-only
+            // column for every candidate. Says what it does and no more: it
+            // takes you out of People you may know, not out of search.
+            _switchRow(
+              'Suggest my account to others',
+              'Shows you in People you may know. People can still find you by searching.',
+              value: _privacy?.suggestAccount,
+              onChanged: (v) => _mutate(() => _profiles.updatePrivacy(suggestAccount: v)),
+            ),
+            _divider(),
             _settingsRow(
               'Blocked accounts',
               'People you have blocked',
@@ -426,6 +436,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
             if (chevron) Icon(Icons.chevron_right, size: 18, color: AppColors.textAlpha(0.35)),
           ],
         ),
+      ),
+    );
+  }
+
+  /// A row with a switch. A null [value] is the loading or failed state: the
+  /// switch is shown off and disabled rather than guessing, the same rule as
+  /// [_pending] for the tier rows.
+  Widget _switchRow(String title, String sub, {required bool? value, required ValueChanged<bool> onChanged}) {
+    return Padding(
+      padding: const EdgeInsets.all(13),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 2),
+                Text(
+                  value == null ? _pending : sub,
+                  style: TextStyle(fontSize: 11, height: 1.4, color: AppColors.textAlpha(0.45)),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Switch(
+            value: value ?? false,
+            onChanged: value == null || _busy ? null : onChanged,
+            activeThumbColor: Colors.white,
+            activeTrackColor: AppColors.purpleDeep,
+          ),
+        ],
       ),
     );
   }

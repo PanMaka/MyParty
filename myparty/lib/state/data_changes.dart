@@ -118,6 +118,16 @@ final class MessageHidden extends DataChange {
   final bool direct;
 }
 
+/// The viewer dismissed [userId] from "People you may know" ([dismissed] true),
+/// or undid that dismissal. The profile row and See all both show the list, so
+/// a card dismissed on one leaves the other too.
+final class SuggestionDismissed extends DataChange {
+  const SuggestionDismissed({required this.userId, required this.dismissed});
+
+  final String userId;
+  final bool dismissed;
+}
+
 /// The viewer blocked ([blocked] true) or unblocked [userId]. Wide on
 /// purpose: a block hides the pair from each other in every policy, so their
 /// profile, their parties, their DM thread and their follow edges all change.

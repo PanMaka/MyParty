@@ -45,6 +45,7 @@ class _FakeProfileRepository extends ProfileRepository {
   final List<String> mapVisibilityWrites = [];
   final List<String> invitePolicyWrites = [];
   final List<String> dmPolicyWrites = [];
+  final List<bool> suggestAccountWrites = [];
 
   /// The stored answer, as `user_genders` would return it; and every value
   /// `set_my_gender` was sent, null being "prefer not to say".
@@ -75,10 +76,12 @@ class _FakeProfileRepository extends ProfileRepository {
     MapVisibility? mapVisibility,
     InvitePolicy? invitePolicy,
     DmPolicy? dmPolicy,
+    bool? suggestAccount,
   }) async {
     if (mapVisibility != null) mapVisibilityWrites.add(mapVisibility.wire);
     if (invitePolicy != null) invitePolicyWrites.add(invitePolicy.wire);
     if (dmPolicy != null) dmPolicyWrites.add(dmPolicy.wire);
+    if (suggestAccount != null) suggestAccountWrites.add(suggestAccount);
 
     // Rejected exactly as the server would reject it: nothing is stored. The
     // screen must not end up displaying the value it tried to write.
@@ -88,6 +91,7 @@ class _FakeProfileRepository extends ProfileRepository {
       mapVisibility: mapVisibility,
       invitePolicy: invitePolicy,
       dmPolicy: dmPolicy,
+      suggestAccount: suggestAccount,
     );
   }
 }
@@ -186,7 +190,7 @@ void main() {
         'ACCOUNT', 'Email', 'Password', 'Data & deletion',
         'PROFILE', 'Edit profile', 'Gender', genderVisibilityNote,
         'PRIVACY & SAFETY', 'Who sees my parties on the map', 'Who can invite me',
-        'Who can message me', 'Blocked accounts',
+        'Who can message me', 'Suggest my account to others', 'Blocked accounts',
         'NOTIFICATIONS', 'Notifications & location',
         'SUPPORT & LEGAL', 'Contact support', 'Open-source licences', 'App version',
         'Sign out',
@@ -239,9 +243,10 @@ void main() {
       await tester.pumpWidget(MaterialApp(home: SettingsScreen(auth: _FakeAuthService(), appVersion: _version)));
       await tester.pumpAndSettle();
 
-      // Three tier rows (map, invites, messages) and the gender row, which
-      // reads a different table and fails on its own.
-      expect(find.text('Did not load'), findsNWidgets(4));
+      // Three tier rows (map, invites, messages), the "Suggest my account"
+      // switch (same get_my_settings read), and the gender row, which reads a
+      // different table and fails on its own.
+      expect(find.text('Did not load'), findsNWidgets(5));
       expect(find.text('…'), findsNothing);
       expect(tester.takeException(), isNull);
     });
@@ -335,8 +340,9 @@ void main() {
       // fetchPrivacy is still in flight, so the row is showing "…". Tapping it
       // now would open a tier sheet with no current tier to check against —
       // `_privacy!` — which is a crash on exactly the slow connection that
-      // makes the window wide enough to hit.
-      expect(find.text('…'), findsNWidgets(3));
+      // makes the window wide enough to hit. Four: the three tiers and the
+      // "Suggest my account" switch, which is disabled for the same reason.
+      expect(find.text('…'), findsNWidgets(4));
       await tester.tap(find.text('Who sees my parties on the map'));
       await tester.pump();
 
@@ -368,6 +374,57 @@ void main() {
       expect(_tierValue('Who can message me', 'Nobody'), findsOneWidget);
     });
   });
+  group('suggest my account', () {
+    Finder suggestSwitch() => find.descendant(
+          of: find.ancestor(of: find.text('Suggest my account to others'), matching: find.byType(Row)).first,
+          matching: find.byType(Switch),
+        );
+
+    testWidgets('shows the stored value and writes the flip', (tester) async {
+      final repo = _FakeProfileRepository();
+      await _pumpSettings(tester, repo);
+      await _scrollTo(tester, find.text('Suggest my account to others'));
+
+      expect(tester.widget<Switch>(suggestSwitch()).value, isTrue, reason: 'default on, as stored');
+      expect(find.text('Shows you in People you may know. People can still find you by searching.'),
+          findsOneWidget);
+
+      await tester.tap(suggestSwitch());
+      await tester.pumpAndSettle();
+      expect(repo.suggestAccountWrites, [false]);
+      expect(tester.widget<Switch>(suggestSwitch()).value, isFalse, reason: 'reads back the stored false');
+    });
+
+    testWidgets('a rejected write leaves the switch on the stored value', (tester) async {
+      final repo = _FakeProfileRepository(failWrites: true);
+      await _pumpSettings(tester, repo);
+      await _scrollTo(tester, find.text('Suggest my account to others'));
+
+      await tester.tap(suggestSwitch());
+      await tester.pumpAndSettle();
+      expect(repo.suggestAccountWrites, [false]);
+      expect(tester.widget<Switch>(suggestSwitch()).value, isTrue);
+    });
+
+    testWidgets('disabled while the setting is still loading, not guessed', (tester) async {
+      final gate = Completer<void>();
+      await tester.pumpWidget(MaterialApp(
+        home: SettingsScreen(
+          repository: _FakeProfileRepository(gate: gate),
+          auth: _FakeAuthService(),
+          appVersion: _version,
+          openUrl: (_) async => true,
+        ),
+      ));
+      await tester.pump();
+      await _scrollTo(tester, find.text('Suggest my account to others'));
+      expect(tester.widget<Switch>(suggestSwitch()).onChanged, isNull);
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(tester.widget<Switch>(suggestSwitch()).onChanged, isNotNull);
+    });
+  });
+
   group('gender', () {
     testWidgets('the row shows the stored answer, with the note directly under it', (tester) async {
       // All on the first screen, with no scrolling: the gender row, its note

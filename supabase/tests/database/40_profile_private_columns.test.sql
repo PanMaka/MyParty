@@ -28,7 +28,7 @@
 -- aaaa...0002 public (host 1111).
 begin;
 set search_path to public, extensions;
-select plan(123);
+select plan(127);
 
 create temp table private_cols (c text primary key) on commit drop;
 insert into private_cols values
@@ -36,7 +36,8 @@ insert into private_cols values
   ('credibility_score'), ('location_consent'), ('push_consent'),
   ('analytics_consent'), ('notify_nearby'), ('notify_radius_meters'),
   ('notify_daily_cap'), ('quiet_hours_start'), ('quiet_hours_end'),
-  ('notification_tz'), ('map_visibility'), ('invite_policy'), ('dm_policy');
+  ('notification_tz'), ('map_visibility'), ('invite_policy'), ('dm_policy'),
+  ('suggest_account');
 grant select on private_cols to authenticated, anon;
 
 create temp table public_cols (c text primary key) on commit drop;
@@ -184,7 +185,7 @@ create temp table stranger_expected on commit drop as
 select onboarding_completed_at, deleted_at, location_consent, push_consent,
        analytics_consent, notify_nearby, notify_radius_meters, notify_daily_cap,
        quiet_hours_start, quiet_hours_end, notification_tz, map_visibility,
-       invite_policy, dm_policy
+       invite_policy, dm_policy, suggest_account
 from public.profiles where id = '44444444-4444-4444-4444-444444444444';
 grant select on stranger_expected to authenticated;
 
@@ -335,6 +336,10 @@ select isnt((select deleted_at from public.get_my_settings()), null,
 -- reviewed list, and each one either reads the caller's own row, answers only
 -- about the caller, or reads only deleted_at as the discoverability bit that
 -- search has always revealed. A new one fails here until somebody has looked.
+-- get_follow_suggestions (Phase 48) is the one that reads OTHER users' rows: it
+-- filters on their suggest_account and onboarding_completed_at, takes no id,
+-- and returns neither -- only public columns of the accounts that pass. What
+-- leaks is the bit "not suggested", accepted in 20261022153236's header.
 -- Trigger functions are excluded: they cannot be called directly.
 -- ============================================================
 reset role;
@@ -352,7 +357,7 @@ select is(
         order by 1),
   array['abandon_signup', 'accepts_dm_from', 'accepts_invite_from',
         'can_send_direct_message', 'cancel_account_deletion', 'change_username',
-        'complete_onboarding', 'export_account_data', 'get_my_settings',
+        'complete_onboarding', 'export_account_data', 'get_follow_suggestions', 'get_my_settings',
         'has_location_consent', 'host_on_my_map', 'redeem_party_invite',
         'request_account_deletion', 'set_location_consent', 'set_push_consent'],
   'every client-callable definer function that reads a private column is on the reviewed list');
@@ -462,6 +467,7 @@ insert into rpc_calls values
   ('get_direct_chats',      $$ select * from public.get_direct_chats() $$, true),
   ('get_direct_messages',   $$ select * from public.get_direct_messages('45450000-0000-0000-0000-0000000000d1') $$, true),
   ('get_my_blocked_accounts', $$ select * from public.get_my_blocked_accounts() $$, true),
+  ('get_follow_suggestions', $$ select * from public.get_follow_suggestions() $$, true),
   ('get_profile_stats',     $$ select * from public.get_profile_stats('11111111-1111-1111-1111-111111111111') $$, true),
   ('get_party_stories',     $$ select * from public.get_party_stories('aaaaaaaa-0000-0000-0000-000000000002') $$, false),
   ('get_story_rails',       $$ select * from public.get_story_rails() $$, false),

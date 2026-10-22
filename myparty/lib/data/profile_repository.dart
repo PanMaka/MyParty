@@ -479,7 +479,7 @@ class ProfileRepository {
     return ProfilePrivacy.fromRow(row);
   }
 
-  /// Writes any of the three tiers.
+  /// Writes any of the three tiers, and the "Suggest my account" switch.
   ///
   /// A plain PATCH: all three columns are in the `profiles` UPDATE column
   /// grant under an owner-only policy, and all three columns are `not null` enums, so a bad value is
@@ -491,6 +491,7 @@ class ProfileRepository {
     MapVisibility? mapVisibility,
     InvitePolicy? invitePolicy,
     DmPolicy? dmPolicy,
+    bool? suggestAccount,
   }) async {
     final userId = currentUserId;
     if (userId == null) return;
@@ -499,6 +500,7 @@ class ProfileRepository {
       'map_visibility': ?mapVisibility?.wire,
       'invite_policy': ?invitePolicy?.wire,
       'dm_policy': ?dmPolicy?.wire,
+      'suggest_account': ?suggestAccount,
     };
 
     if (patch.isEmpty) return;
