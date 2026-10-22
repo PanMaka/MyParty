@@ -16,6 +16,7 @@ import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
 import '../widgets/follow_button.dart';
 import '../widgets/mp_bottom_nav.dart' show MpTab;
+import '../widgets/people_you_may_know.dart';
 import '../widgets/profile_party_card.dart';
 import '../widgets/report_sheet.dart';
 import '../widgets/user_link.dart';
@@ -186,6 +187,17 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
   /// other person blocked the viewer — the "not available" state stays one
   /// state for that case.
   bool _blockedByMe = false;
+
+  /// Bumped by pull to refresh only, so PEOPLE YOU MAY KNOW refetches with the
+  /// rest of the screen when the user asks. Tab focus and resume it already
+  /// hears through its own [LiveRefresh]; bumping on those too would fetch it
+  /// twice.
+  int _suggestionsGeneration = 0;
+
+  Future<void> _pullToRefresh() {
+    if (_target is OwnProfile) setState(() => _suggestionsGeneration++);
+    return liveRefresh();
+  }
 
   /// The Message button is mid-request. Guards a double tap opening two chat
   /// screens on top of each other.
@@ -448,7 +460,7 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
       body: SafeArea(
         bottom: false,
         child: RefreshIndicator(
-          onRefresh: liveRefresh,
+          onRefresh: _pullToRefresh,
           child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.only(bottom: 96),
@@ -523,6 +535,16 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
                 ),
               ),
             _actionRow(),
+            // Owner-only: get_follow_suggestions answers for auth.uid() and
+            // takes no user id, so on someone else's profile it would show the
+            // VIEWER's suggestions under their name.
+            if (_target is OwnProfile)
+              PeopleYouMayKnow(
+                social: _social,
+                avatarUrl: _profiles.avatarUrl,
+                liveTab: liveTab,
+                refreshGeneration: _suggestionsGeneration,
+              ),
             // The owner's half of the screen is now one thing: their parties.
             // Privacy, notifications, account deletion and sign out moved
             // behind the gear in the header — see [SettingsScreen].

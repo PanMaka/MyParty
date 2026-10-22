@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart' show protected;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../models/follow_suggestion.dart';
 import '../models/profile.dart';
 import '../state/data_changes.dart';
 
@@ -117,6 +118,51 @@ class SocialRepository {
         .delete()
         .eq('follower_id', id)
         .eq('followee_id', targetUserId);
+  }
+
+  /// One page of "People you may know", for the signed-in user only.
+  ///
+  /// `get_follow_suggestions` takes no user id: who it answers for is
+  /// `auth.uid()`, and every exclusion (follows, blocks, opt-outs, dismissals,
+  /// pending deletion) is the server's. Nothing is filtered again here.
+  /// [after] is the last row of the previous page, echoed back as the keyset.
+  Future<List<FollowSuggestion>> fetchFollowSuggestions({SuggestionCursor? after, int limit = 20}) async {
+    if (_uid == null) return [];
+
+    final rows = await _client.rpc('get_follow_suggestions', params: {
+      'p_cursor_tier': after?.tier,
+      'p_cursor_rank': after?.rank,
+      'p_cursor_id': after?.userId,
+      'p_limit': limit,
+    });
+
+    return (rows as List)
+        .map((row) => FollowSuggestion.fromRow(row as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Stops suggesting [targetUserId]. Announces [SuggestionDismissed] once the
+  /// server has stored it, so the other list showing suggestions drops the
+  /// card too. The write is [writeDismissal].
+  Future<void> dismissSuggestion(String targetUserId) async {
+    await writeDismissal(targetUserId);
+    dataChanges.publish(SuggestionDismissed(userId: targetUserId, dismissed: true));
+  }
+
+  /// The snackbar's Undo. The server deletes only the caller's own row.
+  Future<void> undismissSuggestion(String targetUserId) async {
+    await deleteDismissal(targetUserId);
+    dataChanges.publish(SuggestionDismissed(userId: targetUserId, dismissed: false));
+  }
+
+  @protected
+  Future<void> writeDismissal(String targetUserId) async {
+    await _client.rpc('dismiss_follow_suggestion', params: {'p_user_id': targetUserId});
+  }
+
+  @protected
+  Future<void> deleteDismissal(String targetUserId) async {
+    await _client.rpc('undismiss_follow_suggestion', params: {'p_user_id': targetUserId});
   }
 
   /// Username search, server-side through the `search_profiles` RPC.

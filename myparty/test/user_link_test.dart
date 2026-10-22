@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:myparty/data/party_repository.dart';
 import 'package:myparty/data/profile_repository.dart';
 import 'package:myparty/data/social_repository.dart';
+import 'package:myparty/models/follow_suggestion.dart';
 import 'package:myparty/models/hosted_parties.dart';
 import 'package:myparty/models/party_list_item.dart';
 import 'package:myparty/models/party_summary.dart';
@@ -52,6 +53,10 @@ class _FakeSocial extends SocialRepository {
 
   @override
   Future<bool> isFollowing(String userId) async => false;
+
+  @override
+  Future<List<FollowSuggestion>> fetchFollowSuggestions({SuggestionCursor? after, int limit = 20}) async =>
+      const [];
 }
 
 class _FakeParties extends PartyRepository {

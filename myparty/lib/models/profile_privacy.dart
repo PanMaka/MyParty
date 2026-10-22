@@ -114,25 +114,39 @@ class ProfilePrivacy {
     required this.mapVisibility,
     required this.invitePolicy,
     required this.dmPolicy,
+    this.suggestAccount = true,
   });
 
   final MapVisibility mapVisibility;
   final InvitePolicy invitePolicy;
   final DmPolicy dmPolicy;
 
+  /// "Suggest my account to others": whether `get_follow_suggestions` may
+  /// suggest this user to anyone. Owner-only, like the three tiers.
+  final bool suggestAccount;
+
   factory ProfilePrivacy.fromRow(Map<String, dynamic> row) {
     return ProfilePrivacy(
       mapVisibility: MapVisibility.fromWire(row['map_visibility']),
       invitePolicy: InvitePolicy.fromWire(row['invite_policy']),
       dmPolicy: DmPolicy.fromWire(row['dm_policy']),
+      // A missing value reads as off rather than on: like the tiers, a privacy
+      // row must not guess the permissive answer.
+      suggestAccount: (row['suggest_account'] as bool?) ?? false,
     );
   }
 
-  ProfilePrivacy copyWith({MapVisibility? mapVisibility, InvitePolicy? invitePolicy, DmPolicy? dmPolicy}) {
+  ProfilePrivacy copyWith({
+    MapVisibility? mapVisibility,
+    InvitePolicy? invitePolicy,
+    DmPolicy? dmPolicy,
+    bool? suggestAccount,
+  }) {
     return ProfilePrivacy(
       mapVisibility: mapVisibility ?? this.mapVisibility,
       invitePolicy: invitePolicy ?? this.invitePolicy,
       dmPolicy: dmPolicy ?? this.dmPolicy,
+      suggestAccount: suggestAccount ?? this.suggestAccount,
     );
   }
 }

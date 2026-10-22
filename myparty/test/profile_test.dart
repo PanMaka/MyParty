@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:myparty/data/party_repository.dart';
 import 'package:myparty/data/profile_repository.dart';
 import 'package:myparty/data/social_repository.dart';
+import 'package:myparty/models/follow_suggestion.dart';
 import 'package:myparty/models/hosted_parties.dart';
 import 'package:myparty/models/party_summary.dart';
 import 'package:myparty/models/profile.dart';
@@ -100,6 +101,12 @@ class _FakeSocialRepository extends SocialRepository {
 
   @override
   Future<List<Profile>> fetchFollowing({String? userId}) async => following;
+
+  /// The owner's PEOPLE YOU MAY KNOW row. Empty here, so the section stays
+  /// hidden; test/follow_suggestions_test.dart covers it.
+  @override
+  Future<List<FollowSuggestion>> fetchFollowSuggestions({SuggestionCursor? after, int limit = 20}) async =>
+      const [];
 
   @override
   Future<bool> isFollowing(String userId) async {
