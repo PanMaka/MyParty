@@ -296,7 +296,7 @@ void main() {
           );
 
       expect(inSheet('Υπόγειο τεχνο μέχρι το πρωί.'), findsOneWidget);
-      expect(inSheet('@second_host'), findsOneWidget);
+      expect(inSheet('second_host'), findsOneWidget);
       expect(inSheet('Ψυρρή'), findsOneWidget);
       expect(inSheet('Interested ✓'), findsOneWidget);
     });

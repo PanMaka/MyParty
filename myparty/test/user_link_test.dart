@@ -144,7 +144,7 @@ void main() {
   for (final isPrivate in [false, true]) {
     final variant = isPrivate ? 'private' : 'public';
     // The invitation is the "Invited by @host" badge now, not a byline clause.
-    final byline = isPrivate ? 'Private · @dj_eleni' : 'Public · @dj_eleni';
+    final byline = isPrivate ? 'Private · dj_eleni' : 'Public · dj_eleni';
 
     testWidgets('tapping the host on a $variant party sheet opens their profile, and back returns to the sheet',
         (tester) async {
@@ -154,7 +154,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(ProfileScreen), findsOneWidget);
-      expect(find.text('@dj_eleni'), findsOneWidget);
+      expect(find.text('dj_eleni'), findsOneWidget);
       expect(profiles.fetched, contains(_hostId));
       // Somebody else's profile: the follow button is there.
       expect(find.byType(FollowButton), findsOneWidget);
@@ -171,7 +171,7 @@ void main() {
   testWidgets('the byline answers a tap above its text, inside the 44px target', (tester) async {
     await openSheet(tester, _item(isPrivate: false));
 
-    final top = tester.getRect(find.text('Public · @dj_eleni')).topLeft;
+    final top = tester.getRect(find.text('Public · dj_eleni')).topLeft;
 
     // Well past the reach, on the title: nothing.
     await tester.tapAt(top + const Offset(8, -30));
@@ -195,11 +195,11 @@ void main() {
       ),
     ));
 
-    await tester.tap(find.text('Public · @nikos'));
+    await tester.tap(find.text('Public · nikos'));
     await tester.pumpAndSettle();
 
     expect(find.byType(ProfileScreen), findsOneWidget);
-    expect(find.text('@nikos'), findsOneWidget);
+    expect(find.text('nikos'), findsOneWidget);
     // Owner view: no follow button pointed at yourself, and the gear is there.
     expect(find.byType(FollowButton), findsNothing);
     expect(find.byIcon(Icons.settings_outlined), findsOneWidget);
@@ -210,7 +210,7 @@ void main() {
   testWidgets("an erased host's tombstone handle is not a link", (tester) async {
     await openSheet(tester, _item(isPrivate: false, hostId: _erasedId, hostUsername: _erasedHandle));
 
-    await tester.tap(find.text('Public · @$_erasedHandle'));
+    await tester.tap(find.text('Public · $_erasedHandle'));
     await tester.pumpAndSettle();
 
     expect(find.byType(ProfileScreen), findsNothing);

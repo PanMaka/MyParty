@@ -332,7 +332,7 @@ void main() {
     testWidgets('renders the profiles row, not the prototype identity', (tester) async {
       await _pumpProfile(tester, _FakeProfileRepository());
 
-      expect(find.text('@nikos'), findsOneWidget);
+      expect(find.text('nikos'), findsOneWidget);
       expect(find.text('42'), findsOneWidget);
 
       // The design-prototype literals this step replaced.
@@ -340,6 +340,51 @@ void main() {
       expect(find.text('@katerina · ΕΚΠΑ, Ψυχολογία'), findsNothing);
       expect(find.text('184'), findsNothing);
       expect(find.text('23'), findsNothing);
+    });
+
+    testWidgets('the username has no "@", and the full name sits under it, smaller and muted (Phase 49)',
+        (tester) async {
+      const named = Profile(
+        id: 'me', username: 'nikos', followerCount: 42, followingCount: 9,
+        bio: 'Στα δεκαπέντε λεπτά από παντού.',
+        firstName: 'Νίκος', lastName: 'Παπαδόπουλος',
+      );
+      await _pumpProfile(tester, _FakeProfileRepository(profile: named));
+
+      expect(find.text('nikos'), findsOneWidget);
+      expect(find.text('@nikos'), findsNothing);
+      final name = find.text('Νίκος Παπαδόπουλος');
+      expect(name, findsOneWidget);
+
+      double top(Finder f) => tester.getTopLeft(f).dy;
+      expect(top(find.text('nikos')), lessThan(top(name)), reason: 'the username stays the main line');
+      expect(top(name), lessThan(top(find.text('Στα δεκαπέντε λεπτά από παντού.'))));
+
+      final handleStyle = tester.widget<Text>(find.text('nikos')).style!;
+      final nameStyle = tester.widget<Text>(name).style!;
+      expect(nameStyle.fontSize, lessThan(handleStyle.fontSize!));
+      expect(nameStyle.color!.a, lessThan(1), reason: 'muted');
+    });
+
+    testWidgets('no name draws nothing: the bio sits where it always did', (tester) async {
+      await _pumpProfile(tester, _FakeProfileRepository());
+      final bioGap = tester.getTopLeft(find.text('Στα δεκαπέντε λεπτά από παντού.')).dy -
+          tester.getBottomLeft(find.text('nikos')).dy;
+
+      // The default fake has no name. With no name line, the only space between
+      // handle and bio is the bio's own 5px padding.
+      expect(bioGap, closeTo(5, 0.5));
+    });
+
+    testWidgets("another user's profile shows their name the same way", (tester) async {
+      const other = Profile(
+        id: 'u2', username: 'maria', followerCount: 1, followingCount: 1,
+        firstName: 'Μαρία', lastName: 'Κωνσταντίνου',
+      );
+      await _pumpProfile(tester, _FakeProfileRepository(profile: other), target: const OtherProfile('u2'));
+
+      expect(find.text('maria'), findsOneWidget);
+      expect(find.text('Μαρία Κωνσταντίνου'), findsOneWidget);
     });
 
     testWidgets('labels the follower count followers, never friends', (tester) async {
@@ -356,7 +401,7 @@ void main() {
     testWidgets('renders exactly two lines of text: the handle and the bio', (tester) async {
       await _pumpProfile(tester, _FakeProfileRepository());
 
-      expect(find.text('@nikos'), findsOneWidget);
+      expect(find.text('nikos'), findsOneWidget);
       expect(find.text('Στα δεκαπέντε λεπτά από παντού.'), findsOneWidget);
 
       // `following_count` used to be a third thing in this block. It is not
@@ -378,7 +423,7 @@ void main() {
       // common case rather than the degraded one. Nothing may be substituted
       // in that slot: a generated sentence where a bio goes reads as the user's
       // own words.
-      expect(find.text('@nikos'), findsOneWidget);
+      expect(find.text('nikos'), findsOneWidget);
       expect(find.text(''), findsNothing);
       expect(find.textContaining('Γράψε κάτι'), findsNothing);
       expect(find.textContaining('Χωρίς bio'), findsNothing);
@@ -431,7 +476,7 @@ void main() {
 
       expect(find.text('The profile did not load'), findsOneWidget);
       expect(find.text('Try again'), findsOneWidget);
-      expect(find.text('@nikos'), findsNothing);
+      expect(find.text('nikos'), findsNothing);
     });
 
     testWidgets('a filtered or missing row says so instead of rendering zeros', (tester) async {

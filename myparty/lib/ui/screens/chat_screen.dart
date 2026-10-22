@@ -51,7 +51,7 @@ class ChatScreen extends StatefulWidget {
     this.peerAvatarUrl,
     DirectChatRepository? repository,
   })  : conversationId = threadId,
-        title = '@$peerUsername',
+        title = peerUsername,
         isPrivate = false,
         memberCount = null,
         partyRepository = null,

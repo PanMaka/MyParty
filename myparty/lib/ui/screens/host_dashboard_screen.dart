@@ -836,7 +836,7 @@ class _HostDashboardScreenState extends State<HostDashboardScreen> with LiveRefr
                   ),
                   const SizedBox(width: 11),
                   Expanded(
-                    child: Text('@${row.username}',
+                    child: Text(row.username,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),

@@ -415,7 +415,7 @@ class PartyDetailSheet extends StatelessWidget {
                       // a property of the CALLER, like my_rsvp_status.
                       [
                         item.isPrivate ? 'Private' : 'Public',
-                        '@${item.hostUsername}',
+                        item.hostUsername,
                       ].join(' · '),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,

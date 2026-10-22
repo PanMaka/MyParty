@@ -245,7 +245,7 @@ class _InviteFollowersScreenState extends State<InviteFollowersScreen> {
             const SizedBox(width: 11),
             Expanded(
               child: Text(
-                '@${f.username}',
+                f.username,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(

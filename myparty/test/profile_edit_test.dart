@@ -62,6 +62,9 @@ class _FakeProfileRepository extends ProfileRepository {
   final List<String> usernameWrites = [];
   final List<(String, String)> nameWrites = [];
 
+  /// Calls to [clearNames]: Remove name, or both fields emptied (Phase 49).
+  int nameClears = 0;
+
   /// Every primitive call in order, as `verb:argument`. Asserting on the whole
   /// list rather than on individual flags is deliberate — the ordering is the
   /// invariant, so the test has to be able to fail when only the order changes.
@@ -105,7 +108,8 @@ class _FakeProfileRepository extends ProfileRepository {
   }
 
   @override
-  Future<({String firstName, String lastName})?> fetchMyNames() async => names;
+  Future<({String firstName, String lastName, bool shown})?> fetchMyNames() async =>
+      names == null ? null : (firstName: names!.firstName, lastName: names!.lastName, shown: true);
 
   @override
   Future<DateTime?> fetchUsernameNextChangeAt() async => nextUsernameChange;
@@ -117,6 +121,12 @@ class _FakeProfileRepository extends ProfileRepository {
       throw UsernameRefused(refuseUsername!, nextChangeAt: DateTime(2026, 11, 20));
     }
     return DateTime(2026, 11, 20);
+  }
+
+  @override
+  Future<void> clearNames() async {
+    nameClears++;
+    if (failNames) throw Exception('offline');
   }
 
   @override
@@ -429,7 +439,7 @@ void main() {
   // The screen.
   // ---------------------------------------------------------------------
   group('the form', () {
-    testWidgets('offers a username, a private name, a bio and a photo, and nothing else',
+    testWidgets('offers a username, an optional public name, a bio and a photo, and nothing else',
         (tester) async {
       await _pumpEditor(tester, _FakeProfileRepository());
 
@@ -439,7 +449,8 @@ void main() {
       expect(find.text('BIO'), findsOneWidget);
       expect(find.text('Change photo'), findsOneWidget);
       // The name is the owner's alone (user_names), which the screen says.
-      expect(find.text('Only you can see your name. Others see your username.'), findsOneWidget);
+      expect(find.text(nameVisibilityNote), findsOneWidget);
+      expect(find.textContaining('Only you can see'), findsNothing);
 
       // There is no display_name, school or department column, and a form is
       // exactly where that decision would quietly be reversed.
@@ -864,8 +875,45 @@ void main() {
       await tester.pumpAndSettle();
       await _tapSave(tester);
 
-      expect(find.text('Please enter your last name.'), findsOneWidget);
+      expect(find.text('Add your last name too, or leave both empty.'), findsOneWidget);
       expect(repo.nameWrites, isEmpty);
+      expect(repo.nameClears, 0);
+    });
+
+    testWidgets('Remove name empties both fields, and Save removes it', (tester) async {
+      final repo = _FakeProfileRepository();
+      await _pumpEditor(tester, repo);
+
+      await tester.ensureVisible(find.text('Remove name'));
+      await tester.tap(find.text('Remove name'));
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(_firstNameInput).controller!.text, '');
+      expect(tester.widget<TextField>(_lastNameInput).controller!.text, '');
+      expect(find.text('Remove name'), findsNothing, reason: 'nothing left to remove');
+      expect(repo.nameClears, 0, reason: 'staged until Save, like Remove photo');
+
+      await _tapSave(tester);
+
+      expect(repo.nameClears, 1);
+      expect(repo.nameWrites, isEmpty);
+    });
+
+    testWidgets('emptying both fields by hand removes the name too', (tester) async {
+      final repo = _FakeProfileRepository();
+      await _pumpEditor(tester, repo);
+
+      await tester.enterText(_firstNameInput, '');
+      await tester.enterText(_lastNameInput, ' ');
+      await tester.pumpAndSettle();
+      await _tapSave(tester);
+
+      expect(repo.nameClears, 1);
+    });
+
+    testWidgets('Remove name is not offered when there is no name', (tester) async {
+      await _pumpEditor(tester, _FakeProfileRepository(names: null));
+
+      expect(find.text('Remove name'), findsNothing);
     });
 
     testWidgets('an account with no names starts empty and stays clean', (tester) async {

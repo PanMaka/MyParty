@@ -283,7 +283,8 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      expect(find.text('@zoi'), findsOneWidget);
+      // The title and the peer's line, both without "@" since Phase 49.
+      expect(find.text('zoi'), findsNWidgets(2));
       expect(find.text('are you coming saturday?'), findsOneWidget);
       expect(find.text('yes!'), findsOneWidget);
 
@@ -359,7 +360,7 @@ void main() {
       ]);
       await pumpMessages(tester, chats);
 
-      expect(find.text('@zoi'), findsOneWidget);
+      expect(find.text('zoi'), findsOneWidget);
       expect(find.text('see you there'), findsOneWidget);
       expect(find.text('3'), findsOneWidget);
       // Your own last line is labelled as yours.
@@ -390,7 +391,7 @@ void main() {
       final chats = _FakeDirectChats(threads: [_thread('t1')]);
       await pumpMessages(tester, chats);
 
-      await tester.tap(find.text('@zoi'));
+      await tester.tap(find.text('zoi'));
       await tester.pumpAndSettle();
       expect(find.text('PROFILE'), findsOneWidget);
       expect(find.byType(ChatScreen), findsNothing);
@@ -399,7 +400,7 @@ void main() {
       // Back lands on the Direct list, unchanged.
       await tester.pageBack();
       await tester.pumpAndSettle();
-      expect(find.text('@zoi'), findsOneWidget);
+      expect(find.text('zoi'), findsOneWidget);
 
       expect(opened, ['peer-t1']);
     });
@@ -435,7 +436,7 @@ void main() {
 
       expect(chats.openedWith, ['them']);
       expect(find.byType(ChatScreen), findsOneWidget);
-      expect(find.text('@zoi'), findsWidgets);
+      expect(find.text('zoi'), findsWidgets);
       expect(chats.historyFor, [_pairId('me', 'them')]);
       expect(find.text('Coming soon'), findsNothing);
     });
@@ -493,7 +494,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(social.calls, contains('unblock:them'));
-      expect(find.text('@zoi'), findsOneWidget);
+      expect(find.text('zoi'), findsOneWidget);
       expect(find.text('Message'), findsOneWidget);
     });
 
@@ -529,12 +530,12 @@ void main() {
       await tester.pumpWidget(MaterialApp(home: BlockedAccountsScreen(social: social)));
       await tester.pumpAndSettle();
 
-      expect(find.text('@zoi'), findsOneWidget);
+      expect(find.text('zoi'), findsOneWidget);
       await tester.tap(find.text('Unblock'));
       await tester.pumpAndSettle();
 
       expect(social.calls, ['unblock:them']);
-      expect(find.text('@zoi'), findsNothing);
+      expect(find.text('zoi'), findsNothing);
     });
 
     testWidgets('a block made elsewhere appears in Blocked accounts without a refresh', (tester) async {
@@ -547,7 +548,7 @@ void main() {
       await social.block('them');
       await tester.pumpAndSettle();
 
-      expect(find.text('@zoi'), findsOneWidget);
+      expect(find.text('zoi'), findsOneWidget);
     });
   });
 }

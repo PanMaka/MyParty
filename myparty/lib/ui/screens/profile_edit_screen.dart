@@ -9,15 +9,16 @@ import '../../utils/english_date.dart';
 import '../theme/app_theme.dart';
 import '../widgets/diagonal_placeholder.dart';
 
-/// What a profile has: a username, a bio and a photo — plus the owner's first
-/// and last name, which nobody else sees.
+/// What a profile has: a username, a bio and a photo — plus an optional first
+/// and last name, shown under the username since Phase 49.
 ///
 /// There is no display name field, no school and no department, and their
 /// absence is the same decision three times over — `20260820095801` did not add
 /// the columns, and said why: "a schema that offers three text fields gets a
 /// header with three text fields, whatever the design said". The first and
-/// last name are not that field reversed: they live in `user_names`, which is
-/// owner-read-only (Phase 44), and the header never shows them.
+/// last name are not that field reversed: they live in `user_names`, are
+/// optional (both or neither), and the header shows them as one muted line
+/// under the username (Phase 49).
 ///
 /// The avatar is picked into memory and uploaded on save rather than on pick.
 /// That is what makes "Cancel" mean something during the upload — see
@@ -65,8 +66,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   /// When a username change is next allowed; null when it is allowed now.
   DateTime? _nextUsernameChange;
 
-  /// The stored names, or null for an account with none (onboarded before
-  /// names were asked for).
+  /// The stored names, or null for an account with none.
   ({String firstName, String lastName})? _savedNames;
 
   /// The picked photo, held in memory until save. Null means "not changing
@@ -128,7 +128,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       if (!mounted) return;
       setState(() {
         _profile = profile;
-        _savedNames = names;
+        _savedNames = names == null ? null : (firstName: names.firstName, lastName: names.lastName);
         _savedUsername = profile?.username ?? '';
         _nextUsernameChange = nextChange;
         // Seeded once. The controllers are the edit buffers from here on, so a
@@ -207,8 +207,10 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     // Every form-side check first, so nothing is written while another field
     // is still wrong. The server runs the real ones regardless.
     final usernameError = _usernameChanged ? UsernameConstraint.validate(username) : null;
-    final firstError = _namesChanged ? PersonNameConstraint.validate(first, label: 'first name') : null;
-    final lastError = _namesChanged ? PersonNameConstraint.validate(last, label: 'last name') : null;
+    // Both or neither: two empty fields remove the name.
+    final nameErrors = _namesChanged ? PersonNameConstraint.validatePair(first, last) : null;
+    final firstError = nameErrors?.first;
+    final lastError = nameErrors?.last;
     // The form's copy of the CHECK. It refuses the same four things, before
     // the round trip rather than after — the constraint still runs, and is
     // still what decides.
@@ -263,9 +265,14 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
 
     if (_namesChanged) {
       try {
-        await _profiles.setNames(firstName: first, lastName: last);
+        final removing = first.isEmpty && last.isEmpty;
+        if (removing) {
+          await _profiles.clearNames();
+        } else {
+          await _profiles.setNames(firstName: first, lastName: last);
+        }
         if (!mounted) return;
-        setState(() => _savedNames = (firstName: first, lastName: last));
+        setState(() => _savedNames = removing ? null : (firstName: first, lastName: last));
       } catch (_) {
         if (!mounted) return;
         setState(() {
@@ -579,7 +586,31 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         const SizedBox(height: 10),
         field(_lastName, 'Last name', _lastNameError),
         if (_lastNameError != null) _caption(_lastNameError!, color: AppColors.pinkLight),
-        _caption('Only you can see your name. Others see your username.'),
+        _caption(nameVisibilityNote),
+        // Staged like Remove photo: it empties the fields, and Save removes
+        // the name. Hidden once both are empty, when there is nothing to remove.
+        if (_firstName.text.isNotEmpty || _lastName.text.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: GestureDetector(
+              onTap: _saving
+                  ? null
+                  : () => setState(() {
+                        _firstName.clear();
+                        _lastName.clear();
+                        _firstNameError = null;
+                        _lastNameError = null;
+                      }),
+              child: Text(
+                'Remove name',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: _saving ? AppColors.textAlpha(0.3) : AppColors.purpleLight,
+                ),
+              ),
+            ),
+          ),
       ],
     );
   }

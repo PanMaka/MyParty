@@ -148,7 +148,12 @@ class ProfileRepository {
 
     final row = await _client
         .from('profiles')
-        .select('id, username, bio, avatar_path, follower_count, following_count')
+        // The name rides along as an embed, under user_names' own policies
+        // (Phase 49): shown, discoverable, and not block-paired, which the
+        // policy gets from this same profiles row filter. A hidden name is a
+        // null embed, never a missing profile.
+        .select('id, username, bio, avatar_path, follower_count, following_count, '
+            'user_names(first_name, last_name)')
         .eq('id', id)
         .maybeSingle();
 
@@ -228,10 +233,13 @@ class ProfileRepository {
   /// gives a friendlier error for the common case. Throws [UsernameRefused]
   /// for a taken or invalid name. Choosing the first name does not start the
   /// 30-day cooldown, so it can be fixed once straight away.
+  ///
+  /// Names are optional (Phase 49): pass null for both to store none. The
+  /// server refuses half a name.
   Future<void> completeOnboarding({
     required String username,
-    required String firstName,
-    required String lastName,
+    String? firstName,
+    String? lastName,
   }) async {
     if (currentUserId == null) throw StateError('No signed-in user to onboard');
 
@@ -272,31 +280,45 @@ class ProfileRepository {
     return next == null ? null : DateTime.parse(next as String).toLocal();
   }
 
-  /// The signed-in user's first and last name, from `user_names` under its
-  /// owner-only policy. Null when there is no row (an account onboarded
-  /// before names were asked for) or when signed out. Nobody else can read
-  /// them.
-  Future<({String firstName, String lastName})?> fetchMyNames() async {
-    final userId = currentUserId;
-    if (userId == null) return null;
+  /// The signed-in user's first and last name through `get_my_names`, and
+  /// whether other people can see it yet (`shown`). Null when there is no name
+  /// or when signed out. Not a select on `user_names`: `shown_at` is not
+  /// client-readable (Phase 49), so the function is the owner's door.
+  Future<({String firstName, String lastName, bool shown})?> fetchMyNames() async {
+    if (currentUserId == null) return null;
 
-    final row = await _client
-        .from('user_names')
-        .select('first_name, last_name')
-        .eq('user_id', userId)
-        .maybeSingle();
-    if (row == null) return null;
-    return (firstName: row['first_name'] as String, lastName: row['last_name'] as String);
+    final rows = await _client.rpc('get_my_names') as List<dynamic>;
+    if (rows.isEmpty) return null;
+    final row = rows.first as Map<String, dynamic>;
+    return (
+      firstName: row['first_name'] as String,
+      lastName: row['last_name'] as String,
+      shown: row['shown'] as bool,
+    );
   }
 
   /// Sets both names through `set_my_names`, never `.upsert()`: the table has
   /// no client write grant. The server trims and refuses an empty or
-  /// over-long name with 22023.
+  /// over-long name with 22023. Saving also makes the name visible, because
+  /// every screen that writes one says it is shown.
   Future<void> setNames({required String firstName, required String lastName}) async {
     await _client.rpc('set_my_names', params: {
       'p_first_name': firstName,
       'p_last_name': lastName,
     });
+  }
+
+  /// Deletes the caller's names: `set_my_names(null, null)`, like
+  /// `set_my_gender(null)`. Edit profile's Remove name and the Phase 49
+  /// notice's Remove my name.
+  Future<void> clearNames() async {
+    await _client.rpc('set_my_names', params: {'p_first_name': null, 'p_last_name': null});
+  }
+
+  /// The Phase 49 notice's OK: the name becomes visible to signed-in users.
+  /// Idempotent on the server, and a no-op without a name.
+  Future<void> acknowledgeNameShown() async {
+    await _client.rpc('acknowledge_name_shown');
   }
 
   /// Uploads a new avatar and points `profiles.avatar_path` at it, removing the
