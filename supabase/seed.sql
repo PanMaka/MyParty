@@ -532,3 +532,17 @@ insert into public.user_genders (user_id, gender) values
   ('0c0c0c0c-0000-0000-0000-000000000001', 'female'),
   ('0c0c0c0c-0000-0000-0000-000000000002', 'male'),
   ('0c0c0c0c-0000-0000-0000-000000000003', 'non_binary');
+
+-- ============================================================
+-- Names (Phase 49), so profile headers have something to show. The four c
+-- personas are shown. host (1111) holds a name that is NOT yet shown, so
+-- signing in as host@myparty.local brings up the one-time notice. Everyone
+-- else has no name, which is the other state the header must render.
+-- 43_public_names writes its own fixtures and relies on none of these.
+-- ============================================================
+insert into public.user_names (user_id, first_name, last_name, shown_at) values
+  ('11111111-1111-1111-1111-111111111111', 'Άρης',    'Βλάχος',       null),
+  ('0c0c0c0c-0000-0000-0000-000000000001', 'Νίκος',   'Παπαδόπουλος', now()),
+  ('0c0c0c0c-0000-0000-0000-000000000002', 'Μαρία',   'Κωνσταντίνου', now()),
+  ('0c0c0c0c-0000-0000-0000-000000000003', 'Δημήτρης', 'Αλεξίου',     now()),
+  ('0c0c0c0c-0000-0000-0000-000000000004', 'Ελένη',   'Γεωργίου',     now());

@@ -20,6 +20,8 @@ shipped 1.38, moved its fix decision to §3, and added 1.40-1.41 for Phase 46
 Phase 47 added 1.42-1.45, with 1.44 the auth-email release checklist.
 Phase 46 shipped 1.40 and 1.41, moved the avatars and PostGIS decisions to §3,
 and added 1.44 F (re-run the erasures a pre-existing bug failed) (2026-10-22).
+Phase 49 made names public, recorded that in §3 and added 1.50 (name search)
+(2026-10-23).
 
 ---
 
@@ -838,6 +840,16 @@ flutter_map 8 (8.0.0 needs ^7; 10.x betas need latlong2 0.9). Two things follow.
 addresses MapTiler returns. International students may want Latin script;
 `name:latin` exists in the tiles. A product call, one expression to change.
 
+### 1.50 Idea: find people by first and last name
+
+Since Phase 49 names are public to signed-in users, but `search_profiles`
+still matches only `username_search`. Left out on purpose, not forgotten: name
+search is a separate decision about discoverability (looking up a person by a
+legal name is a stronger thing than seeing one on a profile you already
+opened). It must honour the same row filter as the name itself (shown,
+`is_discoverable`, not block-paired), and it needs its own index and measurement
+because `user_names` is not on search's leakproof prefix path (gotcha 22).
+
 ---
 
 ## 2. Costed: should the map adopt `party_is_past()`?
@@ -892,6 +904,29 @@ showing dead pins before the wizard changes. Do not take B or C as written.
 ## 3. NOT backlog — decisions that look like gaps
 
 Here so they are not "fixed" by somebody reading §1 and pattern-matching.
+
+- **First and last names are public to signed-in users (Phase 49, 2026-10-23),
+  reversing Phase 44's owner-read-only.** Names show under the username on a
+  profile. They stay in `user_names`, exposed by a SECOND row policy rather
+  than moved onto `profiles`, because the two conditions are about the row, and
+  a grant names a role, never a row: a pending account shows no name but keeps
+  it for a restore, and an existing user's name stays hidden until they have
+  seen the notice. The policy's `exists` reads `profiles` as the caller, so the
+  block filter applies to names without a second copy of it.
+  - **Existing users opt in by seeing a notice, not by a date.** They were told
+    "Only you can see your name". `shown_at` is null for every pre-Phase 49 row
+    and keeps the name owner-only until the owner taps OK
+    (`acknowledge_name_shown`) or saves the name under the new copy. The notice
+    also offers Remove my name. An account whose owner never comes back never
+    has its name published. A switch-over date would have published names of
+    people who were never told.
+  - **Names are optional, everywhere.** `set_my_names(null, null)` deletes the
+    row, like `set_my_gender(null)`, and onboarding accepts none. Both or
+    neither: half a name is still refused. Once Remove my name existed for
+    existing users, requiring a name at sign-up would have made opting out a
+    privilege of joining early.
+  - `shown_at` is not granted to clients (it would date when someone saw the
+    notice); the owner reads it through `get_my_names()`.
 
 - **Sign-up email confirmation is ON, and turning it off breaks Change email.**
   Decided in Phase 47 (2026-10-21). GoTrue skips the second confirmation of an
