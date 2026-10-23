@@ -3,12 +3,13 @@
 --
 -- What has to hold:
 --
---   A. Shape: owner-read-only, no client write of any kind, the CHECK holds
---      even for a writer that bypasses set_my_names.
+--   A. Shape: no client write of any kind, the CHECK holds even for a writer
+--      that bypasses set_my_names. (Owner-read-only until Phase 49; who reads
+--      a name now is 43_public_names.)
 --   B. The rule: trimmed, 1-50, no control characters, and nothing about
 --      alphabets.
 --   C. set_my_names: sets, replaces, trims, refuses half a name, own row only,
---      anon out.
+--      anon out. Clearing (both null) is in 43_public_names.
 --   D. Export carries both names; erasure deletes the row.
 --
 -- The one-off copy from auth metadata cannot be re-run here (seed.sql runs
@@ -57,13 +58,16 @@ select throws_ok(
   $$ delete from public.user_names where user_id = '11111111-1111-1111-1111-111111111111' $$,
   '42501', null, 'NEGATIVE: no direct DELETE');
 
+-- Reversed in Phase 49: set_my_names stamps shown_at, so the name is public
+-- to signed-in users. The negatives (signed out, blocks, pending, unshown)
+-- are in 43_public_names.
 select tests.authenticate_as('44444444-4444-4444-4444-444444444444'); -- stranger
-select is_empty(
-  $$ select 1 from public.user_names where user_id = '11111111-1111-1111-1111-111111111111' $$,
-  'NEGATIVE: a stranger reads nothing of the host''s names');
 select is(
-  (select count(*)::int from public.user_names), 0,
-  'and sees no row at all, having none of their own');
+  (select first_name || '|' || last_name from public.user_names where user_id = '11111111-1111-1111-1111-111111111111'),
+  'George|Pap', 'a signed-in stranger reads the host''s names (Phase 49)');
+select throws_ok(
+  $$ select public.set_my_names('X', 'Y'); update public.user_names set first_name = 'Z' $$,
+  '42501', null, 'NEGATIVE: and writing their own row still goes only through set_my_names');
 
 select tests.clear_authentication(); -- anon
 select throws_ok($$ select 1 from public.user_names $$, '42501', null, 'anon holds no grant on user_names');

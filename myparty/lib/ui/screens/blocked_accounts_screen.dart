@@ -160,7 +160,7 @@ class _BlockedAccountsScreenState extends State<BlockedAccountsScreen> with Live
                       ),
                       const SizedBox(width: 12),
                       Expanded(
-                        child: Text('@${profile.username}',
+                        child: Text(profile.username,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
                       ),

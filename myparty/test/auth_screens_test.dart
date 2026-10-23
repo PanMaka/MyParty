@@ -103,8 +103,9 @@ class _FakeProfileRepository extends ProfileRepository {
   final Set<String> taken;
   final List<String> checked = [];
   /// Every completeOnboarding call as (username, first, last): one call
-  /// carries all three since Phase 44.
-  final List<(String, String, String)> onboarded = [];
+  /// carries all three since Phase 44. The names are null when none was given
+  /// (Phase 49).
+  final List<(String, String?, String?)> onboarded = [];
 
   /// Never completes, so a successful submit stops short of navigating to
   /// HomeScreen, which needs a real Supabase.
@@ -119,8 +120,8 @@ class _FakeProfileRepository extends ProfileRepository {
   @override
   Future<void> completeOnboarding({
     required String username,
-    required String firstName,
-    required String lastName,
+    String? firstName,
+    String? lastName,
   }) {
     onboarded.add((username, firstName, lastName));
     if (refuseAs != null) return Future.error(UsernameRefused(refuseAs!));
@@ -402,8 +403,8 @@ void main() {
         ));
 
     Future<void> fillNames(WidgetTester tester) async {
-      await tester.enterText(find.widgetWithText(TextField, 'First name'), ' Maria ');
-      await tester.enterText(find.widgetWithText(TextField, 'Last name'), ' Papadopoulou ');
+      await tester.enterText(find.widgetWithText(TextField, 'First name (optional)'), ' Maria ');
+      await tester.enterText(find.widgetWithText(TextField, 'Last name (optional)'), ' Papadopoulou ');
     }
 
     Future<void> submit(WidgetTester tester, String username) async {
@@ -418,7 +419,7 @@ void main() {
 
       expect(_headerAsset(tester), 'assets/images/username_party.png');
       _expectCircularHeader(tester);
-      expect(find.text("What's your name? People need it to find you in a party!"), findsOneWidget);
+      expect(find.text("What's your name?"), findsOneWidget);
       expect(
         find.descendant(of: find.byType(AuthFieldsBox), matching: find.widgetWithText(TextField, 'Username')),
         findsOneWidget,
@@ -440,11 +441,11 @@ void main() {
 
       Finder inBox(Finder box, String label) =>
           find.descendant(of: box, matching: find.widgetWithText(TextField, label));
-      expect(inBox(namesBox, 'First name'), findsOneWidget);
-      expect(inBox(namesBox, 'Last name'), findsOneWidget);
+      expect(inBox(namesBox, 'First name (optional)'), findsOneWidget);
+      expect(inBox(namesBox, 'Last name (optional)'), findsOneWidget);
       expect(inBox(namesBox, 'Username'), findsNothing);
       expect(inBox(usernameBox, 'Username'), findsOneWidget);
-      expect(inBox(usernameBox, 'First name'), findsNothing);
+      expect(inBox(usernameBox, 'First name (optional)'), findsNothing);
 
       // The caption is outside both boxes, between them.
       final captionText = find.text(caption);
@@ -458,7 +459,7 @@ void main() {
       await tester.pumpWidget(screen(_FakeProfileRepository()));
 
       TextStyle? styleOf(String text) => tester.widget<Text>(find.text(text)).style;
-      final header = styleOf("What's your name? People need it to find you in a party!");
+      final header = styleOf("What's your name?");
       final second = styleOf('And what about the name for people to find you within the app?');
       expect(second, header);
       expect(
@@ -467,15 +468,34 @@ void main() {
       );
     });
 
-    testWidgets('missing names are named under their fields and nothing is written', (tester) async {
+    testWidgets('the names are optional, and the screen says they are shown on the profile', (tester) async {
+      await tester.pumpWidget(screen(_FakeProfileRepository()));
+
+      expect(find.widgetWithText(TextField, 'First name (optional)'), findsOneWidget);
+      expect(find.widgetWithText(TextField, 'Last name (optional)'), findsOneWidget);
+      expect(find.text(nameVisibilityNote), findsOneWidget);
+      expect(find.textContaining('Only you can see'), findsNothing);
+    });
+
+    testWidgets('no names onboards with none: both sent as null', (tester) async {
       final repo = _FakeProfileRepository();
-      final auth = _FakeAuthService();
-      await tester.pumpWidget(screen(repo, auth));
+      await tester.pumpWidget(screen(repo));
 
       await submit(tester, 'maria');
 
-      expect(find.text('Please enter your first name.'), findsOneWidget);
-      expect(find.text('Please enter your last name.'), findsOneWidget);
+      expect(find.textContaining('Please enter your'), findsNothing);
+      expect(repo.onboarded, [('maria', null, null)]);
+    });
+
+    testWidgets('half a name is named under the empty field and nothing is written', (tester) async {
+      final repo = _FakeProfileRepository();
+      final auth = _FakeAuthService();
+      await tester.pumpWidget(screen(repo, auth));
+      await tester.enterText(find.widgetWithText(TextField, 'First name (optional)'), 'Maria');
+
+      await submit(tester, 'maria');
+
+      expect(find.text('Add your last name too, or leave both empty.'), findsOneWidget);
       expect(repo.checked, isEmpty);
       expect(repo.onboarded, isEmpty);
     });
@@ -568,8 +588,8 @@ void main() {
       )));
       final gate = tester.state(find.byType(_GateProbe));
 
-      await tester.enterText(find.widgetWithText(TextField, 'First name'), 'Maria');
-      await tester.enterText(find.widgetWithText(TextField, 'Last name'), 'P');
+      await tester.enterText(find.widgetWithText(TextField, 'First name (optional)'), 'Maria');
+      await tester.enterText(find.widgetWithText(TextField, 'Last name (optional)'), 'P');
       await tester.enterText(find.widgetWithText(TextField, 'Username'), 'maria');
       await tester.ensureVisible(find.text('Continue'));
       await tester.tap(find.text('Continue'));
@@ -647,7 +667,7 @@ void main() {
           authService: auth,
         )),
       );
-      await tester.enterText(find.widgetWithText(TextField, 'First name'), 'Maria');
+      await tester.enterText(find.widgetWithText(TextField, 'First name (optional)'), 'Maria');
       await tester.enterText(find.widgetWithText(TextField, 'Username'), 'maria');
       await tester.tap(find.byTooltip('Back to sign up'));
       await tester.pumpAndSettle();
@@ -710,8 +730,8 @@ void main() {
           authService: _FakeAuthService(),
         )),
       );
-      await tester.enterText(find.widgetWithText(TextField, 'First name'), 'Maria');
-      await tester.enterText(find.widgetWithText(TextField, 'Last name'), 'P');
+      await tester.enterText(find.widgetWithText(TextField, 'First name (optional)'), 'Maria');
+      await tester.enterText(find.widgetWithText(TextField, 'Last name (optional)'), 'P');
       await tester.enterText(find.widgetWithText(TextField, 'Username'), 'maria');
       await tester.ensureVisible(find.text('Continue'));
       await tester.tap(find.text('Continue'));

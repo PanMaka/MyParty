@@ -28,7 +28,7 @@
 -- aaaa...0002 public (host 1111).
 begin;
 set search_path to public, extensions;
-select plan(127);
+select plan(131);
 
 create temp table private_cols (c text primary key) on commit drop;
 insert into private_cols values
@@ -95,6 +95,43 @@ select ok(
   (select p.prosecdef and p.pronargs = 0 and p.proconfig = array['search_path=""']
    from pg_proc p where p.oid = 'public.get_my_settings()'::regprocedure),
   'get_my_settings is security definer, pins search_path, and takes no user argument');
+
+
+-- ============================================================
+-- 1b. user_names (Phase 49, 20261022211326). The names are public to signed-in
+-- users (by row policy: shown, discoverable, not block-paired -- proven in
+-- 43_public_names); shown_at is owner-only through get_my_names, updated_at
+-- server-only.
+-- ============================================================
+select is(
+  array(select a.attname::text from pg_attribute a
+        where a.attrelid = 'public.user_names'::regclass and a.attnum > 0 and not a.attisdropped
+        order by 1),
+  array['first_name', 'last_name', 'shown_at', 'updated_at', 'user_id'],
+  'every column of user_names is classified here -- a new column has to be decided, not inherited');
+
+select is(
+  array(select c from unnest(array['first_name', 'last_name', 'shown_at', 'updated_at', 'user_id']) c
+        where has_column_privilege('authenticated', 'public.user_names', c, 'select')
+        order by 1),
+  array['first_name', 'last_name', 'user_id'],
+  'authenticated reads exactly the public user_names columns: not shown_at, not updated_at');
+
+select ok(
+  not has_any_column_privilege('anon', 'public.user_names', 'select'),
+  'anon can read no column of user_names');
+
+select is(
+  array(select p.proname::text
+        from pg_proc p
+        where p.pronamespace = 'public'::regnamespace
+          and p.prorettype <> 'trigger'::regtype
+          and (has_function_privilege('anon', p.oid, 'execute')
+               or has_function_privilege('authenticated', p.oid, 'execute'))
+          and p.prosrc ~ '\mshown_at\M'
+        order by 1),
+  array['acknowledge_name_shown', 'export_account_data', 'get_my_names', 'set_my_names'],
+  'every client-callable function that touches shown_at is reviewed, and each acts on the caller''s own row');
 
 
 -- ============================================================

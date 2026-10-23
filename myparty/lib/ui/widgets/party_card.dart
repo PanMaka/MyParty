@@ -171,7 +171,7 @@ class PartyCard extends StatelessWidget {
                                 username: item.hostUsername,
                                 hitSlop: const EdgeInsets.only(top: 14),
                                 child: Text(
-                                  '@${item.hostUsername}',
+                                  item.hostUsername,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(fontSize: 12, color: AppColors.textAlpha(0.65)),

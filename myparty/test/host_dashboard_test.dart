@@ -352,16 +352,16 @@ void main() {
     expect(find.text('RSVPS OVER TIME'), findsNothing, reason: 'the chart was removed in Phase 40');
 
     // Going tab first: the two going guests, no GOING badge (it is the tab).
-    await tester.scrollUntilVisible(find.text('@ana'), 200);
-    expect(find.text('@ana'), findsOneWidget);
-    expect(find.text('@bo'), findsOneWidget);
-    expect(find.text('@cy'), findsNothing);
+    await tester.scrollUntilVisible(find.text('ana'), 200);
+    expect(find.text('ana'), findsOneWidget);
+    expect(find.text('bo'), findsOneWidget);
+    expect(find.text('cy'), findsNothing);
     expect(find.text('FOLLOWS YOU'), findsOneWidget);
 
     // Interested lists everyone, going included, and badges the going ones.
     await tester.tap(find.text('Interested · 8'));
     await tester.pumpAndSettle();
-    expect(find.text('@cy'), findsOneWidget);
+    expect(find.text('cy'), findsOneWidget);
     expect(find.descendant(of: find.byType(UserLink), matching: find.text('GOING')), findsNWidgets(2));
     expect(repo.guestFetches, containsAllInOrder([true, false]));
   });
@@ -444,7 +444,7 @@ void main() {
 
     expect(find.byType(MapPinSheet), findsOneWidget);
     expect(find.byKey(const Key('guest-preview-banner')), findsOneWidget);
-    expect(find.text('@host_user'), findsOneWidget);
+    expect(find.text('host_user'), findsOneWidget);
     final going = tester.widget<ElevatedButton>(
       find.ancestor(of: find.text('Going'), matching: find.byType(ElevatedButton)),
     );
@@ -500,7 +500,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(InviteFollowersScreen), findsOneWidget);
-      expect(find.text('@dee'), findsOneWidget);
+      expect(find.text('dee'), findsOneWidget);
       expect(find.text('Invited'), findsOneWidget, reason: 'eli is already invited');
       expect(find.text('Going'), findsOneWidget, reason: 'fay already answered');
       expect(find.byType(Checkbox), findsOneWidget, reason: 'only dee is selectable');
@@ -532,8 +532,8 @@ void main() {
       await tester.pump(const Duration(milliseconds: 400));
       await tester.pumpAndSettle();
 
-      expect(find.text('@fay'), findsOneWidget);
-      expect(find.text('@dee'), findsNothing);
+      expect(find.text('fay'), findsOneWidget);
+      expect(find.text('dee'), findsNothing);
     });
 
     testWidgets('a public party offers its ordinary link, not an invite link', (tester) async {
@@ -654,7 +654,7 @@ void main() {
 
       await tester.tap(find.byKey(const Key('tab-invited')));
       await tester.pumpAndSettle();
-      expect(find.text('@gus'), findsOneWidget);
+      expect(find.text('gus'), findsOneWidget);
       expect(find.text('VIA LINK'), findsOneWidget);
       expect(find.text('NO ANSWER'), findsOneWidget);
       expect(find.descendant(of: find.byType(UserLink), matching: find.text('COMING')), findsOneWidget,

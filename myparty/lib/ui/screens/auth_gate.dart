@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../services/notifications.dart';
 import '../widgets/party_link_handler.dart';
 import 'login_screen.dart';
+import 'name_notice_screen.dart';
 import 'home_screen.dart';
 import 'pending_deletion_screen.dart';
 import 'username_setup_screen.dart';
@@ -61,9 +62,11 @@ class ProfileGateRow {
     required this.locationConsent,
     this.notificationTz,
     this.deletionRequestedAt,
+    this.unshownName,
   });
 
-  factory ProfileGateRow.fromRow(Map<String, dynamic> row) {
+  /// [names] is the `get_my_names` row, if any.
+  factory ProfileGateRow.fromRow(Map<String, dynamic> row, {Map<String, dynamic>? names}) {
     final deletedAt = row['deleted_at'] as String?;
     return ProfileGateRow(
       onboarded: row['onboarding_completed_at'] != null,
@@ -71,6 +74,9 @@ class ProfileGateRow {
       locationConsent: (row['location_consent'] as bool?) ?? false,
       notificationTz: row['notification_tz'] as String?,
       deletionRequestedAt: deletedAt == null ? null : DateTime.parse(deletedAt).toLocal(),
+      unshownName: names == null || names['shown'] == true
+          ? null
+          : '${names['first_name']} ${names['last_name']}',
     );
   }
 
@@ -81,6 +87,11 @@ class ProfileGateRow {
 
   /// `profiles.deleted_at`: non-null while the account is in its grace period.
   final DateTime? deletionRequestedAt;
+
+  /// "First Last" while the Phase 49 notice is owed: a name stored before
+  /// names became public, which stays owner-only until the user answers.
+  /// Null when there is no name or it is already shown.
+  final String? unshownName;
 }
 
 typedef ProfileGateLoader = Future<ProfileGateRow> Function(String userId);
@@ -90,9 +101,20 @@ typedef SignedInHook = Future<void> Function(ProfileGateRow row);
 /// (20261021121734) these columns are owner-only, and a grant cannot say
 /// "your own row", so nobody reads them off the table. The function reads the
 /// session's own row; [userId] is the session's user by construction.
+///
+/// `get_my_names` rides along for the Phase 49 notice: `shown_at` is not
+/// client-readable either. Read as a list, never `.maybeSingle()`: on an RPC
+/// that asks PostgREST for a single object, and an account with no name
+/// returns zero rows, which PostgREST refuses with 406 / PGRST116 instead of
+/// null. That took the gate down for every nameless account.
 Future<ProfileGateRow> _loadGateRow(String userId) async {
-  final row = await Supabase.instance.client.rpc('get_my_settings').single();
-  return ProfileGateRow.fromRow(row);
+  final client = Supabase.instance.client;
+  final (row, names) = await (
+    client.rpc('get_my_settings').single(),
+    client.rpc('get_my_names'),
+  ).wait;
+  final first = (names as List<dynamic>).firstOrNull;
+  return ProfileGateRow.fromRow(row, names: first as Map<String, dynamic>?);
 }
 
 Future<void> _notificationsSignedIn(ProfileGateRow row) => Notifications.onSignedIn(
@@ -101,8 +123,8 @@ Future<void> _notificationsSignedIn(ProfileGateRow row) => Notifications.onSigne
       notificationTz: row.notificationTz,
     );
 
-/// Routes a logged-in user to [PendingDeletionScreen], [UsernameSetupScreen]
-/// or [HomeScreen], in that order of precedence.
+/// Routes a logged-in user to [PendingDeletionScreen], [UsernameSetupScreen],
+/// [NameNoticeScreen] or [HomeScreen], in that order of precedence.
 ///
 /// Public, with injectable seams, only so the routing can be widget-tested:
 /// [load], [onSignedIn] and [home] default to the real Supabase read, the real
@@ -116,6 +138,7 @@ class ProfileGate extends StatefulWidget {
     this.onSignedIn = _notificationsSignedIn,
     this.home,
     this.pendingDeletion,
+    this.nameNotice,
   });
 
   final String userId;
@@ -126,6 +149,10 @@ class ProfileGate extends StatefulWidget {
   /// Builds the pending-deletion screen; tests swap in one with a fake
   /// repository. The callback is the gate's re-check.
   final Widget Function(DateTime requestedAt, VoidCallback onRestored)? pendingDeletion;
+
+  /// Builds the Phase 49 name notice; tests swap in one with a fake
+  /// repository. The callback lets the user through.
+  final Widget Function(String name, VoidCallback onAnswered)? nameNotice;
 
   @override
   State<ProfileGate> createState() => _ProfileGateState();
@@ -182,6 +209,23 @@ class _ProfileGateState extends State<ProfileGate> {
         if (requestedAt != null) {
           return widget.pendingDeletion?.call(requestedAt, _recheck) ??
               PendingDeletionScreen(deletionRequestedAt: requestedAt, onRestored: _recheck);
+        }
+
+        // After onboarding, which never owes it: a name given there is shown
+        // from the start. Before home, because the name stays hidden until
+        // this is answered and the answer is the user's, not a default.
+        final unshownName = row.unshownName;
+        if (row.onboarded && unshownName != null) {
+          void answered() => setState(() {
+                _row = Future.value(ProfileGateRow(
+                  onboarded: true,
+                  pushConsent: row.pushConsent,
+                  locationConsent: row.locationConsent,
+                  notificationTz: row.notificationTz,
+                ));
+              });
+          return widget.nameNotice?.call(unshownName, answered) ??
+              NameNoticeScreen(name: unshownName, onAnswered: answered);
         }
 
         // PartyLinkHandler only around the signed-in, onboarded root: a link

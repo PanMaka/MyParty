@@ -290,7 +290,7 @@ void main() {
       expect(find.text('Techno Monday'), findsOneWidget);
       // Two pieces since Phase 36: the handle is a link to the host's profile
       // and the area is not.
-      expect(find.text('@vinyl_room'), findsOneWidget);
+      expect(find.text('vinyl_room'), findsOneWidget);
       expect(find.text(' · Psyrri'), findsWidgets);
 
       // The hype bar went with mpParties -- a percentage with no column behind
@@ -592,7 +592,7 @@ void main() {
       expect(find.byType(MapPinSheet), findsOneWidget);
       expect(inSheet(find.text('PUBLIC')), findsOneWidget);
       expect(inSheet(find.text('Public one')), findsOneWidget);
-      expect(inSheet(find.text('@thanasis')), findsOneWidget);
+      expect(inSheet(find.text('thanasis')), findsOneWidget);
       expect(inSheet(find.text('Koukaki')), findsOneWidget);
       expect(inSheet(find.text('Bring ice.')), findsOneWidget);
       expect(inSheet(find.text('9 interested')), findsOneWidget);

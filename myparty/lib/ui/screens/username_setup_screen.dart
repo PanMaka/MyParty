@@ -46,15 +46,21 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
   String? _firstNameError;
   String? _lastNameError;
 
+  static const nameCaption = "What's your name?";
+  static const firstNameLabel = 'First name (optional)';
+  static const lastNameLabel = 'Last name (optional)';
+
   static const usernameCaption = 'And what about the name for people to find you within the app?';
 
   Future<void> _submit() async {
     final firstName = _firstNameController.text.trim();
     final lastName = _lastNameController.text.trim();
     final username = _usernameController.text.trim();
+    // Optional since Phase 49, but both or neither.
+    final nameErrors = PersonNameConstraint.validatePair(firstName, lastName);
     setState(() {
-      _firstNameError = PersonNameConstraint.validate(firstName, label: 'first name');
-      _lastNameError = PersonNameConstraint.validate(lastName, label: 'last name');
+      _firstNameError = nameErrors.first;
+      _lastNameError = nameErrors.last;
       _errorText = UsernameConstraint.validate(username);
     });
     if (_firstNameError != null || _lastNameError != null || _errorText != null) return;
@@ -73,11 +79,13 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
       }
 
       // One call: complete_onboarding writes the names and the username
-      // together, so there is no order to get wrong.
+      // together, so there is no order to get wrong. Two empty fields store
+      // no name.
+      final noName = firstName.isEmpty && lastName.isEmpty;
       await _profiles.completeOnboarding(
         username: username,
-        firstName: firstName,
-        lastName: lastName,
+        firstName: noName ? null : firstName,
+        lastName: noName ? null : lastName,
       );
       _drafts.clear();
 
@@ -164,15 +172,14 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
                 asset: 'assets/images/username_party.png',
                 imageScale: 1.0,
                 semanticLabel: 'Friends at a party',
-                caption:
-                    "What's your name? People need it to find you in a party!",
+                caption: nameCaption,
               ),
               const SizedBox(height: 32),
               AuthFieldsBox(
                 children: [
                   AuthNameField(
                     controller: _firstNameController,
-                    label: 'First name',
+                    label: firstNameLabel,
                     autofillHint: AutofillHints.givenName,
                     errorText: _firstNameError,
                     onChanged: (v) {
@@ -183,7 +190,7 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
                   const SizedBox(height: 16),
                   AuthNameField(
                     controller: _lastNameController,
-                    label: 'Last name',
+                    label: lastNameLabel,
                     autofillHint: AutofillHints.familyName,
                     errorText: _lastNameError,
                     onChanged: (v) {
@@ -193,7 +200,14 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 10),
+              // What happens to the name, said where it is typed (Phase 49).
+              Text(
+                nameVisibilityNote,
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12.5, height: 1.4, color: Colors.white.withValues(alpha: 0.7)),
+              ),
+              const SizedBox(height: 28),
               const AuthCaption(usernameCaption),
               const SizedBox(height: 20),
               AuthFieldsBox(

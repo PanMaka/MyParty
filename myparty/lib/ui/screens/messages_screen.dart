@@ -650,7 +650,7 @@ class _DirectChatsTabState extends State<_DirectChatsTab>
                     userId: thread.peerId,
                     username: thread.peerUsername,
                     minTapSize: 0,
-                    child: Text('@${thread.peerUsername}',
+                    child: Text(thread.peerUsername,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700)),
                   ),

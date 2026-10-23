@@ -20,6 +20,8 @@ shipped 1.38, moved its fix decision to §3, and added 1.40-1.41 for Phase 46
 Phase 47 added 1.42-1.45, with 1.44 the auth-email release checklist.
 Phase 46 shipped 1.40 and 1.41, moved the avatars and PostGIS decisions to §3,
 and added 1.44 F (re-run the erasures a pre-existing bug failed) (2026-10-22).
+Phase 49 made names public, recorded that in §3 and added 1.50 (name search)
+and 1.51 (firebase_core and Built-in Kotlin) (2026-10-23).
 
 ---
 
@@ -838,6 +840,39 @@ flutter_map 8 (8.0.0 needs ^7; 10.x betas need latlong2 0.9). Two things follow.
 addresses MapTiler returns. International students may want Latin script;
 `name:latin` exists in the tiles. A product call, one expression to change.
 
+### 1.50 Idea: find people by first and last name
+
+Since Phase 49 names are public to signed-in users, but `search_profiles`
+still matches only `username_search`. Left out on purpose, not forgotten: name
+search is a separate decision about discoverability (looking up a person by a
+legal name is a stronger thing than seeing one on a profile you already
+opened). It must honour the same row filter as the name itself (shown,
+`is_discoverable`, not block-paired), and it needs its own index and measurement
+because `user_names` is not on search's leakproof prefix path (gotcha 22).
+
+### 1.51 `firebase_core` still applies the Kotlin Gradle Plugin itself
+
+Every Android build warns: "Your app uses the following plugins that apply
+Kotlin Gradle Plugin (KGP): firebase_core. Future versions of Flutter will fail
+to build". Flutter now provides Kotlin itself ("Built-in Kotlin";
+docs.flutter.dev/release/breaking-changes/migrate-to-built-in-kotlin), and a
+plugin that still applies KGP will become a hard build error.
+
+Still open because no release fixes it yet (checked 2026-10-23): we are on
+`firebase_core` 4.15.1, the last 4.x, and the changelogs of 5.0.0 and 5.1.0 say
+nothing about Built-in Kotlin. 5.0.0 is a breaking upgrade anyway (Firebase
+Android BoM 35 with **minSdk 24**, Apple SDK 13, `firebase_messaging` 17), so
+taking it now would cost a major bump and probably keep the warning.
+
+**When to act:** when a `firebase_core` release says it supports Built-in
+Kotlin, or when a Flutter upgrade turns the warning into an error, whichever
+comes first. Upgrade `firebase_core` and `firebase_messaging` together, as
+their own change. Check minSdk 24 against the devices we support, and re-run
+`scripts/verify_notification_delivery.sh` and a real push on a handset.
+`PushService`'s graceful degradation and the conditional
+`google-services` plugin (CLAUDE.md, "FCM is wired conditionally") are
+unaffected.
+
 ---
 
 ## 2. Costed: should the map adopt `party_is_past()`?
@@ -892,6 +927,29 @@ showing dead pins before the wizard changes. Do not take B or C as written.
 ## 3. NOT backlog — decisions that look like gaps
 
 Here so they are not "fixed" by somebody reading §1 and pattern-matching.
+
+- **First and last names are public to signed-in users (Phase 49, 2026-10-23),
+  reversing Phase 44's owner-read-only.** Names show under the username on a
+  profile. They stay in `user_names`, exposed by a SECOND row policy rather
+  than moved onto `profiles`, because the two conditions are about the row, and
+  a grant names a role, never a row: a pending account shows no name but keeps
+  it for a restore, and an existing user's name stays hidden until they have
+  seen the notice. The policy's `exists` reads `profiles` as the caller, so the
+  block filter applies to names without a second copy of it.
+  - **Existing users opt in by seeing a notice, not by a date.** They were told
+    "Only you can see your name". `shown_at` is null for every pre-Phase 49 row
+    and keeps the name owner-only until the owner taps OK
+    (`acknowledge_name_shown`) or saves the name under the new copy. The notice
+    also offers Remove my name. An account whose owner never comes back never
+    has its name published. A switch-over date would have published names of
+    people who were never told.
+  - **Names are optional, everywhere.** `set_my_names(null, null)` deletes the
+    row, like `set_my_gender(null)`, and onboarding accepts none. Both or
+    neither: half a name is still refused. Once Remove my name existed for
+    existing users, requiring a name at sign-up would have made opting out a
+    privilege of joining early.
+  - `shown_at` is not granted to clients (it would date when someone saw the
+    notice); the owner reads it through `get_my_names()`.
 
 - **Sign-up email confirmation is ON, and turning it off breaks Change email.**
   Decided in Phase 47 (2026-10-21). GoTrue skips the second confirmation of an

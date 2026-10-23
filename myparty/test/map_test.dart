@@ -1145,7 +1145,7 @@ void main() {
       expect(find.text('Syntagma Afterparty'), findsOneWidget);
       expect(find.text('Ταράτσα με θέα, φέρτε ποτό.'), findsOneWidget);
       expect(find.text('Κουκάκι'), findsOneWidget);
-      expect(find.text('@nikos'), findsOneWidget);
+      expect(find.text('nikos'), findsOneWidget);
       expect(find.byTooltip('Report'), findsOneWidget);
     });
 

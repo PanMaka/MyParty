@@ -17,7 +17,7 @@ class Profile {
   final int followerCount;
   final int followingCount;
 
-  /// The single line rendered under `@username`, or null when the user has not
+  /// The single line rendered under the username and name, or null when the user has not
   /// written one. **Null is the only way this is absent** — `20260820095801`
   /// rejects the empty string and the whitespace-only string with a CHECK
   /// constraint, precisely so that no renderer downstream needs its own
@@ -39,6 +39,13 @@ class Profile {
   /// stock face that would read as one.
   final String? avatarPath;
 
+  /// From the `user_names` embed, both or neither. Null when the user has no
+  /// name, has not yet seen the Phase 49 notice (the policy keeps it owner-only
+  /// until then), is pending deletion or erased, or is block-paired with the
+  /// viewer. The header draws nothing for null: no gap, no placeholder.
+  final String? firstName;
+  final String? lastName;
+
   const Profile({
     required this.id,
     required this.username,
@@ -46,6 +53,8 @@ class Profile {
     required this.followingCount,
     this.bio,
     this.avatarPath,
+    this.firstName,
+    this.lastName,
   });
 
   factory Profile.fromRow(Map<String, dynamic> row) {
@@ -59,7 +68,17 @@ class Profile {
       // the one distinction the constraint exists to preserve.
       bio: row['bio'] as String?,
       avatarPath: row['avatar_path'] as String?,
+      firstName: _names(row)?['first_name'] as String?,
+      lastName: _names(row)?['last_name'] as String?,
     );
+  }
+
+  /// The `user_names(first_name, last_name)` embed. One-to-one (its key is
+  /// `user_id`), so PostgREST sends an object or null; a select without the
+  /// embed has no key at all.
+  static Map<String, dynamic>? _names(Map<String, dynamic> row) {
+    final names = row['user_names'];
+    return names is Map<String, dynamic> ? names : null;
   }
 
   /// This row with its follower count moved by [delta] — the profile screen's
@@ -73,6 +92,8 @@ class Profile {
     followingCount: followingCount,
     bio: bio,
     avatarPath: avatarPath,
+    firstName: firstName,
+    lastName: lastName,
   );
 
   /// True only when there is a real key to load. Guards the image widget, the
@@ -85,6 +106,13 @@ class Profile {
   /// checking `bio != null`, so the "no fabricated value" rule has one place to
   /// live if the emptiness question ever gets more complicated.
   bool get hasBio => bio != null;
+
+  /// "First Last", or null. The server stores both or neither, so one half
+  /// alone is not a state worth rendering.
+  String? get fullName {
+    final first = firstName, last = lastName;
+    return first == null || last == null ? null : '$first $last';
+  }
 
   /// The avatar fallback, for the [hasAvatar] == false case. Derived from the
   /// uuid so a given user always gets the same pair and the list stops looking
@@ -223,6 +251,12 @@ class UsernameConstraint {
   static bool isValid(String value) => validate(value) == null;
 }
 
+/// Under the name fields in Edit profile and at onboarding (Phase 49). Says
+/// what is true: the name shows on the profile, and search is by username
+/// only (backlog 1.50). Not an anonymity promise in either direction.
+const nameVisibilityNote =
+    'Optional. Your name is shown on your profile. Others can find you by your username.';
+
 /// The client's mirror of `person_name_is_valid` (20261021094725): trimmed,
 /// 1-50 characters, no control characters, and nothing about alphabets.
 class PersonNameConstraint {
@@ -238,5 +272,15 @@ class PersonNameConstraint {
     if (value.runes.length > maxCharacters) return 'Up to $maxCharacters characters.';
     if (RegExp(r'[\x00-\x1F\x7F]').hasMatch(value)) return 'Use one line.';
     return null;
+  }
+
+  /// Names are optional since Phase 49, but both or neither (`set_my_names`
+  /// refuses half a name). Takes trimmed values; returns each field's error.
+  static ({String? first, String? last}) validatePair(String first, String last) {
+    if (first.isEmpty && last.isEmpty) return (first: null, last: null);
+    return (
+      first: first.isEmpty ? 'Add your first name too, or leave both empty.' : validate(first, label: 'first name'),
+      last: last.isEmpty ? 'Add your last name too, or leave both empty.' : validate(last, label: 'last name'),
+    );
   }
 }

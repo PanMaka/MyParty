@@ -362,7 +362,7 @@ class _MapPinSheetState extends State<MapPinSheet> {
             hitSlop: const EdgeInsets.only(top: 10),
             child: Padding(
               padding: const EdgeInsets.only(top: 7),
-              child: _factRow(Icons.person_outline, '@${pin.hostUsername}'),
+              child: _factRow(Icons.person_outline, pin.hostUsername!),
             ),
           ),
       ],

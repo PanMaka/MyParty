@@ -191,6 +191,8 @@ insert into allowed_grants values
   ('function', 'complete_onboarding(text,text,text)', 'authenticated', 'EXECUTE', null),
   ('function', 'set_location_consent(boolean)', 'authenticated', 'EXECUTE', null),
   ('function', 'set_my_names(text,text)', 'authenticated', 'EXECUTE', null),
+  ('function', 'get_my_names()', 'authenticated', 'EXECUTE', null),
+  ('function', 'acknowledge_name_shown()', 'authenticated', 'EXECUTE', null),
   ('function', 'set_push_consent(boolean)', 'authenticated', 'EXECUTE', null),
   ('function', 'username_next_change_at()', 'authenticated', 'EXECUTE', null),
   ('function', 'update_party(uuid,text,text,text,text,timestamp with time zone,timestamp with time zone,double precision,double precision)', 'authenticated', 'EXECUTE', null),
@@ -282,7 +284,11 @@ insert into allowed_grants values
   ('table', 'story_views', 'authenticated', 'SELECT', null),
   ('table', 'user_birthdates', 'authenticated', 'SELECT', null),
   ('table', 'user_genders', 'authenticated', 'SELECT', null),
-  ('table', 'user_names', 'authenticated', 'SELECT', null),
+  -- Phase 49: public to signed-in users by row policy; shown_at and
+  -- updated_at are not granted (get_my_names reads shown_at for the owner).
+  ('column', 'user_names', 'authenticated', 'SELECT', 'first_name'),
+  ('column', 'user_names', 'authenticated', 'SELECT', 'last_name'),
+  ('column', 'user_names', 'authenticated', 'SELECT', 'user_id'),
   ('table', 'user_consents', 'authenticated', 'SELECT', null),
   ('table', 'user_devices', 'authenticated', 'DELETE', null),
   ('table', 'user_devices', 'authenticated', 'SELECT', null);

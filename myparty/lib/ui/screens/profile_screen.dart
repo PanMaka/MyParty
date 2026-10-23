@@ -896,10 +896,26 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // No "@" since Phase 49: the handle is the header's name, the way
+          // Instagram prints it. The "@" stays where a handle sits inside a
+          // sentence ("Block @x?").
           Text(
-            '@${profile.username}',
+            profile.username,
             style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800, letterSpacing: -0.3),
           ),
+          // The full name, smaller and muted, or nothing at all: no gap for an
+          // account without one (no name, not yet shown, pending deletion,
+          // erased). The server decides which; null is all the client sees.
+          if (profile.fullName case final fullName?)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                fullName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: AppColors.textAlpha(0.6)),
+              ),
+            ),
           // The whole of the second line, or no second line at all — never a
           // blank one. `hasBio` is the only guard needed: the
           // `profiles_bio_one_short_line` CHECK already refuses '' and the
@@ -909,7 +925,7 @@ class _ProfileScreenState extends State<ProfileScreen> with LiveRefresh<ProfileS
           // Nothing is substituted when it is null. A bio is the user's own
           // words, and a generated sentence rendered in that slot reads as
           // theirs — which is also why the header has to look finished with
-          // `@username` alone. That is what every account looks like the day it
+          // the username alone. That is what every account looks like the day it
           // is created, so it is the common case, not the degraded one.
           //
           // One line, capped by the design rather than by the data: the column
