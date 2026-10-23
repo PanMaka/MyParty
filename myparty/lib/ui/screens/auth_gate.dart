@@ -103,14 +103,18 @@ typedef SignedInHook = Future<void> Function(ProfileGateRow row);
 /// session's own row; [userId] is the session's user by construction.
 ///
 /// `get_my_names` rides along for the Phase 49 notice: `shown_at` is not
-/// client-readable either.
+/// client-readable either. Read as a list, never `.maybeSingle()`: on an RPC
+/// that asks PostgREST for a single object, and an account with no name
+/// returns zero rows, which PostgREST refuses with 406 / PGRST116 instead of
+/// null. That took the gate down for every nameless account.
 Future<ProfileGateRow> _loadGateRow(String userId) async {
   final client = Supabase.instance.client;
   final (row, names) = await (
     client.rpc('get_my_settings').single(),
-    client.rpc('get_my_names').maybeSingle(),
+    client.rpc('get_my_names'),
   ).wait;
-  return ProfileGateRow.fromRow(row, names: names);
+  final first = (names as List<dynamic>).firstOrNull;
+  return ProfileGateRow.fromRow(row, names: first as Map<String, dynamic>?);
 }
 
 Future<void> _notificationsSignedIn(ProfileGateRow row) => Notifications.onSignedIn(
