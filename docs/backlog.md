@@ -21,7 +21,7 @@ Phase 47 added 1.42-1.45, with 1.44 the auth-email release checklist.
 Phase 46 shipped 1.40 and 1.41, moved the avatars and PostGIS decisions to §3,
 and added 1.44 F (re-run the erasures a pre-existing bug failed) (2026-10-22).
 Phase 49 made names public, recorded that in §3 and added 1.50 (name search)
-(2026-10-23).
+and 1.51 (firebase_core and Built-in Kotlin) (2026-10-23).
 
 ---
 
@@ -849,6 +849,29 @@ legal name is a stronger thing than seeing one on a profile you already
 opened). It must honour the same row filter as the name itself (shown,
 `is_discoverable`, not block-paired), and it needs its own index and measurement
 because `user_names` is not on search's leakproof prefix path (gotcha 22).
+
+### 1.51 `firebase_core` still applies the Kotlin Gradle Plugin itself
+
+Every Android build warns: "Your app uses the following plugins that apply
+Kotlin Gradle Plugin (KGP): firebase_core. Future versions of Flutter will fail
+to build". Flutter now provides Kotlin itself ("Built-in Kotlin";
+docs.flutter.dev/release/breaking-changes/migrate-to-built-in-kotlin), and a
+plugin that still applies KGP will become a hard build error.
+
+Still open because no release fixes it yet (checked 2026-10-23): we are on
+`firebase_core` 4.15.1, the last 4.x, and the changelogs of 5.0.0 and 5.1.0 say
+nothing about Built-in Kotlin. 5.0.0 is a breaking upgrade anyway (Firebase
+Android BoM 35 with **minSdk 24**, Apple SDK 13, `firebase_messaging` 17), so
+taking it now would cost a major bump and probably keep the warning.
+
+**When to act:** when a `firebase_core` release says it supports Built-in
+Kotlin, or when a Flutter upgrade turns the warning into an error, whichever
+comes first. Upgrade `firebase_core` and `firebase_messaging` together, as
+their own change. Check minSdk 24 against the devices we support, and re-run
+`scripts/verify_notification_delivery.sh` and a real push on a handset.
+`PushService`'s graceful degradation and the conditional
+`google-services` plugin (CLAUDE.md, "FCM is wired conditionally") are
+unaffected.
 
 ---
 
